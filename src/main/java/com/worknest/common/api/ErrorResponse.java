@@ -13,15 +13,16 @@ public class ErrorResponse {
 
     private boolean success;
     private String message;
-    private String error;
+    private String errorCode;
+    private String path;
     private LocalDateTime timestamp;
 
-    public static ErrorResponse of(String message, String error) {
-        return new ErrorResponse(false, message, error, LocalDateTime.now());
+    public static ErrorResponse of(String message, String errorCode, String path) {
+        return new ErrorResponse(false, message, errorCode, path, LocalDateTime.now());
     }
 
-    public static ErrorResponse of(String message) {
-        return new ErrorResponse(false, message, null, LocalDateTime.now());
+    public static ErrorResponse of(String message, String errorCode) {
+        return new ErrorResponse(false, message, errorCode, null, LocalDateTime.now());
     }
 }
 

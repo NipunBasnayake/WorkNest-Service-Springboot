@@ -24,6 +24,7 @@ spring:
   jackson:
     serialization:
       indent-output: true
+    default-property-inclusion: non_null
 
   output:
     ansi:
@@ -35,6 +36,10 @@ logging:
     org.springframework: INFO
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql: TRACE
+    com.worknest: DEBUG
+    com.worknest.tenant.filter: DEBUG
+    com.worknest.tenant.resolver: DEBUG
+    com.worknest.tenant.connection: DEBUG
 
 app:
   tenant:

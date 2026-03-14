@@ -5,6 +5,7 @@ import com.worknest.master.dto.PlatformTenantResponseDto;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.service.PlatformTenantService;
+import com.worknest.tenant.context.MasterTenantContextRunner;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,44 +19,63 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
 
     private final PlatformTenantRepository tenantRepository;
     private final ModelMapper modelMapper;
+    private final MasterTenantContextRunner masterTenantContextRunner;
 
     public PlatformTenantServiceImpl(
             PlatformTenantRepository tenantRepository,
-            ModelMapper modelMapper) {
+            ModelMapper modelMapper,
+            MasterTenantContextRunner masterTenantContextRunner) {
         this.tenantRepository = tenantRepository;
         this.modelMapper = modelMapper;
+        this.masterTenantContextRunner = masterTenantContextRunner;
     }
 
     @Override
     public List<PlatformTenantResponseDto> getAllTenants() {
-        return tenantRepository.findAll().stream()
+        return masterTenantContextRunner.runInMasterContext(() -> tenantRepository.findAll().stream()
                 .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
     }
 
     @Override
     public PlatformTenantResponseDto getTenantByKey(String tenantKey) {
-        PlatformTenant tenant = tenantRepository.findByTenantKey(tenantKey)
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            throw new ResourceNotFoundException("Tenant key is required");
+        }
+        PlatformTenant tenant = masterTenantContextRunner.runInMasterContext(() -> tenantRepository.findByTenantKey(normalizedTenantKey)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant not found with key: " + tenantKey));
+                        "Tenant not found with key: " + normalizedTenantKey)));
         return mapToResponseDto(tenant);
     }
 
     @Override
     public PlatformTenantResponseDto getTenantById(Long id) {
-        PlatformTenant tenant = tenantRepository.findById(id)
+        PlatformTenant tenant = masterTenantContextRunner.runInMasterContext(() -> tenantRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Tenant not found with id: " + id));
+                        "Tenant not found with id: " + id)));
         return mapToResponseDto(tenant);
     }
 
     @Override
     public boolean tenantExists(String tenantKey) {
-        return tenantRepository.existsByTenantKey(tenantKey);
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            return false;
+        }
+        return masterTenantContextRunner.runInMasterContext(() -> tenantRepository.existsByTenantKey(normalizedTenantKey));
     }
 
     private PlatformTenantResponseDto mapToResponseDto(PlatformTenant tenant) {
         return modelMapper.map(tenant, PlatformTenantResponseDto.class);
+    }
+
+    private String normalizeTenantKey(String tenantKey) {
+        if (tenantKey == null) {
+            return null;
+        }
+        String normalized = tenantKey.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 }
 

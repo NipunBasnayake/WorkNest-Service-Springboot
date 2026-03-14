@@ -1,6 +1,8 @@
 package com.worknest.tenant.datasource.impl;
 
+import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.TenantNotFoundException;
+import com.worknest.common.exception.TenantResolutionException;
 import com.worknest.common.util.AppConstants;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
@@ -35,22 +37,27 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
 
     @Override
     public DataSource getDataSource(String tenantKey) {
-        if (tenantKey == null || tenantKey.isBlank() || defaultTenant.equalsIgnoreCase(tenantKey)) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null || defaultTenant.equalsIgnoreCase(normalizedTenantKey)) {
             return masterDataSource;
         }
 
         // Return cached DataSource if exists
-        if (tenantDataSources.containsKey(tenantKey)) {
-            return tenantDataSources.get(tenantKey);
+        if (tenantDataSources.containsKey(normalizedTenantKey)) {
+            return tenantDataSources.get(normalizedTenantKey);
         }
 
         // Load tenant from database using JdbcTemplate (no JPA dependency)
-        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tenantKey)
-                .orElseThrow(() -> new TenantNotFoundException("Tenant not found: " + tenantKey));
+        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(normalizedTenantKey)
+                .orElseThrow(() -> new TenantNotFoundException("Tenant not found: " + normalizedTenantKey));
+
+        if (tenant.getStatus() != TenantStatus.ACTIVE) {
+            throw new TenantResolutionException("Tenant is not active: " + normalizedTenantKey);
+        }
 
         // Create and cache new DataSource
         DataSource dataSource = createDataSource(tenant);
-        tenantDataSources.put(tenantKey, dataSource);
+        tenantDataSources.put(normalizedTenantKey, dataSource);
 
         return dataSource;
     }
@@ -62,7 +69,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
 
     @Override
     public void removeDataSource(String tenantKey) {
-        DataSource dataSource = tenantDataSources.remove(tenantKey);
+        DataSource dataSource = tenantDataSources.remove(normalizeTenantKey(tenantKey));
         if (dataSource instanceof HikariDataSource hikariDataSource) {
             hikariDataSource.close();
         }
@@ -85,6 +92,14 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         config.setPoolName("TenantPool-" + tenant.getTenantKey());
 
         return new HikariDataSource(config);
+    }
+
+    private String normalizeTenantKey(String tenantKey) {
+        if (tenantKey == null) {
+            return null;
+        }
+        String normalized = tenantKey.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 }
 

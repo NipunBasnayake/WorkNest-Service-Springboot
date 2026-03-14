@@ -55,6 +55,70 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    @ExceptionHandler(DuplicateTenantKeyException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateTenantKeyException(
+            DuplicateTenantKeyException ex, HttpServletRequest request) {
+        logger.warn("Duplicate tenant key: {} at {}", ex.getMessage(), request.getRequestURI());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "DUPLICATE_TENANT_KEY", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(DuplicateEmailException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateEmailException(
+            DuplicateEmailException ex, HttpServletRequest request) {
+        logger.warn("Duplicate email: {} at {}", ex.getMessage(), request.getRequestURI());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "DUPLICATE_EMAIL", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
+            InvalidCredentialsException ex, HttpServletRequest request) {
+        logger.warn("Invalid credentials at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "INVALID_CREDENTIALS", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    }
+
+    @ExceptionHandler(InactiveUserException.class)
+    public ResponseEntity<ErrorResponse> handleInactiveUserException(
+            InactiveUserException ex, HttpServletRequest request) {
+        logger.warn("Inactive user blocked at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "INACTIVE_USER", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidTokenException(
+            InvalidTokenException ex, HttpServletRequest request) {
+        logger.warn("Invalid token at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "INVALID_TOKEN", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    }
+
+    @ExceptionHandler(TokenExpiredException.class)
+    public ResponseEntity<ErrorResponse> handleTokenExpiredException(
+            TokenExpiredException ex, HttpServletRequest request) {
+        logger.warn("Expired token at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_EXPIRED", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    }
+
+    @ExceptionHandler(TokenRevokedException.class)
+    public ResponseEntity<ErrorResponse> handleTokenRevokedException(
+            TokenRevokedException ex, HttpServletRequest request) {
+        logger.warn("Revoked token at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_REVOKED", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    }
+
+    @ExceptionHandler(ForbiddenOperationException.class)
+    public ResponseEntity<ErrorResponse> handleForbiddenOperationException(
+            ForbiddenOperationException ex, HttpServletRequest request) {
+        logger.warn("Forbidden operation at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "FORBIDDEN_OPERATION", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
     /**
      * Handle validation errors from @Valid annotations.
      * Returns all validation error messages.

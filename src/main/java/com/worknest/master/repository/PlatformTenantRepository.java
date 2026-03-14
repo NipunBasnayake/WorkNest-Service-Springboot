@@ -11,5 +11,6 @@ public interface PlatformTenantRepository extends JpaRepository<PlatformTenant, 
 
     Optional<PlatformTenant> findByTenantKey(String tenantKey);
     boolean existsByTenantKey(String tenantKey);
+    boolean existsByCompanyNameIgnoreCase(String companyName);
 }
 

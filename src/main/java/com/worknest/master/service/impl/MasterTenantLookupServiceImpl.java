@@ -1,5 +1,6 @@
 package com.worknest.master.service.impl;
 
+import com.worknest.common.enums.TenantStatus;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -23,16 +24,29 @@ public class MasterTenantLookupServiceImpl implements MasterTenantLookupService 
 
     @Override
     public Optional<PlatformTenant> findByTenantKey(String tenantKey) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            return Optional.empty();
+        }
+
         String sql = "SELECT id, tenant_key, company_name, database_name, db_url, db_username, " +
                      "db_password, status, created_at, updated_at " +
                      "FROM platform_tenants WHERE tenant_key = ?";
 
         try {
-            PlatformTenant tenant = masterJdbcTemplate.queryForObject(sql, new TenantRowMapper(), tenantKey);
+            PlatformTenant tenant = masterJdbcTemplate.queryForObject(sql, new TenantRowMapper(), normalizedTenantKey);
             return Optional.ofNullable(tenant);
         } catch (EmptyResultDataAccessException e) {
             return Optional.empty();
         }
+    }
+
+    private String normalizeTenantKey(String tenantKey) {
+        if (tenantKey == null) {
+            return null;
+        }
+        String normalized = tenantKey.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 
     private static class TenantRowMapper implements RowMapper<PlatformTenant> {
@@ -46,10 +60,18 @@ public class MasterTenantLookupServiceImpl implements MasterTenantLookupService 
             tenant.setDbUrl(rs.getString("db_url"));
             tenant.setDbUsername(rs.getString("db_username"));
             tenant.setDbPassword(rs.getString("db_password"));
-            tenant.setStatus(rs.getString("status"));
+            tenant.setStatus(parseTenantStatus(rs.getString("status")));
             tenant.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
             tenant.setUpdatedAt(rs.getTimestamp("updated_at").toLocalDateTime());
             return tenant;
+        }
+
+        private TenantStatus parseTenantStatus(String rawStatus) {
+            try {
+                return TenantStatus.valueOf(rawStatus.toUpperCase());
+            } catch (RuntimeException ex) {
+                return TenantStatus.INACTIVE;
+            }
         }
     }
 }

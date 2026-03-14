@@ -2,7 +2,9 @@ package com.worknest.tenant.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.worknest.common.api.ErrorResponse;
+import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.util.AppConstants;
+import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.tenant.context.TenantContext;
 import jakarta.servlet.FilterChain;
@@ -56,9 +58,19 @@ public class TenantContextFilter extends OncePerRequestFilter {
         try {
             String requestUri = request.getRequestURI();
 
+            if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+
             // Skip tenant validation for master endpoints
             if (isMasterEndpoint(requestUri)) {
                 log.debug("Master endpoint accessed: {}", requestUri);
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            if (!isTenantEndpoint(requestUri)) {
                 filterChain.doFilter(request, response);
                 return;
             }
@@ -74,16 +86,25 @@ public class TenantContextFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Validate tenant exists
-            if (masterTenantLookupService.findByTenantKey(tenantId).isEmpty()) {
+            tenantId = tenantId.trim().toLowerCase();
+
+            PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tenantId).orElse(null);
+            if (tenant == null) {
                 log.warn("Invalid tenant ID: {}", tenantId);
                 sendErrorResponse(response, HttpStatus.NOT_FOUND,
                         "Tenant not found: " + tenantId, "TENANT_NOT_FOUND", requestUri);
                 return;
             }
 
+            if (tenant.getStatus() != TenantStatus.ACTIVE) {
+                log.warn("Inactive tenant access blocked: {}", tenantId);
+                sendErrorResponse(response, HttpStatus.FORBIDDEN,
+                        "Tenant is not active: " + tenantId, "TENANT_INACTIVE", requestUri);
+                return;
+            }
+
             // Set tenant context for this thread
-            TenantContext.setTenantId(tenantId);
+            TenantContext.setTenantId(tenant.getTenantKey());
             log.debug("Tenant context set: {}", tenantId);
 
             // Continue with the request
@@ -102,9 +123,15 @@ public class TenantContextFilter extends OncePerRequestFilter {
      */
     private boolean isMasterEndpoint(String uri) {
         return uri.startsWith("/api/platform/") ||
+               uri.startsWith("/api/auth/") ||
+               uri.startsWith("/v3/api-docs") ||
+               uri.startsWith("/swagger-ui") ||
                uri.startsWith("/actuator") ||
-               uri.startsWith("/error") ||
-               (uri.contains("/health") || uri.contains("/tenant-info"));
+               uri.startsWith("/error");
+    }
+
+    private boolean isTenantEndpoint(String uri) {
+        return uri.startsWith("/api/tenant/");
     }
 
     /**

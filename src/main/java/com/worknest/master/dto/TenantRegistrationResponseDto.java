@@ -2,22 +2,25 @@ package com.worknest.master.dto;
 
 import com.worknest.common.enums.TenantStatus;
 import lombok.AllArgsConstructor;
-import lombok.Data;
+import lombok.Builder;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
-@Data
+@Getter
+@Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PlatformTenantResponseDto {
-
-    private Long id;
+public class TenantRegistrationResponseDto {
+    private Long tenantId;
     private String tenantKey;
     private String companyName;
     private String databaseName;
     private TenantStatus status;
+    private Long tenantAdminUserId;
+    private String tenantAdminEmail;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }
-

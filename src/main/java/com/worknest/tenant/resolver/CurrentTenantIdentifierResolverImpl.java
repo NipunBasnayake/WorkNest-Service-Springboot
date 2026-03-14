@@ -21,9 +21,9 @@ public class CurrentTenantIdentifierResolverImpl implements CurrentTenantIdentif
 
     @Override
     public String resolveCurrentTenantIdentifier() {
-        String tenantId = TenantContext.getTenantId();
+        String tenantId = normalizeTenantId(TenantContext.getTenantId());
 
-        if (tenantId == null || tenantId.trim().isEmpty()) {
+        if (tenantId == null) {
             logger.debug("No tenant context found, using default tenant: {}", defaultTenant);
             return defaultTenant;
         }
@@ -36,6 +36,14 @@ public class CurrentTenantIdentifierResolverImpl implements CurrentTenantIdentif
     public boolean validateExistingCurrentSessions() {
         // Allow existing sessions without validation
         return true;
+    }
+
+    private String normalizeTenantId(String tenantId) {
+        if (tenantId == null) {
+            return null;
+        }
+        String normalized = tenantId.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 }
 

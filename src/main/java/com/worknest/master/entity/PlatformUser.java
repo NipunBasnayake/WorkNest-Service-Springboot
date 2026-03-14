@@ -1,6 +1,7 @@
 package com.worknest.master.entity;
 
-import com.worknest.common.enums.TenantStatus;
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -10,38 +11,44 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "platform_tenants")
+@Table(
+        name = "platform_users",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_platform_users_email", columnNames = "email")
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PlatformTenant {
+public class PlatformUser {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_key", nullable = false, unique = true, length = 50)
-    private String tenantKey;
+    @Column(name = "full_name", nullable = false, length = 150)
+    private String fullName;
 
-    @Column(name = "company_name", nullable = false, length = 255)
-    private String companyName;
+    @Column(name = "email", nullable = false, length = 255)
+    private String email;
 
-    @Column(name = "database_name", nullable = false, length = 100)
-    private String databaseName;
+    @Column(name = "password_hash", nullable = false, length = 255)
+    private String passwordHash;
 
-    @Column(name = "db_url", nullable = false, length = 500)
-    private String dbUrl;
-
-    @Column(name = "db_username", nullable = false, length = 100)
-    private String dbUsername;
-
-    @Column(name = "db_password", nullable = false, length = 255)
-    private String dbPassword;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 30)
+    private PlatformRole role;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private TenantStatus status;
+    private UserStatus status;
+
+    @Column(name = "tenant_key", length = 50)
+    private String tenantKey;
+
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -54,7 +61,7 @@ public class PlatformTenant {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
         if (status == null) {
-            status = TenantStatus.ACTIVE;
+            status = UserStatus.ACTIVE;
         }
     }
 
@@ -63,4 +70,3 @@ public class PlatformTenant {
         updatedAt = LocalDateTime.now();
     }
 }
-

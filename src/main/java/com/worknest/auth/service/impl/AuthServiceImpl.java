@@ -1,0 +1,187 @@
+package com.worknest.auth.service.impl;
+
+import com.worknest.auth.dto.*;
+import com.worknest.auth.service.AuthService;
+import com.worknest.auth.service.PlatformUserService;
+import com.worknest.auth.service.RefreshTokenService;
+import com.worknest.common.enums.TenantStatus;
+import com.worknest.common.enums.UserStatus;
+import com.worknest.common.exception.ForbiddenOperationException;
+import com.worknest.common.exception.InactiveUserException;
+import com.worknest.common.exception.InvalidCredentialsException;
+import com.worknest.common.exception.TenantNotFoundException;
+import com.worknest.master.entity.PlatformTenant;
+import com.worknest.master.entity.PlatformUser;
+import com.worknest.master.entity.RefreshToken;
+import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.security.jwt.JwtService;
+import com.worknest.security.model.PlatformUserPrincipal;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+public class AuthServiceImpl implements AuthService {
+
+    private final PlatformUserService platformUserService;
+    private final RefreshTokenService refreshTokenService;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final MasterTenantLookupService masterTenantLookupService;
+
+    public AuthServiceImpl(
+            PlatformUserService platformUserService,
+            RefreshTokenService refreshTokenService,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            MasterTenantLookupService masterTenantLookupService) {
+        this.platformUserService = platformUserService;
+        this.refreshTokenService = refreshTokenService;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.masterTenantLookupService = masterTenantLookupService;
+    }
+
+    @Override
+    public LoginResponseDto login(LoginRequestDto requestDto) {
+        PlatformUser user = platformUserService.findByEmailOrThrow(requestDto.getEmail());
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new InactiveUserException("User account is inactive");
+        }
+
+        validateUserTenantScope(user, requestDto.getTenantKey());
+
+        if (!passwordEncoder.matches(requestDto.getPassword(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException("Invalid email or password");
+        }
+
+        refreshTokenService.revokeAllActiveTokens(user);
+        RefreshToken refreshToken = refreshTokenService.createToken(user);
+        String accessToken = jwtService.generateAccessToken(user);
+
+        platformUserService.updateLastLogin(user.getId());
+
+        return LoginResponseDto.builder()
+                .tokenType("Bearer")
+                .accessToken(accessToken)
+                .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
+                .refreshToken(refreshToken.getToken())
+                .refreshTokenExpiresAt(refreshToken.getExpiresAt())
+                .user(mapUser(user))
+                .build();
+    }
+
+    @Override
+    public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto) {
+        RefreshToken currentToken = refreshTokenService.validateToken(requestDto.getRefreshToken());
+        PlatformUser user = currentToken.getPlatformUser();
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new InactiveUserException("User account is inactive");
+        }
+
+        validateUserTenantScope(user, user.getTenantKey());
+
+        RefreshToken rotatedToken = refreshTokenService.rotateToken(currentToken);
+        String newAccessToken = jwtService.generateAccessToken(user);
+
+        return RefreshTokenResponseDto.builder()
+                .tokenType("Bearer")
+                .accessToken(newAccessToken)
+                .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
+                .refreshToken(rotatedToken.getToken())
+                .refreshTokenExpiresAt(rotatedToken.getExpiresAt())
+                .build();
+    }
+
+    @Override
+    public LogoutResponseDto logout(LogoutRequestDto requestDto) {
+        RefreshToken token = refreshTokenService.validateToken(requestDto.getRefreshToken());
+        PlatformUser tokenUser = token.getPlatformUser();
+
+        PlatformUserPrincipal currentPrincipal = extractCurrentPrincipal();
+        if (currentPrincipal == null || !currentPrincipal.getId().equals(tokenUser.getId())) {
+            throw new ForbiddenOperationException("Cannot revoke a token for a different user");
+        }
+
+        refreshTokenService.revokeToken(requestDto.getRefreshToken());
+        return LogoutResponseDto.builder()
+                .revoked(true)
+                .message("Logout successful. Refresh token revoked.")
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AuthUserDto getCurrentUser() {
+        PlatformUserPrincipal principal = extractCurrentPrincipal();
+        if (principal == null) {
+            throw new ForbiddenOperationException("No authenticated user found");
+        }
+
+        return AuthUserDto.builder()
+                .id(principal.getId())
+                .fullName(principal.getFullName())
+                .email(principal.getUsername())
+                .role(principal.getRole())
+                .status(principal.getStatus())
+                .tenantKey(principal.getTenantKey())
+                .build();
+    }
+
+    private void validateUserTenantScope(PlatformUser user, String requestedTenantKey) {
+        if (!user.getRole().isTenantScoped()) {
+            return;
+        }
+
+        String userTenantKey = normalizeTenantKey(user.getTenantKey());
+        if (userTenantKey == null) {
+            throw new ForbiddenOperationException("Tenant-scoped user must have a tenant key");
+        }
+
+        String normalizedRequestedTenant = normalizeTenantKey(requestedTenantKey);
+        if (normalizedRequestedTenant != null &&
+                !normalizedRequestedTenant.equalsIgnoreCase(userTenantKey)) {
+            throw new ForbiddenOperationException("Requested tenant does not match user tenant");
+        }
+
+        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(userTenantKey)
+                .orElseThrow(() -> new TenantNotFoundException(
+                        "Tenant not found for user: " + userTenantKey));
+
+        if (tenant.getStatus() != TenantStatus.ACTIVE) {
+            throw new ForbiddenOperationException("Tenant is not active: " + userTenantKey);
+        }
+    }
+
+    private PlatformUserPrincipal extractCurrentPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof PlatformUserPrincipal principal)) {
+            return null;
+        }
+        return principal;
+    }
+
+    private String normalizeTenantKey(String tenantKey) {
+        if (tenantKey == null) {
+            return null;
+        }
+        String normalized = tenantKey.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private AuthUserDto mapUser(PlatformUser user) {
+        return AuthUserDto.builder()
+                .id(user.getId())
+                .fullName(user.getFullName())
+                .email(user.getEmail())
+                .role(user.getRole())
+                .status(user.getStatus())
+                .tenantKey(user.getTenantKey())
+                .build();
+    }
+}

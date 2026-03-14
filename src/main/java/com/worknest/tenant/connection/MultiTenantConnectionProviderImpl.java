@@ -42,12 +42,13 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
     @Override
     public Connection getConnection(String tenantIdentifier) throws SQLException {
         try {
-            if (tenantIdentifier == null || tenantIdentifier.isBlank() || defaultTenant.equalsIgnoreCase(tenantIdentifier)) {
+            String normalizedTenantIdentifier = normalizeTenantIdentifier(tenantIdentifier);
+            if (normalizedTenantIdentifier == null || defaultTenant.equalsIgnoreCase(normalizedTenantIdentifier)) {
                 return masterDataSource.getConnection();
             }
 
             // Get tenant-specific DataSource and return connection
-            DataSource tenantDataSource = tenantDataSourceService.getDataSource(tenantIdentifier);
+            DataSource tenantDataSource = tenantDataSourceService.getDataSource(normalizedTenantIdentifier);
             return tenantDataSource.getConnection();
         } catch (Exception e) {
             throw new TenantResolutionException("Failed to get connection for tenant: " + tenantIdentifier, e);
@@ -72,6 +73,14 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
     @Override
     public <T> T unwrap(Class<T> unwrapType) {
         return null;
+    }
+
+    private String normalizeTenantIdentifier(String tenantIdentifier) {
+        if (tenantIdentifier == null) {
+            return null;
+        }
+        String normalized = tenantIdentifier.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 }
 

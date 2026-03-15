@@ -1,26 +1,36 @@
 package com.worknest.tenant.entity;
 
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "employees")
+@Table(
+        name = "employees",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_employees_email", columnNames = "email"),
+                @UniqueConstraint(name = "uk_employees_code", columnNames = "employee_code")
+        },
+        indexes = {
+                @Index(name = "idx_employees_role_status", columnList = "role,status")
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
 public class Employee {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "employee_code", nullable = false, unique = true, length = 20)
+    @Column(name = "employee_code", nullable = false, length = 30)
     private String employeeCode;
 
     @Column(name = "first_name", nullable = false, length = 100)
@@ -29,26 +39,25 @@ public class Employee {
     @Column(name = "last_name", nullable = false, length = 100)
     private String lastName;
 
-    @Column(name = "email", nullable = false, unique = true, length = 255)
+    @Column(name = "email", nullable = false, length = 255)
     private String email;
 
-    @Column(name = "phone", length = 20)
-    private String phone;
+    @Column(name = "password_hash", nullable = false, length = 255)
+    private String passwordHash;
 
-    @Column(name = "position", length = 100)
-    private String position;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 30)
+    private PlatformRole role;
 
-    @Column(name = "department", length = 100)
-    private String department;
+    @Column(name = "designation", length = 120)
+    private String designation;
 
-    @Column(name = "salary")
-    private Double salary;
+    @Column(name = "joined_date", nullable = false)
+    private LocalDate joinedDate;
 
-    @Column(name = "hire_date")
-    private LocalDateTime hireDate;
-
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
-    private String status;
+    private UserStatus status;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -58,13 +67,17 @@ public class Employee {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        createdAt = now;
+        updatedAt = now;
         if (status == null) {
-            status = "ACTIVE";
+            status = UserStatus.ACTIVE;
         }
-        if (hireDate == null) {
-            hireDate = LocalDateTime.now();
+        if (joinedDate == null) {
+            joinedDate = LocalDate.now();
+        }
+        if (role == null) {
+            role = PlatformRole.EMPLOYEE;
         }
     }
 
@@ -73,4 +86,3 @@ public class Employee {
         updatedAt = LocalDateTime.now();
     }
 }
-

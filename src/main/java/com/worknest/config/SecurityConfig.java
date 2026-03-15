@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -18,6 +19,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -55,16 +57,17 @@ public class SecurityConfig {
                                 "/error",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html")
+                                "/swagger-ui.html",
+                                "/ws/**")
                         .permitAll()
                         .requestMatchers("/api/auth/logout", "/api/auth/me")
                         .authenticated()
                         .requestMatchers("/api/platform/**")
                         .hasRole("PLATFORM_ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/tenant/**")
-                        .hasAnyRole("TENANT_ADMIN", "ADMIN", "MANAGER", "HR", "EMPLOYEE")
+                        .requestMatchers(HttpMethod.OPTIONS, "/**")
+                        .permitAll()
                         .requestMatchers("/api/tenant/**")
-                        .hasAnyRole("TENANT_ADMIN", "ADMIN", "MANAGER", "HR")
+                        .hasAnyRole("TENANT_ADMIN", "ADMIN", "MANAGER", "HR", "EMPLOYEE")
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

@@ -1,132 +1,387 @@
 package com.worknest.tenant.service.impl;
 
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.util.EmployeeCodeGenerator;
+import com.worknest.security.util.SecurityUtils;
+import com.worknest.tenant.dto.common.PagedResultDto;
+import com.worknest.tenant.dto.employee.*;
 import com.worknest.tenant.entity.Employee;
+import com.worknest.tenant.entity.EmployeeSkill;
+import com.worknest.tenant.enums.AuditActionType;
+import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.repository.EmployeeRepository;
+import com.worknest.tenant.repository.EmployeeSkillRepository;
+import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.EmployeeService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
-@Transactional
+@Transactional(transactionManager = "transactionManager")
 public class EmployeeServiceImpl implements EmployeeService {
 
+    private static final int MAX_EMPLOYEE_CODE_GENERATION_ATTEMPTS = 100;
+
     private final EmployeeRepository employeeRepository;
+    private final EmployeeSkillRepository employeeSkillRepository;
+    private final PlatformUserSyncBridgeService platformUserSyncBridgeService;
+    private final PasswordEncoder passwordEncoder;
+    private final SecurityUtils securityUtils;
+    private final AuditLogService auditLogService;
 
-    public EmployeeServiceImpl(EmployeeRepository employeeRepository) {
+    public EmployeeServiceImpl(
+            EmployeeRepository employeeRepository,
+            EmployeeSkillRepository employeeSkillRepository,
+            PlatformUserSyncBridgeService platformUserSyncBridgeService,
+            PasswordEncoder passwordEncoder,
+            SecurityUtils securityUtils,
+            AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
+        this.employeeSkillRepository = employeeSkillRepository;
+        this.platformUserSyncBridgeService = platformUserSyncBridgeService;
+        this.passwordEncoder = passwordEncoder;
+        this.securityUtils = securityUtils;
+        this.auditLogService = auditLogService;
     }
 
     @Override
-    public Employee createEmployee(Employee employee) {
-        // Validate email uniqueness
-        if (employeeRepository.existsByEmail(employee.getEmail())) {
-            throw new BadRequestException(
-                    "Employee with email " + employee.getEmail() + " already exists");
+    public EmployeeResponseDto createEmployee(EmployeeCreateRequestDto requestDto) {
+        String email = normalizeEmail(requestDto.getEmail());
+        validateTenantAssignableRole(requestDto.getRole());
+
+        if (employeeRepository.existsByEmailIgnoreCase(email)) {
+            throw new DuplicateEmailException("Employee email already exists in this tenant: " + email);
         }
 
-        // Generate employee code if not provided
-        if (employee.getEmployeeCode() == null || employee.getEmployeeCode().trim().isEmpty()) {
-            employee.setEmployeeCode(generateUniqueEmployeeCode());
-        } else {
-            // Validate uniqueness if code is provided
-            if (employeeRepository.existsByEmployeeCode(employee.getEmployeeCode())) {
-                throw new BadRequestException(
-                        "Employee with code " + employee.getEmployeeCode() + " already exists");
+        String employeeCode = resolveEmployeeCode(requestDto.getEmployeeCode());
+
+        Employee employee = new Employee();
+        employee.setEmployeeCode(employeeCode);
+        employee.setFirstName(requestDto.getFirstName().trim());
+        employee.setLastName(requestDto.getLastName().trim());
+        employee.setEmail(email);
+        employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
+        employee.setRole(requestDto.getRole());
+        employee.setDesignation(trimToNull(requestDto.getDesignation()));
+        employee.setJoinedDate(requestDto.getJoinedDate());
+        employee.setStatus(requestDto.getStatus() == null ? UserStatus.ACTIVE : requestDto.getStatus());
+
+        Employee savedEmployee = employeeRepository.save(employee);
+        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+
+        auditLogService.logAction(
+                AuditActionType.CREATE,
+                AuditEntityType.EMPLOYEE,
+                savedEmployee.getId(),
+                "{\"email\":\"" + escapeJson(savedEmployee.getEmail()) + "\"}"
+        );
+        platformUserSyncBridgeService.syncOnCreate(savedEmployee, requestDto.getPassword(), tenantKey);
+
+        return toEmployeeResponse(savedEmployee);
+    }
+
+    @Override
+    public EmployeeResponseDto updateEmployee(Long employeeId, EmployeeUpdateRequestDto requestDto) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+        String oldEmail = employee.getEmail();
+
+        String email = normalizeEmail(requestDto.getEmail());
+        if (!employee.getEmail().equalsIgnoreCase(email) && employeeRepository.existsByEmailIgnoreCase(email)) {
+            throw new DuplicateEmailException("Employee email already exists in this tenant: " + email);
+        }
+
+        if (requestDto.getRole() != null) {
+            validateTenantAssignableRole(requestDto.getRole());
+            employee.setRole(requestDto.getRole());
+        }
+
+        if (requestDto.getJoinedDate() != null && requestDto.getJoinedDate().isAfter(LocalDate.now())) {
+            throw new BadRequestException("Joined date cannot be in the future");
+        }
+
+        employee.setFirstName(requestDto.getFirstName().trim());
+        employee.setLastName(requestDto.getLastName().trim());
+        employee.setEmail(email);
+        employee.setDesignation(trimToNull(requestDto.getDesignation()));
+
+        if (requestDto.getJoinedDate() != null) {
+            employee.setJoinedDate(requestDto.getJoinedDate());
+        }
+        if (requestDto.getStatus() != null) {
+            employee.setStatus(requestDto.getStatus());
+        }
+        if (requestDto.getPassword() != null && !requestDto.getPassword().isBlank()) {
+            employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
+        }
+
+        Employee updated = employeeRepository.save(employee);
+        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+
+        auditLogService.logAction(
+                AuditActionType.UPDATE,
+                AuditEntityType.EMPLOYEE,
+                updated.getId(),
+                "{\"email\":\"" + escapeJson(updated.getEmail()) + "\"}"
+        );
+        platformUserSyncBridgeService.syncOnUpdate(updated, oldEmail, requestDto.getPassword(), tenantKey);
+
+        return toEmployeeResponse(updated);
+    }
+
+    @Override
+    public EmployeeResponseDto updateEmployeeStatus(Long employeeId, EmployeeStatusUpdateDto requestDto) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+        employee.setStatus(requestDto.getStatus());
+        Employee updated = employeeRepository.save(employee);
+        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+
+        auditLogService.logAction(
+                AuditActionType.UPDATE,
+                AuditEntityType.EMPLOYEE,
+                updated.getId(),
+                "{\"status\":\"" + updated.getStatus() + "\"}"
+        );
+        platformUserSyncBridgeService.syncStatus(updated, tenantKey);
+        return toEmployeeResponse(updated);
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public EmployeeResponseDto getEmployeeById(Long employeeId) {
+        return toEmployeeResponse(getEmployeeOrThrow(employeeId));
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public PagedResultDto<EmployeeResponseDto> listEmployees(
+            PlatformRole role,
+            UserStatus status,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+
+        int resolvedPage = Math.max(page, 0);
+        int resolvedSize = Math.max(Math.min(size, 100), 1);
+        String resolvedSortBy = isSortable(sortBy) ? sortBy : "createdAt";
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+
+        Page<Employee> employeePage = employeeRepository.search(
+                role,
+                status,
+                trimToNull(search),
+                PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy))
+        );
+
+        List<EmployeeResponseDto> items = employeePage.getContent().stream()
+                .map(this::toEmployeeResponse)
+                .toList();
+
+        return PagedResultDto.<EmployeeResponseDto>builder()
+                .items(items)
+                .page(employeePage.getNumber())
+                .size(employeePage.getSize())
+                .totalElements(employeePage.getTotalElements())
+                .totalPages(employeePage.getTotalPages())
+                .build();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public EmployeeResponseDto getMyProfile() {
+        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
+        Employee employee = employeeRepository.findByEmailIgnoreCase(currentEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("No employee profile found for current user"));
+        return toEmployeeResponse(employee);
+    }
+
+    @Override
+    public EmployeeResponseDto updateMyProfile(EmployeeSelfUpdateDto requestDto) {
+        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
+        Employee employee = employeeRepository.findByEmailIgnoreCase(currentEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("No employee profile found for current user"));
+
+        employee.setFirstName(requestDto.getFirstName().trim());
+        employee.setLastName(requestDto.getLastName().trim());
+        employee.setDesignation(trimToNull(requestDto.getDesignation()));
+
+        if (requestDto.getPassword() != null && !requestDto.getPassword().isBlank()) {
+            employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
+        }
+
+        Employee updated = employeeRepository.save(employee);
+        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        platformUserSyncBridgeService.syncOnUpdate(updated, updated.getEmail(), requestDto.getPassword(), tenantKey);
+        return toEmployeeResponse(updated);
+    }
+
+    @Override
+    public EmployeeSkillResponseDto addSkill(Long employeeId, EmployeeSkillCreateRequestDto requestDto) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+
+        if (employeeSkillRepository.existsByEmployeeAndSkillNameIgnoreCase(employee, requestDto.getSkillName())) {
+            throw new BadRequestException("Skill already exists for this employee: " + requestDto.getSkillName());
+        }
+
+        EmployeeSkill skill = new EmployeeSkill();
+        skill.setEmployee(employee);
+        skill.setSkillName(requestDto.getSkillName().trim());
+        skill.setSkillLevel(requestDto.getSkillLevel());
+
+        EmployeeSkill saved = employeeSkillRepository.save(skill);
+        auditLogService.logAction(
+                AuditActionType.CREATE,
+                AuditEntityType.EMPLOYEE,
+                employeeId,
+                "{\"skill\":\"" + escapeJson(saved.getSkillName()) + "\"}"
+        );
+        return toSkillResponse(saved);
+    }
+
+    @Override
+    public EmployeeSkillResponseDto updateSkill(Long employeeId, Long skillId, EmployeeSkillCreateRequestDto requestDto) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+
+        EmployeeSkill existingSkill = employeeSkillRepository.findByIdAndEmployeeId(skillId, employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Skill not found for employee"));
+
+        if (!existingSkill.getSkillName().equalsIgnoreCase(requestDto.getSkillName()) &&
+                employeeSkillRepository.existsByEmployeeAndSkillNameIgnoreCase(employee, requestDto.getSkillName())) {
+            throw new BadRequestException("Skill already exists for this employee: " + requestDto.getSkillName());
+        }
+
+        existingSkill.setSkillName(requestDto.getSkillName().trim());
+        existingSkill.setSkillLevel(requestDto.getSkillLevel());
+
+        EmployeeSkill updated = employeeSkillRepository.save(existingSkill);
+        auditLogService.logAction(
+                AuditActionType.UPDATE,
+                AuditEntityType.EMPLOYEE,
+                employeeId,
+                "{\"skill\":\"" + escapeJson(updated.getSkillName()) + "\"}"
+        );
+        return toSkillResponse(updated);
+    }
+
+    @Override
+    public void deleteSkill(Long employeeId, Long skillId) {
+        EmployeeSkill skill = employeeSkillRepository.findByIdAndEmployeeId(skillId, employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Skill not found for employee"));
+        employeeSkillRepository.delete(skill);
+        auditLogService.logAction(
+                AuditActionType.DELETE,
+                AuditEntityType.EMPLOYEE,
+                employeeId,
+                "{\"skill\":\"" + escapeJson(skill.getSkillName()) + "\"}"
+        );
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId) {
+        getEmployeeOrThrow(employeeId);
+        return employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(employeeId)
+                .stream()
+                .map(this::toSkillResponse)
+                .toList();
+    }
+
+    private Employee getEmployeeOrThrow(Long employeeId) {
+        return employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + employeeId));
+    }
+
+    private String resolveEmployeeCode(String requestedCode) {
+        String normalizedRequestedCode = trimToNull(requestedCode);
+        if (normalizedRequestedCode != null) {
+            if (employeeRepository.existsByEmployeeCodeIgnoreCase(normalizedRequestedCode)) {
+                throw new BadRequestException("Employee code already exists: " + normalizedRequestedCode);
             }
+            return normalizedRequestedCode.toUpperCase();
         }
 
-        // Set default values
-        if (employee.getStatus() == null) {
-            employee.setStatus("ACTIVE");
-        }
-        if (employee.getHireDate() == null) {
-            employee.setHireDate(LocalDateTime.now());
-        }
-
-        return employeeRepository.save(employee);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Employee getEmployeeById(Long id) {
-        return employeeRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Employee not found with id: " + id));
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<Employee> getAllEmployees() {
-        return employeeRepository.findAll();
-    }
-
-    @Override
-    public Employee updateEmployee(Long id, Employee employee) {
-        Employee existingEmployee = getEmployeeById(id);
-
-        // Update fields
-        existingEmployee.setFirstName(employee.getFirstName());
-        existingEmployee.setLastName(employee.getLastName());
-
-        // Check email uniqueness if changed
-        if (!existingEmployee.getEmail().equals(employee.getEmail())) {
-            if (employeeRepository.existsByEmail(employee.getEmail())) {
-                throw new BadRequestException(
-                        "Employee with email " + employee.getEmail() + " already exists");
-            }
-            existingEmployee.setEmail(employee.getEmail());
-        }
-
-        existingEmployee.setPhone(employee.getPhone());
-        existingEmployee.setPosition(employee.getPosition());
-        existingEmployee.setDepartment(employee.getDepartment());
-        existingEmployee.setSalary(employee.getSalary());
-        existingEmployee.setStatus(employee.getStatus());
-
-        return employeeRepository.save(existingEmployee);
-    }
-
-    @Override
-    public void deleteEmployee(Long id) {
-        Employee employee = getEmployeeById(id);
-        employeeRepository.delete(employee);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<Employee> getEmployeesByDepartment(String department) {
-        return employeeRepository.findByDepartment(department);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<Employee> getEmployeesByStatus(String status) {
-        return employeeRepository.findByStatus(status);
-    }
-
-    /**
-     * Generate a unique employee code.
-     * Keeps trying until a unique code is found.
-     */
-    private String generateUniqueEmployeeCode() {
-        String code;
         int attempts = 0;
-        do {
-            code = EmployeeCodeGenerator.generateCode();
-            attempts++;
-            if (attempts > 100) {
-                throw new BadRequestException(
-                        "Unable to generate unique employee code after 100 attempts");
+        while (attempts < MAX_EMPLOYEE_CODE_GENERATION_ATTEMPTS) {
+            String generatedCode = EmployeeCodeGenerator.generateCode();
+            if (!employeeRepository.existsByEmployeeCodeIgnoreCase(generatedCode)) {
+                return generatedCode;
             }
-        } while (employeeRepository.existsByEmployeeCode(code));
+            attempts++;
+        }
 
-        return code;
+        throw new BadRequestException("Unable to generate a unique employee code");
+    }
+
+    private void validateTenantAssignableRole(PlatformRole role) {
+        if (role == null) {
+            throw new BadRequestException("Role is required");
+        }
+        if (role == PlatformRole.PLATFORM_ADMIN || role == PlatformRole.TENANT_ADMIN) {
+            throw new BadRequestException("Only tenant business roles (ADMIN, MANAGER, HR, EMPLOYEE) are allowed");
+        }
+    }
+
+    private EmployeeResponseDto toEmployeeResponse(Employee employee) {
+        return EmployeeResponseDto.builder()
+                .id(employee.getId())
+                .employeeCode(employee.getEmployeeCode())
+                .firstName(employee.getFirstName())
+                .lastName(employee.getLastName())
+                .email(employee.getEmail())
+                .role(employee.getRole())
+                .designation(employee.getDesignation())
+                .joinedDate(employee.getJoinedDate())
+                .status(employee.getStatus())
+                .createdAt(employee.getCreatedAt())
+                .updatedAt(employee.getUpdatedAt())
+                .build();
+    }
+
+    private EmployeeSkillResponseDto toSkillResponse(EmployeeSkill skill) {
+        return EmployeeSkillResponseDto.builder()
+                .id(skill.getId())
+                .employeeId(skill.getEmployee().getId())
+                .skillName(skill.getSkillName())
+                .skillLevel(skill.getSkillLevel())
+                .createdAt(skill.getCreatedAt())
+                .build();
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String escapeJson(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private boolean isSortable(String sortBy) {
+        return "createdAt".equals(sortBy) ||
+                "updatedAt".equals(sortBy) ||
+                "firstName".equals(sortBy) ||
+                "lastName".equals(sortBy) ||
+                "email".equals(sortBy) ||
+                "employeeCode".equals(sortBy) ||
+                "joinedDate".equals(sortBy);
     }
 }
-

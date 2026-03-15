@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
 @Service
-@Transactional
+@Transactional(transactionManager = "masterTransactionManager")
 public class PlatformUserServiceImpl implements PlatformUserService {
 
     private final PlatformUserRepository platformUserRepository;
@@ -26,7 +26,7 @@ public class PlatformUserServiceImpl implements PlatformUserService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
     public PlatformUser findByEmailOrThrow(String email) {
         return masterTenantContextRunner.runInMasterContext(() ->
                 platformUserRepository.findByEmailIgnoreCase(normalizeEmail(email))
@@ -48,7 +48,7 @@ public class PlatformUserServiceImpl implements PlatformUserService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
     public boolean emailExists(String email) {
         return masterTenantContextRunner.runInMasterContext(() ->
                 platformUserRepository.existsByEmailIgnoreCase(normalizeEmail(email)));

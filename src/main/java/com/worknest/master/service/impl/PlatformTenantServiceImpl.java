@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
+@Transactional(transactionManager = "masterTransactionManager", readOnly = true)
 public class PlatformTenantServiceImpl implements PlatformTenantService {
 
     private final PlatformTenantRepository tenantRepository;

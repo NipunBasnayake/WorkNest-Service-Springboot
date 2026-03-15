@@ -6,6 +6,7 @@ import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.InactiveUserException;
 import com.worknest.common.exception.InvalidTokenException;
+import com.worknest.common.exception.InvalidCredentialsException;
 import com.worknest.security.jwt.JwtService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -95,7 +96,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } catch (ForbiddenOperationException ex) {
             writeErrorResponse(response, request.getRequestURI(),
                     HttpStatus.FORBIDDEN, ex.getMessage(), "FORBIDDEN_OPERATION");
-        } catch (InvalidTokenException | JwtException ex) {
+        } catch (InvalidCredentialsException | InvalidTokenException | JwtException | ClassCastException ex) {
             writeErrorResponse(response, request.getRequestURI(),
                     HttpStatus.UNAUTHORIZED, "Access token is invalid", "INVALID_TOKEN");
         } finally {

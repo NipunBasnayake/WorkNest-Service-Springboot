@@ -26,12 +26,21 @@ services:
       db:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://worknest-repo-worknestdb-fowcw1:3306/platform_master?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: worknest_user
-      SPRING_DATASOURCE_PASSWORD: worknestdbpassword@1234
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      DB_URL: jdbc:mysql://db:3306/platform_master?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: root
+      DB_PASSWORD: 1234
+      JPA_DDL_AUTO: update
+      JPA_SHOW_SQL: "false"
+      JWT_SECRET: V29ya05lc3RTdXBlclNlY3JldEtleUZvckpXVDEyMzQ1Njc4OTAxMjM0NTY3ODkw
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      WS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      BOOTSTRAP_SEED_DEMO_DATA: "true"
+      ATTACHMENTS_DIR: /app/storage/attachments
     ports:
       - "8080:8080"
+    volumes:
+      - attachments-data:/app/storage
 
 volumes:
   mysql-data:
+  attachments-data:

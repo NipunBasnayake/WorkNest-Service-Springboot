@@ -67,12 +67,19 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
 
     @Override
     public boolean isUnwrappableAs(Class<?> unwrapType) {
-        return false;
+        if (unwrapType == null) {
+            return false;
+        }
+        return unwrapType.isAssignableFrom(getClass())
+                || MultiTenantConnectionProvider.class.equals(unwrapType);
     }
 
     @Override
     public <T> T unwrap(Class<T> unwrapType) {
-        return null;
+        if (isUnwrappableAs(unwrapType)) {
+            return unwrapType.cast(this);
+        }
+        throw new IllegalArgumentException("Unwrap type is not supported: " + unwrapType);
     }
 
     private String normalizeTenantIdentifier(String tenantIdentifier) {

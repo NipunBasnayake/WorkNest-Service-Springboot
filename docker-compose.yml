@@ -22,16 +22,12 @@ services:
       dockerfile: Dockerfile
     container_name: worknest-backend
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://worknest-repo-worknestdb-fowcw1:3306/platform_master?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: worknest_user
       SPRING_DATASOURCE_PASSWORD: worknestdbpassword@1234
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
-    ports:
-      - "8080:8080"
+      SERVER_PORT: 8080
 
 volumes:
   mysql-data:

@@ -11,6 +11,7 @@ import lombok.Setter;
 @Builder
 public class EmployeeSimpleDto {
     private Long id;
+    private Long platformUserId;
     private String employeeCode;
     private String fullName;
     private String email;

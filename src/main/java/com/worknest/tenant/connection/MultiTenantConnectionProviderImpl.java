@@ -1,5 +1,6 @@
 package com.worknest.tenant.connection;
 
+import com.worknest.common.exception.TenantContextMissingException;
 import com.worknest.common.exception.TenantResolutionException;
 import com.worknest.common.util.AppConstants;
 import com.worknest.tenant.datasource.TenantDataSourceService;
@@ -15,6 +16,7 @@ import java.sql.SQLException;
 @Component
 public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionProvider<String> {
 
+    private static final String BOOTSTRAP_TENANT = "BOOTSTRAP";
     private final DataSource masterDataSource;
     private final TenantDataSourceService tenantDataSourceService;
     private final String defaultTenant;
@@ -30,7 +32,8 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
 
     @Override
     public Connection getAnyConnection() throws SQLException {
-        // Return master database connection as default
+        // Hibernate bootstrap/session validation may request a generic connection.
+        // Always serve this from the master datasource.
         return masterDataSource.getConnection();
     }
 
@@ -42,14 +45,25 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
     @Override
     public Connection getConnection(String tenantIdentifier) throws SQLException {
         try {
-            String normalizedTenantIdentifier = normalizeTenantIdentifier(tenantIdentifier);
-            if (normalizedTenantIdentifier == null || defaultTenant.equalsIgnoreCase(normalizedTenantIdentifier)) {
+            if (BOOTSTRAP_TENANT.equalsIgnoreCase(tenantIdentifier)) {
                 return masterDataSource.getConnection();
+            }
+
+            String normalizedTenantIdentifier = normalizeTenantIdentifier(tenantIdentifier);
+            if (normalizedTenantIdentifier == null) {
+                throw new TenantContextMissingException(
+                        "Tenant identifier is missing for tenant-scoped connection resolution");
+            }
+            if (defaultTenant.equalsIgnoreCase(normalizedTenantIdentifier)) {
+                throw new TenantContextMissingException(
+                        "Master tenant identifier is not allowed for tenant-scoped connections");
             }
 
             // Get tenant-specific DataSource and return connection
             DataSource tenantDataSource = tenantDataSourceService.getDataSource(normalizedTenantIdentifier);
             return tenantDataSource.getConnection();
+        } catch (TenantContextMissingException ex) {
+            throw ex;
         } catch (Exception e) {
             throw new TenantResolutionException("Failed to get connection for tenant: " + tenantIdentifier, e);
         }

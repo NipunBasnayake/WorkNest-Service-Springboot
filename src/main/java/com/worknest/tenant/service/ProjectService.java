@@ -22,6 +22,8 @@ public interface ProjectService {
 
     List<ProjectResponseDto> listProjects();
 
+    List<ProjectResponseDto> listMyProjects();
+
     PagedResultDto<ProjectResponseDto> listProjectsPaged(
             ProjectStatus status,
             String search,

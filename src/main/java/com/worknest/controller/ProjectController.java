@@ -32,7 +32,7 @@ public class ProjectController {
                 .body(ApiResponse.success("Project created successfully", responseDto));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> updateProject(
             @PathVariable Long id,
@@ -41,7 +41,7 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success("Project updated successfully", responseDto));
     }
 
-    @PatchMapping("/{id}/status")
+    @PatchMapping("/{id:\\d+}/status")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> changeStatus(
             @PathVariable Long id,
@@ -50,7 +50,7 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success("Project status updated successfully", responseDto));
     }
 
-    @PostMapping("/{id}/teams")
+    @PostMapping("/{id:\\d+}/teams")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<ProjectTeamResponseDto>> assignTeam(
             @PathVariable Long id,
@@ -60,7 +60,7 @@ public class ProjectController {
                 .body(ApiResponse.success("Team assigned to project successfully", responseDto));
     }
 
-    @DeleteMapping("/{id}/teams/{teamId}")
+    @DeleteMapping("/{id:\\d+}/teams/{teamId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<Void>> removeTeamAssignment(
             @PathVariable Long id,
@@ -69,7 +69,7 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success("Team assignment removed successfully"));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<Void>> deleteProject(@PathVariable Long id) {
         projectService.deleteProject(id);
@@ -81,6 +81,13 @@ public class ProjectController {
     public ResponseEntity<ApiResponse<List<ProjectResponseDto>>> listProjects() {
         List<ProjectResponseDto> response = projectService.listProjects();
         return ResponseEntity.ok(ApiResponse.success("Projects retrieved successfully", response));
+    }
+
+    @GetMapping("/my")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<ProjectResponseDto>>> listMyProjects() {
+        List<ProjectResponseDto> response = projectService.listMyProjects();
+        return ResponseEntity.ok(ApiResponse.success("My projects retrieved successfully", response));
     }
 
     @GetMapping("/paged")
@@ -103,14 +110,14 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success("Projects retrieved successfully", response));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<ProjectDetailResponseDto>> getProjectDetails(@PathVariable Long id) {
         ProjectDetailResponseDto response = projectService.getProjectDetails(id);
         return ResponseEntity.ok(ApiResponse.success("Project details retrieved successfully", response));
     }
 
-    @GetMapping("/{id}/teams")
+    @GetMapping("/{id:\\d+}/teams")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<ProjectTeamResponseDto>>> listProjectTeams(@PathVariable Long id) {
         List<ProjectTeamResponseDto> response = projectService.listProjectTeams(id);

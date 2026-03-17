@@ -10,6 +10,8 @@ public interface ProjectTeamRepository extends JpaRepository<ProjectTeam, Long> 
 
     List<ProjectTeam> findByProjectId(Long projectId);
 
+    List<ProjectTeam> findByTeamId(Long teamId);
+
     List<ProjectTeam> findByTeamIdIn(List<Long> teamIds);
 
     Optional<ProjectTeam> findByProjectIdAndTeamId(Long projectId, Long teamId);

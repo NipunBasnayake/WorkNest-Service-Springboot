@@ -63,7 +63,25 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public RefreshToken rotateToken(RefreshToken currentToken) {
-        revokeToken(currentToken.getToken());
+        LocalDateTime now = LocalDateTime.now();
+        int updatedRows = masterTenantContextRunner.runInMasterContext(() ->
+                refreshTokenRepository.revokeIfActiveAndNotExpired(currentToken.getToken(), now, now));
+
+        if (updatedRows == 0) {
+            RefreshToken latestState = masterTenantContextRunner.runInMasterContext(() ->
+                    refreshTokenRepository.findByToken(currentToken.getToken())
+                            .orElseThrow(() -> new InvalidTokenException("Refresh token is invalid")));
+
+            if (latestState.isRevoked()) {
+                throw new TokenRevokedException("Refresh token has already been rotated or revoked");
+            }
+            if (latestState.getExpiresAt().isBefore(LocalDateTime.now())) {
+                revokeToken(currentToken.getToken());
+                throw new TokenExpiredException("Refresh token has expired");
+            }
+            throw new InvalidTokenException("Refresh token cannot be rotated");
+        }
+
         return createToken(currentToken.getPlatformUser());
     }
 

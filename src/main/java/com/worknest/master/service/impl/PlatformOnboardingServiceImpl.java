@@ -12,9 +12,8 @@ import com.worknest.master.entity.PlatformUser;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.repository.PlatformUserRepository;
 import com.worknest.master.service.PlatformOnboardingService;
-import com.worknest.tenant.datasource.TenantDataSourceService;
 import com.worknest.tenant.context.MasterTenantContextRunner;
-import com.zaxxer.hikari.HikariDataSource;
+import com.worknest.tenant.service.TenantSchemaService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,11 +21,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.sql.DataSource;
 import java.util.regex.Pattern;
 
 @Service
-@Transactional
+@Transactional(transactionManager = "masterTransactionManager")
 public class PlatformOnboardingServiceImpl implements PlatformOnboardingService {
 
     private static final Pattern TENANT_KEY_PATTERN = Pattern.compile("^[a-z0-9_-]{3,50}$");
@@ -36,8 +34,8 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
     private final PlatformUserRepository platformUserRepository;
     private final JdbcTemplate masterJdbcTemplate;
     private final PasswordEncoder passwordEncoder;
-    private final TenantDataSourceService tenantDataSourceService;
     private final MasterTenantContextRunner masterTenantContextRunner;
+    private final TenantSchemaService tenantSchemaService;
     private final String masterDbUrl;
     private final String masterDbUsername;
     private final String masterDbPassword;
@@ -47,8 +45,8 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
             PlatformUserRepository platformUserRepository,
             @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
             PasswordEncoder passwordEncoder,
-            TenantDataSourceService tenantDataSourceService,
             MasterTenantContextRunner masterTenantContextRunner,
+            TenantSchemaService tenantSchemaService,
             @Value("${spring.datasource.url}") String masterDbUrl,
             @Value("${spring.datasource.username}") String masterDbUsername,
             @Value("${spring.datasource.password}") String masterDbPassword) {
@@ -56,8 +54,8 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         this.platformUserRepository = platformUserRepository;
         this.masterJdbcTemplate = masterJdbcTemplate;
         this.passwordEncoder = passwordEncoder;
-        this.tenantDataSourceService = tenantDataSourceService;
         this.masterTenantContextRunner = masterTenantContextRunner;
+        this.tenantSchemaService = tenantSchemaService;
         this.masterDbUrl = masterDbUrl;
         this.masterDbUsername = masterDbUsername;
         this.masterDbPassword = masterDbPassword;
@@ -97,7 +95,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
 
             PlatformTenant tenant = buildTenantEntity(requestDto, normalizedTenantKey, databaseName);
             PlatformTenant savedTenant = platformTenantRepository.save(tenant);
-            prepareTenantSchema(savedTenant);
+            tenantSchemaService.ensureTenantSchema(savedTenant);
 
             PlatformUser tenantAdmin = buildTenantAdminEntity(
                     requestDto,
@@ -152,34 +150,6 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
 
     private void createTenantDatabaseIfMissing(String databaseName) {
         masterJdbcTemplate.execute("CREATE DATABASE IF NOT EXISTS `" + databaseName + "`");
-    }
-
-    private void prepareTenantSchema(PlatformTenant tenant) {
-        DataSource tenantDataSource = tenantDataSourceService.createDataSource(tenant);
-        try {
-            JdbcTemplate tenantJdbcTemplate = new JdbcTemplate(tenantDataSource);
-            tenantJdbcTemplate.execute("""
-                    CREATE TABLE IF NOT EXISTS employees (
-                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        employee_code VARCHAR(20) NOT NULL UNIQUE,
-                        first_name VARCHAR(100) NOT NULL,
-                        last_name VARCHAR(100) NOT NULL,
-                        email VARCHAR(255) NOT NULL UNIQUE,
-                        phone VARCHAR(20),
-                        position VARCHAR(100),
-                        department VARCHAR(100),
-                        salary DOUBLE,
-                        hire_date DATETIME,
-                        status VARCHAR(20) NOT NULL,
-                        created_at DATETIME NOT NULL,
-                        updated_at DATETIME NOT NULL
-                    )
-                    """);
-        } finally {
-            if (tenantDataSource instanceof HikariDataSource hikariDataSource) {
-                hikariDataSource.close();
-            }
-        }
     }
 
     private String buildTenantDbUrl(String tenantDatabaseName) {

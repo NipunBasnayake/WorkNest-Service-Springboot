@@ -1,113 +1,137 @@
 package com.worknest.controller;
 
 import com.worknest.common.api.ApiResponse;
-import com.worknest.tenant.context.TenantContext;
-import com.worknest.tenant.dto.EmployeeCreateDto;
-import com.worknest.tenant.dto.EmployeeResponseDto;
-import com.worknest.tenant.dto.EmployeeUpdateDto;
-import com.worknest.tenant.entity.Employee;
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
+import com.worknest.tenant.dto.common.PagedResultDto;
+import com.worknest.tenant.dto.employee.*;
 import com.worknest.tenant.service.EmployeeService;
 import jakarta.validation.Valid;
-import org.modelmapper.ModelMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/tenant/employees")
 public class EmployeeController {
 
     private final EmployeeService employeeService;
-    private final ModelMapper modelMapper;
 
-    public EmployeeController(EmployeeService employeeService, ModelMapper modelMapper) {
+    public EmployeeController(EmployeeService employeeService) {
         this.employeeService = employeeService;
-        this.modelMapper = modelMapper;
-    }
-
-    @GetMapping("/health")
-    public ResponseEntity<ApiResponse<Map<String, String>>> health() {
-        Map<String, String> data = new HashMap<>();
-        data.put("status", "UP");
-        data.put("currentTenant", TenantContext.getTenantId());
-        data.put("message", "Multi-tenant system is running");
-        return ResponseEntity.ok(ApiResponse.success("Health check successful", data));
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> createEmployee(
-            @Valid @RequestBody EmployeeCreateDto createDto) {
-        Employee employee = modelMapper.map(createDto, Employee.class);
-        Employee created = employeeService.createEmployee(employee);
-        EmployeeResponseDto responseDto = mapToResponseDto(created);
+            @Valid @RequestBody EmployeeCreateRequestDto requestDto) {
+        EmployeeResponseDto responseDto = employeeService.createEmployee(requestDto);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Employee created successfully", responseDto));
     }
 
-    @GetMapping
-    public ResponseEntity<ApiResponse<List<EmployeeResponseDto>>> getAllEmployees() {
-        List<Employee> employees = employeeService.getAllEmployees();
-        List<EmployeeResponseDto> responseDtos = employees.stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(
-                ApiResponse.success("Employees retrieved successfully", responseDtos));
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateEmployee(
+            @PathVariable Long id,
+            @Valid @RequestBody EmployeeUpdateRequestDto requestDto) {
+        EmployeeResponseDto responseDto = employeeService.updateEmployee(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Employee updated successfully", responseDto));
+    }
+
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateEmployeeStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody EmployeeStatusUpdateDto requestDto) {
+        EmployeeResponseDto responseDto = employeeService.updateEmployeeStatus(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Employee status updated successfully", responseDto));
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> getEmployeeById(@PathVariable Long id) {
-        Employee employee = employeeService.getEmployeeById(id);
-        EmployeeResponseDto responseDto = mapToResponseDto(employee);
-        return ResponseEntity.ok(
-                ApiResponse.success("Employee retrieved successfully", responseDto));
+        EmployeeResponseDto responseDto = employeeService.getEmployeeById(id);
+        return ResponseEntity.ok(ApiResponse.success("Employee retrieved successfully", responseDto));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateEmployee(
+    @GetMapping
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    public ResponseEntity<ApiResponse<PagedResultDto<EmployeeResponseDto>>> listEmployees(
+            @RequestParam(required = false) PlatformRole role,
+            @RequestParam(required = false) UserStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+
+        PagedResultDto<EmployeeResponseDto> responseDto = employeeService
+                .listEmployees(role, status, search, page, size, sortBy, sortDir);
+        return ResponseEntity.ok(ApiResponse.success("Employees retrieved successfully", responseDto));
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<EmployeeResponseDto>> getMyProfile() {
+        EmployeeResponseDto responseDto = employeeService.getMyProfile();
+        return ResponseEntity.ok(ApiResponse.success("Employee profile retrieved", responseDto));
+    }
+
+    @PutMapping("/me")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateMyProfile(
+            @Valid @RequestBody EmployeeSelfUpdateDto requestDto) {
+        EmployeeResponseDto responseDto = employeeService.updateMyProfile(requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Employee profile updated", responseDto));
+    }
+
+    @PostMapping("/{id}/provision-account")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeAccountProvisionResponseDto>> provisionEmployeeAccount(
             @PathVariable Long id,
-            @Valid @RequestBody EmployeeUpdateDto updateDto) {
-        Employee employee = modelMapper.map(updateDto, Employee.class);
-        Employee updated = employeeService.updateEmployee(id, employee);
-        EmployeeResponseDto responseDto = mapToResponseDto(updated);
-        return ResponseEntity.ok(
-                ApiResponse.success("Employee updated successfully", responseDto));
+            @Valid @RequestBody(required = false) EmployeeAccountProvisionRequestDto requestDto) {
+        EmployeeAccountProvisionRequestDto safeRequest = requestDto == null
+                ? new EmployeeAccountProvisionRequestDto()
+                : requestDto;
+        EmployeeAccountProvisionResponseDto responseDto = employeeService.provisionEmployeeAccount(id, safeRequest);
+        return ResponseEntity.ok(ApiResponse.success("Employee login account provisioned successfully", responseDto));
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> deleteEmployee(@PathVariable Long id) {
-        employeeService.deleteEmployee(id);
-        return ResponseEntity.ok(
-                ApiResponse.success("Employee deleted successfully"));
+    @PostMapping("/{id}/skills")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeSkillResponseDto>> addSkill(
+            @PathVariable Long id,
+            @Valid @RequestBody EmployeeSkillCreateRequestDto requestDto) {
+        EmployeeSkillResponseDto responseDto = employeeService.addSkill(id, requestDto);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Employee skill added successfully", responseDto));
     }
 
-    @GetMapping("/department/{department}")
-    public ResponseEntity<ApiResponse<List<EmployeeResponseDto>>> getEmployeesByDepartment(
-            @PathVariable String department) {
-        List<Employee> employees = employeeService.getEmployeesByDepartment(department);
-        List<EmployeeResponseDto> responseDtos = employees.stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(
-                ApiResponse.success("Employees retrieved successfully", responseDtos));
+    @PutMapping("/{id}/skills/{skillId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeSkillResponseDto>> updateSkill(
+            @PathVariable Long id,
+            @PathVariable Long skillId,
+            @Valid @RequestBody EmployeeSkillCreateRequestDto requestDto) {
+        EmployeeSkillResponseDto responseDto = employeeService.updateSkill(id, skillId, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Employee skill updated successfully", responseDto));
     }
 
-    @GetMapping("/tenant-info")
-    public ResponseEntity<ApiResponse<Map<String, String>>> getTenantInfo() {
-        Map<String, String> info = new HashMap<>();
-        String tenantId = TenantContext.getTenantId();
-        info.put("tenantId", tenantId != null ? tenantId : "null");
-        info.put("threadName", Thread.currentThread().getName());
-        info.put("timestamp", java.time.LocalDateTime.now().toString());
-        return ResponseEntity.ok(ApiResponse.success("Tenant info retrieved", info));
+    @DeleteMapping("/{id}/skills/{skillId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<Void>> deleteSkill(@PathVariable Long id, @PathVariable Long skillId) {
+        employeeService.deleteSkill(id, skillId);
+        return ResponseEntity.ok(ApiResponse.success("Employee skill deleted successfully"));
     }
 
-    private EmployeeResponseDto mapToResponseDto(Employee employee) {
-        return modelMapper.map(employee, EmployeeResponseDto.class);
+    @GetMapping("/{id}/skills")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    public ResponseEntity<ApiResponse<List<EmployeeSkillResponseDto>>> listSkills(@PathVariable Long id) {
+        List<EmployeeSkillResponseDto> response = employeeService.listSkillsByEmployee(id);
+        return ResponseEntity.ok(ApiResponse.success("Employee skills retrieved successfully", response));
     }
 }
-

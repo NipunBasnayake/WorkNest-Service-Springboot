@@ -1,0 +1,76 @@
+package com.worknest.tenant.repository;
+
+import com.worknest.tenant.entity.LeaveRequest;
+import com.worknest.tenant.enums.LeaveStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDate;
+import java.util.List;
+
+public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long> {
+
+    List<LeaveRequest> findByEmployeeIdOrderByCreatedAtDesc(Long employeeId);
+
+    List<LeaveRequest> findByStatusOrderByCreatedAtAsc(LeaveStatus status);
+
+    long countByStatus(LeaveStatus status);
+
+    long countByEmployeeIdAndStatus(Long employeeId, LeaveStatus status);
+
+    @Query("""
+            SELECT lr
+            FROM LeaveRequest lr
+            WHERE (:status IS NULL OR lr.status = :status)
+              AND (:fromDate IS NULL OR lr.startDate >= :fromDate)
+              AND (:toDate IS NULL OR lr.endDate <= :toDate)
+            """)
+    Page<LeaveRequest> search(
+            @Param("status") LeaveStatus status,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate,
+            Pageable pageable);
+
+    @Query("""
+            SELECT lr
+            FROM LeaveRequest lr
+            WHERE lr.employee.id = :employeeId
+              AND (:status IS NULL OR lr.status = :status)
+              AND (:fromDate IS NULL OR lr.startDate >= :fromDate)
+              AND (:toDate IS NULL OR lr.endDate <= :toDate)
+            """)
+    Page<LeaveRequest> searchMyRequests(
+            @Param("employeeId") Long employeeId,
+            @Param("status") LeaveStatus status,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate,
+            Pageable pageable);
+
+    @Query("""
+            SELECT lr.status, COUNT(lr)
+            FROM LeaveRequest lr
+            GROUP BY lr.status
+            """)
+    List<Object[]> countByStatusGroup();
+
+    @Query(
+            value = """
+                    SELECT DATE_FORMAT(lr.start_date, '%Y-%m') AS month_key, lr.status, COUNT(*) AS total_count
+                    FROM leave_requests lr
+                    WHERE YEAR(lr.start_date) = :year
+                    GROUP BY DATE_FORMAT(lr.start_date, '%Y-%m'), lr.status
+                    ORDER BY month_key ASC
+                    """,
+            nativeQuery = true
+    )
+    List<Object[]> findLeaveTrendByYear(@Param("year") int year);
+
+    boolean existsByEmployeeIdAndStatusAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+            Long employeeId,
+            LeaveStatus status,
+            LocalDate endDate,
+            LocalDate startDate);
+}

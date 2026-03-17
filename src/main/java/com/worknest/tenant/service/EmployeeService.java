@@ -1,23 +1,44 @@
 package com.worknest.tenant.service;
 
-import com.worknest.tenant.entity.Employee;
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
+import com.worknest.tenant.dto.common.PagedResultDto;
+import com.worknest.tenant.dto.employee.*;
 
 import java.util.List;
 
 public interface EmployeeService {
 
-    Employee createEmployee(Employee employee);
+    EmployeeResponseDto createEmployee(EmployeeCreateRequestDto requestDto);
 
-    Employee getEmployeeById(Long id);
+    EmployeeResponseDto updateEmployee(Long employeeId, EmployeeUpdateRequestDto requestDto);
 
-    List<Employee> getAllEmployees();
+    EmployeeResponseDto updateEmployeeStatus(Long employeeId, EmployeeStatusUpdateDto requestDto);
 
-    Employee updateEmployee(Long id, Employee employee);
+    EmployeeResponseDto getEmployeeById(Long employeeId);
 
-    void deleteEmployee(Long id);
+    PagedResultDto<EmployeeResponseDto> listEmployees(
+            PlatformRole role,
+            UserStatus status,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir);
 
-    List<Employee> getEmployeesByDepartment(String department);
+    EmployeeResponseDto getMyProfile();
 
-    List<Employee> getEmployeesByStatus(String status);
+    EmployeeResponseDto updateMyProfile(EmployeeSelfUpdateDto requestDto);
+
+    EmployeeAccountProvisionResponseDto provisionEmployeeAccount(
+            Long employeeId,
+            EmployeeAccountProvisionRequestDto requestDto);
+
+    EmployeeSkillResponseDto addSkill(Long employeeId, EmployeeSkillCreateRequestDto requestDto);
+
+    EmployeeSkillResponseDto updateSkill(Long employeeId, Long skillId, EmployeeSkillCreateRequestDto requestDto);
+
+    void deleteSkill(Long employeeId, Long skillId);
+
+    List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId);
 }
-

@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@Transactional
+@Transactional(transactionManager = "masterTransactionManager")
 public class AuthServiceImpl implements AuthService {
 
     private final PlatformUserService platformUserService;
@@ -53,7 +53,7 @@ public class AuthServiceImpl implements AuthService {
             throw new InactiveUserException("User account is inactive");
         }
 
-        validateUserTenantScope(user, requestDto.getTenantKey());
+        validateUserTenantScope(user, requestDto.getTenantKey(), false);
 
         if (!passwordEncoder.matches(requestDto.getPassword(), user.getPasswordHash())) {
             throw new InvalidCredentialsException("Invalid email or password");
@@ -84,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
             throw new InactiveUserException("User account is inactive");
         }
 
-        validateUserTenantScope(user, user.getTenantKey());
+        validateUserTenantScope(user, requestDto.getTenantKey(), true);
 
         RefreshToken rotatedToken = refreshTokenService.rotateToken(currentToken);
         String newAccessToken = jwtService.generateAccessToken(user);
@@ -103,6 +103,8 @@ public class AuthServiceImpl implements AuthService {
         RefreshToken token = refreshTokenService.validateToken(requestDto.getRefreshToken());
         PlatformUser tokenUser = token.getPlatformUser();
 
+        validateUserTenantScope(tokenUser, requestDto.getTenantKey(), true);
+
         PlatformUserPrincipal currentPrincipal = extractCurrentPrincipal();
         if (currentPrincipal == null || !currentPrincipal.getId().equals(tokenUser.getId())) {
             throw new ForbiddenOperationException("Cannot revoke a token for a different user");
@@ -116,7 +118,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
     public AuthUserDto getCurrentUser() {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
@@ -133,7 +135,10 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-    private void validateUserTenantScope(PlatformUser user, String requestedTenantKey) {
+    private void validateUserTenantScope(
+            PlatformUser user,
+            String requestedTenantKey,
+            boolean requireRequestedTenantKey) {
         if (!user.getRole().isTenantScoped()) {
             return;
         }
@@ -144,6 +149,9 @@ public class AuthServiceImpl implements AuthService {
         }
 
         String normalizedRequestedTenant = normalizeTenantKey(requestedTenantKey);
+        if (requireRequestedTenantKey && normalizedRequestedTenant == null) {
+            throw new ForbiddenOperationException("Tenant key is required for tenant-scoped users");
+        }
         if (normalizedRequestedTenant != null &&
                 !normalizedRequestedTenant.equalsIgnoreCase(userTenantKey)) {
             throw new ForbiddenOperationException("Requested tenant does not match user tenant");

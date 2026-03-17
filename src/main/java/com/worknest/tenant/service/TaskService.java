@@ -21,6 +21,8 @@ public interface TaskService {
 
     TaskResponseDto changeDueDate(Long taskId, TaskDueDateUpdateRequestDto requestDto);
 
+    List<TaskResponseDto> listMyTasks();
+
     List<TaskResponseDto> listByProject(Long projectId);
 
     PagedResultDto<TaskResponseDto> listTasksPaged(

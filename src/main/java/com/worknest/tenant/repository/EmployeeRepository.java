@@ -18,6 +18,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     Optional<Employee> findByEmailIgnoreCase(String email);
 
+    Optional<Employee> findByPlatformUserId(Long platformUserId);
+
     Optional<Employee> findByEmployeeCodeIgnoreCase(String employeeCode);
 
     boolean existsByEmailIgnoreCase(String email);
@@ -56,6 +58,9 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
                     OR LOWER(e.lastName) LIKE LOWER(CONCAT('%', :search, '%'))
                     OR LOWER(e.email) LIKE LOWER(CONCAT('%', :search, '%'))
                     OR LOWER(e.employeeCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.designation, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.department, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.phone, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
     Page<Employee> search(

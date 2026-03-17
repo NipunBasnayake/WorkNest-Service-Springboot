@@ -23,6 +23,10 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
             LocalDate from,
             LocalDate to);
 
+    Optional<AttendanceRecord> findFirstByEmployeeIdOrderByWorkDateDesc(Long employeeId);
+
+    long countByWorkDate(LocalDate workDate);
+
     long countByWorkDateAndStatus(LocalDate workDate, AttendanceStatus status);
 
     @Query("""

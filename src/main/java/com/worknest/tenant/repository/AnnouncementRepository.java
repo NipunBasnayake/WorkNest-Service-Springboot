@@ -13,6 +13,8 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
 
     List<Announcement> findAllByOrderByCreatedAtDesc();
 
+    List<Announcement> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
     @Query("""
             SELECT a
             FROM Announcement a

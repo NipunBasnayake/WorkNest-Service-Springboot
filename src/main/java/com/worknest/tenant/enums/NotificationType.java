@@ -5,6 +5,7 @@ public enum NotificationType {
     TASK_STATUS_CHANGED,
     LEAVE_APPROVED,
     LEAVE_REJECTED,
+    LEAVE_CANCELLED,
     ANNOUNCEMENT,
     HR_MESSAGE,
     TEAM_MESSAGE,

@@ -45,6 +45,9 @@ public class Employee {
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
+    @Column(name = "platform_user_id")
+    private Long platformUserId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 30)
     private PlatformRole role;

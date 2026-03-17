@@ -18,6 +18,8 @@ public class EmployeeResponseDto {
     private String firstName;
     private String lastName;
     private String email;
+    private Long platformUserId;
+    private boolean accountProvisioned;
     private PlatformRole role;
     private String designation;
     private LocalDate joinedDate;

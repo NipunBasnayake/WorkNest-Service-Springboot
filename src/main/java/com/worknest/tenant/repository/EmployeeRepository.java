@@ -26,6 +26,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     List<Employee> findByStatus(UserStatus status);
 
+    List<Employee> findByRoleInAndStatus(List<PlatformRole> roles, UserStatus status);
+
     long countByStatus(UserStatus status);
 
     @Query("""

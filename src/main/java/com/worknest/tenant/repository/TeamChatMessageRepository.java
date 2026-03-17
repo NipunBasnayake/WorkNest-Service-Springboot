@@ -8,4 +8,6 @@ import java.util.List;
 public interface TeamChatMessageRepository extends JpaRepository<TeamChatMessage, Long> {
 
     List<TeamChatMessage> findByTeamChatIdOrderByCreatedAtAsc(Long teamChatId);
+
+    void deleteByTeamChatId(Long teamChatId);
 }

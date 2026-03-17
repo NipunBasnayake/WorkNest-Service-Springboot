@@ -15,4 +15,8 @@ public interface ProjectTeamRepository extends JpaRepository<ProjectTeam, Long> 
     Optional<ProjectTeam> findByProjectIdAndTeamId(Long projectId, Long teamId);
 
     boolean existsByProjectIdAndTeamId(Long projectId, Long teamId);
+
+    boolean existsByTeamId(Long teamId);
+
+    void deleteByProjectId(Long projectId);
 }

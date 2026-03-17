@@ -12,6 +12,9 @@ import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.TeamFunctionalRole;
 import com.worknest.tenant.repository.EmployeeRepository;
+import com.worknest.tenant.repository.ProjectTeamRepository;
+import com.worknest.tenant.repository.TeamChatMessageRepository;
+import com.worknest.tenant.repository.TeamChatRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
@@ -31,6 +34,9 @@ public class TeamServiceImpl implements TeamService {
 
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final ProjectTeamRepository projectTeamRepository;
+    private final TeamChatRepository teamChatRepository;
+    private final TeamChatMessageRepository teamChatMessageRepository;
     private final EmployeeRepository employeeRepository;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
@@ -38,11 +44,17 @@ public class TeamServiceImpl implements TeamService {
     public TeamServiceImpl(
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
+            ProjectTeamRepository projectTeamRepository,
+            TeamChatRepository teamChatRepository,
+            TeamChatMessageRepository teamChatMessageRepository,
             EmployeeRepository employeeRepository,
             TenantDtoMapper tenantDtoMapper,
             AuditLogService auditLogService) {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
+        this.projectTeamRepository = projectTeamRepository;
+        this.teamChatRepository = teamChatRepository;
+        this.teamChatMessageRepository = teamChatMessageRepository;
         this.employeeRepository = employeeRepository;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
@@ -172,6 +184,29 @@ public class TeamServiceImpl implements TeamService {
                 AuditEntityType.TEAM,
                 teamId,
                 "{\"employeeId\":" + employeeId + "}"
+        );
+    }
+
+    @Override
+    public void deleteTeam(Long teamId) {
+        Team team = getTeamOrThrow(teamId);
+        if (projectTeamRepository.existsByTeamId(teamId)) {
+            throw new BadRequestException("Cannot delete team while it is assigned to one or more projects");
+        }
+
+        teamChatRepository.findByTeamId(teamId).ifPresent(teamChat -> {
+            teamChatMessageRepository.deleteByTeamChatId(teamChat.getId());
+            teamChatRepository.delete(teamChat);
+        });
+
+        teamMemberRepository.deleteByTeamId(teamId);
+        teamRepository.delete(team);
+
+        auditLogService.logAction(
+                AuditActionType.DELETE,
+                AuditEntityType.TEAM,
+                teamId,
+                "{\"name\":\"" + escapeJson(team.getName()) + "\"}"
         );
     }
 

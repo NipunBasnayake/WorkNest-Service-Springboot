@@ -1,6 +1,7 @@
 package com.worknest.tenant.service.impl;
 
 import com.worknest.master.service.PlatformUserSyncService;
+import com.worknest.master.entity.PlatformUser;
 import com.worknest.tenant.entity.Employee;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -16,17 +17,22 @@ public class PlatformUserSyncBridgeService {
     }
 
     @Transactional(transactionManager = "transactionManager", propagation = Propagation.NOT_SUPPORTED)
-    public void syncOnCreate(Employee employee, String rawPassword, String tenantKey) {
-        platformUserSyncService.syncOnCreate(employee, rawPassword, tenantKey);
+    public PlatformUser syncOnCreate(Employee employee, String rawPassword, String tenantKey) {
+        return platformUserSyncService.syncOnCreate(employee, rawPassword, tenantKey);
     }
 
     @Transactional(transactionManager = "transactionManager", propagation = Propagation.NOT_SUPPORTED)
-    public void syncOnUpdate(Employee employee, String oldEmail, String rawPassword, String tenantKey) {
-        platformUserSyncService.syncOnUpdate(employee, oldEmail, rawPassword, tenantKey);
+    public PlatformUser syncOnUpdate(Employee employee, String oldEmail, String rawPassword, String tenantKey) {
+        return platformUserSyncService.syncOnUpdate(employee, oldEmail, rawPassword, tenantKey);
     }
 
     @Transactional(transactionManager = "transactionManager", propagation = Propagation.NOT_SUPPORTED)
-    public void syncStatus(Employee employee, String tenantKey) {
-        platformUserSyncService.syncStatus(employee, tenantKey);
+    public PlatformUser syncStatus(Employee employee, String tenantKey) {
+        return platformUserSyncService.syncStatus(employee, tenantKey);
+    }
+
+    @Transactional(transactionManager = "transactionManager", propagation = Propagation.NOT_SUPPORTED)
+    public PlatformUser provisionEmployeeAccount(Employee employee, String rawPassword, String tenantKey) {
+        return platformUserSyncService.provisionEmployeeAccount(employee, rawPassword, tenantKey);
     }
 }

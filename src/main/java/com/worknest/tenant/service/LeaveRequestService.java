@@ -39,5 +39,7 @@ public interface LeaveRequestService {
 
     LeaveResponseDto rejectLeave(Long leaveRequestId, LeaveDecisionRequestDto requestDto);
 
+    LeaveResponseDto cancelLeave(Long leaveRequestId);
+
     LeaveResponseDto getLeaveDetails(Long leaveRequestId);
 }

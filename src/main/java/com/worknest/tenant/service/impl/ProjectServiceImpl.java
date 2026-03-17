@@ -12,12 +12,15 @@ import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Project;
 import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Team;
+import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.ProjectStatus;
+import com.worknest.tenant.repository.AttachmentRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.ProjectRepository;
 import com.worknest.tenant.repository.ProjectTeamRepository;
+import com.worknest.tenant.repository.TaskRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
@@ -38,6 +41,8 @@ public class ProjectServiceImpl implements ProjectService {
 
     private final ProjectRepository projectRepository;
     private final ProjectTeamRepository projectTeamRepository;
+    private final TaskRepository taskRepository;
+    private final AttachmentRepository attachmentRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final EmployeeRepository employeeRepository;
@@ -48,6 +53,8 @@ public class ProjectServiceImpl implements ProjectService {
     public ProjectServiceImpl(
             ProjectRepository projectRepository,
             ProjectTeamRepository projectTeamRepository,
+            TaskRepository taskRepository,
+            AttachmentRepository attachmentRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
             EmployeeRepository employeeRepository,
@@ -56,6 +63,8 @@ public class ProjectServiceImpl implements ProjectService {
             AuditLogService auditLogService) {
         this.projectRepository = projectRepository;
         this.projectTeamRepository = projectTeamRepository;
+        this.taskRepository = taskRepository;
+        this.attachmentRepository = attachmentRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.employeeRepository = employeeRepository;
@@ -161,6 +170,28 @@ public class ProjectServiceImpl implements ProjectService {
                 AuditEntityType.PROJECT,
                 projectId,
                 "{\"teamId\":" + teamId + "}"
+        );
+    }
+
+    @Override
+    public void deleteProject(Long projectId) {
+        Project project = getProjectOrThrow(projectId);
+        long taskCount = taskRepository.countByProjectId(projectId);
+        if (taskCount > 0) {
+            throw new BadRequestException("Cannot delete project with existing tasks. Delete tasks first.");
+        }
+
+        if (attachmentRepository.existsByEntityTypeAndEntityId(AttachmentEntityType.PROJECT, projectId)) {
+            throw new BadRequestException("Cannot delete project with attachments. Remove attachments first.");
+        }
+
+        projectTeamRepository.deleteByProjectId(projectId);
+        projectRepository.delete(project);
+        auditLogService.logAction(
+                AuditActionType.DELETE,
+                AuditEntityType.PROJECT,
+                projectId,
+                "{\"name\":\"" + escapeJson(project.getName()) + "\"}"
         );
     }
 

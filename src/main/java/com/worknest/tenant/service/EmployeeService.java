@@ -30,6 +30,10 @@ public interface EmployeeService {
 
     EmployeeResponseDto updateMyProfile(EmployeeSelfUpdateDto requestDto);
 
+    EmployeeAccountProvisionResponseDto provisionEmployeeAccount(
+            Long employeeId,
+            EmployeeAccountProvisionRequestDto requestDto);
+
     EmployeeSkillResponseDto addSkill(Long employeeId, EmployeeSkillCreateRequestDto requestDto);
 
     EmployeeSkillResponseDto updateSkill(Long employeeId, Long skillId, EmployeeSkillCreateRequestDto requestDto);

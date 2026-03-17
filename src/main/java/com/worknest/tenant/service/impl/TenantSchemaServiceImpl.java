@@ -47,6 +47,7 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
 
     private void ensureEmployeesLegacyColumns(JdbcTemplate jdbcTemplate) {
         addColumnIfMissing(jdbcTemplate, "employees", "password_hash", "VARCHAR(255)");
+        addColumnIfMissing(jdbcTemplate, "employees", "platform_user_id", "BIGINT");
         addColumnIfMissing(jdbcTemplate, "employees", "role", "VARCHAR(30)");
         addColumnIfMissing(jdbcTemplate, "employees", "designation", "VARCHAR(120)");
         addColumnIfMissing(jdbcTemplate, "employees", "joined_date", "DATE");
@@ -138,6 +139,7 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
                     last_name VARCHAR(100) NOT NULL,
                     email VARCHAR(255) NOT NULL,
                     password_hash VARCHAR(255),
+                    platform_user_id BIGINT,
                     role VARCHAR(30) NOT NULL,
                     designation VARCHAR(120),
                     joined_date DATE,

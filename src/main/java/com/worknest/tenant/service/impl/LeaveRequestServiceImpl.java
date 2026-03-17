@@ -259,6 +259,31 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     }
 
     @Override
+    public LeaveResponseDto cancelLeave(Long leaveRequestId) {
+        LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
+        Employee currentEmployee = getCurrentEmployeeOrThrow();
+        if (!leaveRequest.getEmployee().getId().equals(currentEmployee.getId())) {
+            throw new ForbiddenOperationException("You can cancel only your own leave requests");
+        }
+        if (leaveRequest.getStatus() != LeaveStatus.PENDING) {
+            throw new BadRequestException("Only pending leave requests can be cancelled");
+        }
+
+        leaveRequest.setStatus(LeaveStatus.CANCELLED);
+        LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+
+        notifyApproversAboutCancellation(currentEmployee, updated);
+        auditLogService.logAction(
+                AuditActionType.CANCEL,
+                AuditEntityType.LEAVE_REQUEST,
+                updated.getId(),
+                "{\"employeeId\":" + currentEmployee.getId() + "}"
+        );
+
+        return toLeaveResponse(updated);
+    }
+
+    @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public LeaveResponseDto getLeaveDetails(Long leaveRequestId) {
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
@@ -373,6 +398,26 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private void validateApproverRole(Employee approver) {
         if (!(approver.getRole() == PlatformRole.ADMIN || approver.getRole() == PlatformRole.HR)) {
             throw new BadRequestException("Leave approver must be an ADMIN or HR employee");
+        }
+    }
+
+    private void notifyApproversAboutCancellation(Employee employee, LeaveRequest leaveRequest) {
+        List<Employee> recipients = employeeRepository.findByRoleInAndStatus(
+                List.of(PlatformRole.ADMIN, PlatformRole.HR),
+                UserStatus.ACTIVE
+        ).stream()
+                .filter(candidate -> !candidate.getId().equals(employee.getId()))
+                .toList();
+
+        String message = "Leave request cancelled by " + employee.getFirstName() + " " + employee.getLastName();
+        for (Employee recipient : recipients) {
+            notificationService.createSystemNotification(
+                    recipient.getId(),
+                    NotificationType.LEAVE_CANCELLED,
+                    message,
+                    AuditEntityType.LEAVE_REQUEST.name(),
+                    leaveRequest.getId()
+            );
         }
     }
 

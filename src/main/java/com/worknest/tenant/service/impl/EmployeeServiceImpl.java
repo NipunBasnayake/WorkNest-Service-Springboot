@@ -6,6 +6,7 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.util.EmployeeCodeGenerator;
+import com.worknest.master.entity.PlatformUser;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.employee.*;
@@ -26,12 +27,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.security.SecureRandom;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class EmployeeServiceImpl implements EmployeeService {
 
     private static final int MAX_EMPLOYEE_CODE_GENERATION_ATTEMPTS = 100;
+    private static final int TEMP_PASSWORD_LENGTH = 12;
+    private static final String TEMP_PASSWORD_CHARSET =
+            "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
 
     private final EmployeeRepository employeeRepository;
     private final EmployeeSkillRepository employeeSkillRepository;
@@ -39,6 +44,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     private final PasswordEncoder passwordEncoder;
     private final SecurityUtils securityUtils;
     private final AuditLogService auditLogService;
+    private final SecureRandom secureRandom;
 
     public EmployeeServiceImpl(
             EmployeeRepository employeeRepository,
@@ -53,6 +59,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         this.passwordEncoder = passwordEncoder;
         this.securityUtils = securityUtils;
         this.auditLogService = auditLogService;
+        this.secureRandom = new SecureRandom();
     }
 
     @Override
@@ -86,7 +93,12 @@ public class EmployeeServiceImpl implements EmployeeService {
                 savedEmployee.getId(),
                 "{\"email\":\"" + escapeJson(savedEmployee.getEmail()) + "\"}"
         );
-        platformUserSyncBridgeService.syncOnCreate(savedEmployee, requestDto.getPassword(), tenantKey);
+        PlatformUser syncedUser = platformUserSyncBridgeService.syncOnCreate(
+                savedEmployee,
+                requestDto.getPassword(),
+                tenantKey
+        );
+        savedEmployee = linkPlatformUser(savedEmployee, syncedUser);
 
         return toEmployeeResponse(savedEmployee);
     }
@@ -134,7 +146,13 @@ public class EmployeeServiceImpl implements EmployeeService {
                 updated.getId(),
                 "{\"email\":\"" + escapeJson(updated.getEmail()) + "\"}"
         );
-        platformUserSyncBridgeService.syncOnUpdate(updated, oldEmail, requestDto.getPassword(), tenantKey);
+        PlatformUser syncedUser = platformUserSyncBridgeService.syncOnUpdate(
+                updated,
+                oldEmail,
+                requestDto.getPassword(),
+                tenantKey
+        );
+        updated = linkPlatformUser(updated, syncedUser);
 
         return toEmployeeResponse(updated);
     }
@@ -152,7 +170,8 @@ public class EmployeeServiceImpl implements EmployeeService {
                 updated.getId(),
                 "{\"status\":\"" + updated.getStatus() + "\"}"
         );
-        platformUserSyncBridgeService.syncStatus(updated, tenantKey);
+        PlatformUser syncedUser = platformUserSyncBridgeService.syncStatus(updated, tenantKey);
+        updated = linkPlatformUser(updated, syncedUser);
         return toEmployeeResponse(updated);
     }
 
@@ -223,8 +242,59 @@ public class EmployeeServiceImpl implements EmployeeService {
 
         Employee updated = employeeRepository.save(employee);
         String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
-        platformUserSyncBridgeService.syncOnUpdate(updated, updated.getEmail(), requestDto.getPassword(), tenantKey);
+        PlatformUser syncedUser = platformUserSyncBridgeService.syncOnUpdate(
+                updated,
+                updated.getEmail(),
+                requestDto.getPassword(),
+                tenantKey
+        );
+        updated = linkPlatformUser(updated, syncedUser);
         return toEmployeeResponse(updated);
+    }
+
+    @Override
+    public EmployeeAccountProvisionResponseDto provisionEmployeeAccount(
+            Long employeeId,
+            EmployeeAccountProvisionRequestDto requestDto) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+        if (employee.getPlatformUserId() != null) {
+            throw new BadRequestException("Employee login account is already provisioned");
+        }
+
+        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String requestedPassword = requestDto == null ? null : trimToNull(requestDto.getTemporaryPassword());
+        boolean generatedPassword = requestedPassword == null;
+        String temporaryPassword = generatedPassword ? generateTemporaryPassword() : requestedPassword;
+
+        PlatformUser provisionedUser = platformUserSyncBridgeService.provisionEmployeeAccount(
+                employee,
+                temporaryPassword,
+                tenantKey
+        );
+
+        employee.setPasswordHash(provisionedUser.getPasswordHash());
+        employee.setPlatformUserId(provisionedUser.getId());
+        employee.setRole(provisionedUser.getRole());
+        employee.setStatus(provisionedUser.getStatus());
+        Employee updatedEmployee = employeeRepository.save(employee);
+
+        auditLogService.logAction(
+                AuditActionType.PROVISION,
+                AuditEntityType.EMPLOYEE,
+                updatedEmployee.getId(),
+                "{\"platformUserId\":" + provisionedUser.getId() + "}"
+        );
+
+        return EmployeeAccountProvisionResponseDto.builder()
+                .employeeId(updatedEmployee.getId())
+                .platformUserId(provisionedUser.getId())
+                .email(updatedEmployee.getEmail())
+                .tenantKey(tenantKey)
+                .role(updatedEmployee.getRole())
+                .status(updatedEmployee.getStatus())
+                .accountProvisioned(true)
+                .temporaryPassword(generatedPassword ? temporaryPassword : null)
+                .build();
     }
 
     @Override
@@ -340,6 +410,8 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .firstName(employee.getFirstName())
                 .lastName(employee.getLastName())
                 .email(employee.getEmail())
+                .platformUserId(employee.getPlatformUserId())
+                .accountProvisioned(employee.getPlatformUserId() != null)
                 .role(employee.getRole())
                 .designation(employee.getDesignation())
                 .joinedDate(employee.getJoinedDate())
@@ -373,6 +445,26 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     private String escapeJson(String value) {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private Employee linkPlatformUser(Employee employee, PlatformUser platformUser) {
+        if (platformUser == null || platformUser.getId() == null) {
+            return employee;
+        }
+        if (platformUser.getId().equals(employee.getPlatformUserId())) {
+            return employee;
+        }
+        employee.setPlatformUserId(platformUser.getId());
+        return employeeRepository.save(employee);
+    }
+
+    private String generateTemporaryPassword() {
+        StringBuilder password = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+            int index = secureRandom.nextInt(TEMP_PASSWORD_CHARSET.length());
+            password.append(TEMP_PASSWORD_CHARSET.charAt(index));
+        }
+        return password.toString();
     }
 
     private boolean isSortable(String sortBy) {

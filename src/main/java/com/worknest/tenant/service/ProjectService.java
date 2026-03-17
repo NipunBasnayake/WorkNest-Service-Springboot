@@ -18,6 +18,8 @@ public interface ProjectService {
 
     void removeTeamAssignment(Long projectId, Long teamId);
 
+    void deleteProject(Long projectId);
+
     List<ProjectResponseDto> listProjects();
 
     PagedResultDto<ProjectResponseDto> listProjectsPaged(

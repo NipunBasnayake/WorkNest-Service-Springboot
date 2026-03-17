@@ -19,6 +19,8 @@ public interface TeamService {
 
     void removeMember(Long teamId, Long employeeId);
 
+    void deleteTeam(Long teamId);
+
     List<TeamResponseDto> listTeams();
 
     PagedResultDto<TeamResponseDto> listTeamsPaged(

@@ -1,8 +1,10 @@
 package com.worknest.security.filter;
 
 import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.InvalidTokenException;
+import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.security.jwt.JwtService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.tenant.context.TenantContext;
@@ -40,6 +42,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
     private final String tenantHeaderName;
+    private final MasterTenantLookupService masterTenantLookupService;
     private final EmployeeRepository employeeRepository;
     private final TeamChatRepository teamChatRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -48,6 +51,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     public StompJwtChannelInterceptor(
             JwtService jwtService,
             UserDetailsService userDetailsService,
+            MasterTenantLookupService masterTenantLookupService,
             EmployeeRepository employeeRepository,
             TeamChatRepository teamChatRepository,
             TeamMemberRepository teamMemberRepository,
@@ -55,6 +59,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
             @Value("${app.tenant.header:X-Tenant-ID}") String tenantHeaderName) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.masterTenantLookupService = masterTenantLookupService;
         this.employeeRepository = employeeRepository;
         this.teamChatRepository = teamChatRepository;
         this.teamMemberRepository = teamMemberRepository;
@@ -142,6 +147,13 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
         String requestTenant = accessor.getFirstNativeHeader(tenantHeaderName);
         if (requestTenant == null || !requestTenant.equalsIgnoreCase(tokenTenant)) {
             throw new ForbiddenOperationException("STOMP tenant header does not match token tenant");
+        }
+
+        boolean activeTenant = masterTenantLookupService.findByTenantKey(tokenTenant)
+                .map(tenant -> tenant.getStatus() == TenantStatus.ACTIVE)
+                .orElse(false);
+        if (!activeTenant) {
+            throw new ForbiddenOperationException("Tenant is not active for STOMP connection");
         }
     }
 

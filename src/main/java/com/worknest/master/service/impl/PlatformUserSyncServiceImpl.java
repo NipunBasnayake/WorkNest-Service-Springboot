@@ -31,22 +31,17 @@ public class PlatformUserSyncServiceImpl implements PlatformUserSyncService {
     @Transactional(
             transactionManager = "masterTransactionManager",
             propagation = Propagation.REQUIRES_NEW)
-    public void syncOnCreate(Employee employee, String rawPassword, String tenantKey) {
+    public PlatformUser syncOnCreate(Employee employee, String rawPassword, String tenantKey) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
-        masterTenantContextRunner.runInMasterContext(() -> {
-            if (platformUserRepository.existsByEmailIgnoreCase(employee.getEmail())) {
-                throw new DuplicateEmailException("Email already exists in platform users: " + employee.getEmail());
-            }
-
-            PlatformUser platformUser = new PlatformUser();
-            platformUser.setFullName(employee.getFirstName() + " " + employee.getLastName());
-            platformUser.setEmail(employee.getEmail());
-            platformUser.setPasswordHash(resolvePasswordHash(rawPassword, employee.getPasswordHash()));
-            platformUser.setRole(employee.getRole());
-            platformUser.setStatus(employee.getStatus());
-            platformUser.setTenantKey(normalizedTenantKey);
-
-            platformUserRepository.save(platformUser);
+        return masterTenantContextRunner.runInMasterContext(() -> {
+            String normalizedEmail = normalizeEmail(employee.getEmail());
+            ensureEmailAvailable(normalizedEmail, null);
+            PlatformUser platformUser = buildPlatformUser(
+                    employee,
+                    normalizedTenantKey,
+                    resolvePasswordHash(rawPassword, employee.getPasswordHash())
+            );
+            return platformUserRepository.save(platformUser);
         });
     }
 
@@ -54,66 +49,120 @@ public class PlatformUserSyncServiceImpl implements PlatformUserSyncService {
     @Transactional(
             transactionManager = "masterTransactionManager",
             propagation = Propagation.REQUIRES_NEW)
-    public void syncOnUpdate(Employee employee, String oldEmail, String rawPassword, String tenantKey) {
+    public PlatformUser syncOnUpdate(Employee employee, String oldEmail, String rawPassword, String tenantKey) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
-        masterTenantContextRunner.runInMasterContext(() -> {
-            PlatformUser platformUser = platformUserRepository
-                    .findByEmailIgnoreCaseAndTenantKey(normalizeEmail(oldEmail), normalizedTenantKey)
-                    .orElseGet(() -> platformUserRepository
-                            .findByEmailIgnoreCaseAndTenantKey(employee.getEmail(), normalizedTenantKey)
-                            .orElse(null));
-
-            if (platformUser == null) {
-                PlatformUser newUser = new PlatformUser();
-                newUser.setFullName(employee.getFirstName() + " " + employee.getLastName());
-                newUser.setEmail(employee.getEmail());
-                newUser.setPasswordHash(resolvePasswordHash(rawPassword, employee.getPasswordHash()));
-                newUser.setRole(employee.getRole());
-                newUser.setStatus(employee.getStatus());
-                newUser.setTenantKey(normalizedTenantKey);
-
-                if (platformUserRepository.existsByEmailIgnoreCase(newUser.getEmail())) {
-                    throw new DuplicateEmailException("Email already exists in platform users: " + newUser.getEmail());
-                }
-
-                platformUserRepository.save(newUser);
-                return;
-            }
-
-            if (!platformUser.getEmail().equalsIgnoreCase(employee.getEmail())) {
-                if (platformUserRepository.existsByEmailIgnoreCase(employee.getEmail())) {
-                    throw new DuplicateEmailException("Email already exists in platform users: " + employee.getEmail());
-                }
-                platformUser.setEmail(employee.getEmail());
-            }
-
-            platformUser.setFullName(employee.getFirstName() + " " + employee.getLastName());
-            platformUser.setRole(employee.getRole());
-            platformUser.setStatus(employee.getStatus());
-            if (rawPassword != null && !rawPassword.isBlank()) {
-                platformUser.setPasswordHash(passwordEncoder.encode(rawPassword));
-            }
-
-            platformUserRepository.save(platformUser);
-        });
+        return masterTenantContextRunner.runInMasterContext(() ->
+                upsertEmployeeUser(employee, oldEmail, rawPassword, normalizedTenantKey));
     }
 
     @Override
     @Transactional(
             transactionManager = "masterTransactionManager",
             propagation = Propagation.REQUIRES_NEW)
-    public void syncStatus(Employee employee, String tenantKey) {
+    public PlatformUser syncStatus(Employee employee, String tenantKey) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
-        masterTenantContextRunner.runInMasterContext(() -> {
-            PlatformUser platformUser = platformUserRepository
-                    .findByEmailIgnoreCaseAndTenantKey(employee.getEmail(), normalizedTenantKey)
-                    .orElse(null);
-            if (platformUser != null) {
-                platformUser.setStatus(employee.getStatus());
-                platformUser.setRole(employee.getRole());
-                platformUserRepository.save(platformUser);
+        return masterTenantContextRunner.runInMasterContext(() ->
+                upsertEmployeeUser(employee, employee.getEmail(), null, normalizedTenantKey));
+    }
+
+    @Override
+    @Transactional(
+            transactionManager = "masterTransactionManager",
+            propagation = Propagation.REQUIRES_NEW)
+    public PlatformUser provisionEmployeeAccount(Employee employee, String rawPassword, String tenantKey) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        return masterTenantContextRunner.runInMasterContext(() ->
+                upsertEmployeeUser(employee, employee.getEmail(), rawPassword, normalizedTenantKey));
+    }
+
+    private PlatformUser upsertEmployeeUser(
+            Employee employee,
+            String oldEmail,
+            String rawPassword,
+            String normalizedTenantKey) {
+
+        PlatformUser platformUser = findExistingPlatformUser(employee, oldEmail, normalizedTenantKey);
+        String normalizedEmployeeEmail = normalizeEmail(employee.getEmail());
+
+        if (platformUser == null) {
+            ensureEmailAvailable(normalizedEmployeeEmail, null);
+            PlatformUser newUser = buildPlatformUser(
+                    employee,
+                    normalizedTenantKey,
+                    resolvePasswordHash(rawPassword, employee.getPasswordHash())
+            );
+            return platformUserRepository.save(newUser);
+        }
+
+        if (!platformUser.getEmail().equalsIgnoreCase(normalizedEmployeeEmail)) {
+            ensureEmailAvailable(normalizedEmployeeEmail, platformUser.getId());
+            platformUser.setEmail(normalizedEmployeeEmail);
+        }
+
+        platformUser.setFullName(buildFullName(employee));
+        platformUser.setRole(employee.getRole());
+        platformUser.setStatus(employee.getStatus());
+        platformUser.setTenantKey(normalizedTenantKey);
+        if (rawPassword != null && !rawPassword.isBlank()) {
+            platformUser.setPasswordHash(passwordEncoder.encode(rawPassword));
+        }
+
+        return platformUserRepository.save(platformUser);
+    }
+
+    private PlatformUser findExistingPlatformUser(
+            Employee employee,
+            String oldEmail,
+            String normalizedTenantKey) {
+        if (employee.getPlatformUserId() != null) {
+            PlatformUser byId = platformUserRepository.findById(employee.getPlatformUserId()).orElse(null);
+            if (byId != null && normalizedTenantKey.equals(normalizeTenantKey(byId.getTenantKey()))) {
+                return byId;
             }
-        });
+        }
+
+        String normalizedOldEmail = normalizeEmail(oldEmail);
+        PlatformUser byOldEmail = normalizedOldEmail == null
+                ? null
+                : platformUserRepository.findByEmailIgnoreCaseAndTenantKey(normalizedOldEmail, normalizedTenantKey)
+                .orElse(null);
+        if (byOldEmail != null) {
+            return byOldEmail;
+        }
+
+        return platformUserRepository.findByEmailIgnoreCaseAndTenantKey(
+                normalizeEmail(employee.getEmail()),
+                normalizedTenantKey
+        ).orElse(null);
+    }
+
+    private PlatformUser buildPlatformUser(Employee employee, String normalizedTenantKey, String passwordHash) {
+        PlatformUser platformUser = new PlatformUser();
+        platformUser.setFullName(buildFullName(employee));
+        platformUser.setEmail(normalizeEmail(employee.getEmail()));
+        platformUser.setPasswordHash(passwordHash);
+        platformUser.setRole(employee.getRole());
+        platformUser.setStatus(employee.getStatus());
+        platformUser.setTenantKey(normalizedTenantKey);
+        return platformUser;
+    }
+
+    private String buildFullName(Employee employee) {
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
+    }
+
+    private void ensureEmailAvailable(String normalizedEmail, Long existingUserId) {
+        PlatformUser existingUser = platformUserRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
+        if (existingUser == null) {
+            return;
+        }
+        if (existingUserId != null && existingUserId.equals(existingUser.getId())) {
+            return;
+        }
+        throw new DuplicateEmailException("Email already exists in platform users: " + normalizedEmail);
     }
 
     private String resolvePasswordHash(String rawPassword, String existingHash) {

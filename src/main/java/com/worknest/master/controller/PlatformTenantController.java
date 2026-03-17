@@ -2,7 +2,9 @@ package com.worknest.master.controller;
 
 import com.worknest.common.api.ApiResponse;
 import com.worknest.master.dto.PlatformTenantResponseDto;
+import com.worknest.master.dto.TenantStatusUpdateRequestDto;
 import com.worknest.master.service.PlatformTenantService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +32,15 @@ public class PlatformTenantController {
         log.info("Request received to get tenant: {}", tenantKey);
         PlatformTenantResponseDto tenant = platformTenantService.getTenantByKey(tenantKey);
         return ResponseEntity.ok(ApiResponse.success("Tenant retrieved successfully", tenant));
+    }
+
+    @PatchMapping("/{tenantKey}/status")
+    public ResponseEntity<ApiResponse<PlatformTenantResponseDto>> updateTenantStatus(
+            @PathVariable String tenantKey,
+            @Valid @RequestBody TenantStatusUpdateRequestDto requestDto) {
+        log.info("Request received to update tenant status for {} to {}", tenantKey, requestDto.getStatus());
+        PlatformTenantResponseDto tenant = platformTenantService.updateTenantStatus(tenantKey, requestDto.getStatus());
+        return ResponseEntity.ok(ApiResponse.success("Tenant status updated successfully", tenant));
     }
 }
 

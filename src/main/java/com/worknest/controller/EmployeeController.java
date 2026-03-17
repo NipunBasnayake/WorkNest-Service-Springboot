@@ -89,6 +89,18 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee profile updated", responseDto));
     }
 
+    @PostMapping("/{id}/provision-account")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeAccountProvisionResponseDto>> provisionEmployeeAccount(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) EmployeeAccountProvisionRequestDto requestDto) {
+        EmployeeAccountProvisionRequestDto safeRequest = requestDto == null
+                ? new EmployeeAccountProvisionRequestDto()
+                : requestDto;
+        EmployeeAccountProvisionResponseDto responseDto = employeeService.provisionEmployeeAccount(id, safeRequest);
+        return ResponseEntity.ok(ApiResponse.success("Employee login account provisioned successfully", responseDto));
+    }
+
     @PostMapping("/{id}/skills")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeSkillResponseDto>> addSkill(

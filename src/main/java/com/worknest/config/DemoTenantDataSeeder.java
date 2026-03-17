@@ -213,8 +213,9 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
         employee.setStatus(UserStatus.ACTIVE);
 
         Employee saved = employeeRepository.save(employee);
-        ensurePlatformUser(saved, tenantKey);
-        return saved;
+        PlatformUser platformUser = ensurePlatformUser(saved, tenantKey);
+        saved.setPlatformUserId(platformUser.getId());
+        return employeeRepository.save(saved);
     }
 
     private TeamMember createTeamMember(Team team, Employee employee, TeamFunctionalRole functionalRole) {
@@ -225,10 +226,11 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
         return teamMember;
     }
 
-    private void ensurePlatformUser(Employee employee, String tenantKey) {
-        masterTenantContextRunner.runInMasterContext(() -> {
-            if (platformUserRepository.existsByEmailIgnoreCase(employee.getEmail())) {
-                return;
+    private PlatformUser ensurePlatformUser(Employee employee, String tenantKey) {
+        return masterTenantContextRunner.runInMasterContext(() -> {
+            PlatformUser existing = platformUserRepository.findByEmailIgnoreCase(employee.getEmail()).orElse(null);
+            if (existing != null) {
+                return existing;
             }
 
             PlatformUser user = new PlatformUser();
@@ -239,7 +241,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             user.setStatus(employee.getStatus());
             user.setTenantKey(tenantKey);
 
-            platformUserRepository.save(user);
+            return platformUserRepository.save(user);
         });
     }
 }

@@ -119,6 +119,13 @@ public class LeaveRequestController {
         return ResponseEntity.ok(ApiResponse.success("Leave request rejected", response));
     }
 
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> cancelLeave(@PathVariable Long id) {
+        LeaveResponseDto response = leaveRequestService.cancelLeave(id);
+        return ResponseEntity.ok(ApiResponse.success("Leave request cancelled", response));
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<LeaveResponseDto>> getLeaveDetails(@PathVariable Long id) {

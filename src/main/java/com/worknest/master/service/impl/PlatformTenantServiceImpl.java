@@ -1,5 +1,7 @@
 package com.worknest.master.service.impl;
 
+import com.worknest.common.enums.TenantStatus;
+import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.master.dto.PlatformTenantResponseDto;
 import com.worknest.master.entity.PlatformTenant;
@@ -58,6 +60,27 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
     }
 
     @Override
+    @Transactional(transactionManager = "masterTransactionManager")
+    public PlatformTenantResponseDto updateTenantStatus(String tenantKey, TenantStatus status) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            throw new BadRequestException("Tenant key is required");
+        }
+        if (status == null) {
+            throw new BadRequestException("Tenant status is required");
+        }
+
+        return masterTenantContextRunner.runInMasterContext(() -> {
+            PlatformTenant tenant = tenantRepository.findByTenantKey(normalizedTenantKey)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Tenant not found with key: " + normalizedTenantKey));
+            tenant.setStatus(status);
+            PlatformTenant updated = tenantRepository.save(tenant);
+            return mapToResponseDto(updated);
+        });
+    }
+
+    @Override
     public boolean tenantExists(String tenantKey) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
         if (normalizedTenantKey == null) {
@@ -78,4 +101,3 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
         return normalized.isBlank() ? null : normalized;
     }
 }
-

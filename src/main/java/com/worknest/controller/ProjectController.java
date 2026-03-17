@@ -69,6 +69,13 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success("Team assignment removed successfully"));
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
+    public ResponseEntity<ApiResponse<Void>> deleteProject(@PathVariable Long id) {
+        projectService.deleteProject(id);
+        return ResponseEntity.ok(ApiResponse.success("Project deleted successfully"));
+    }
+
     @GetMapping
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<ProjectResponseDto>>> listProjects() {

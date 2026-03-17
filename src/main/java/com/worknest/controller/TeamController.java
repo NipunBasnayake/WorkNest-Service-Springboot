@@ -77,6 +77,13 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team member removed successfully"));
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteTeam(@PathVariable Long id) {
+        teamService.deleteTeam(id);
+        return ResponseEntity.ok(ApiResponse.success("Team deleted successfully"));
+    }
+
     @GetMapping
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<TeamResponseDto>>> listTeams() {

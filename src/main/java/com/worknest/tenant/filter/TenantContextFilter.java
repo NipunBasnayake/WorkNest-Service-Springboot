@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
@@ -38,15 +39,18 @@ public class TenantContextFilter extends OncePerRequestFilter {
     private final MasterTenantLookupService masterTenantLookupService;
     private final ObjectMapper objectMapper;
     private final String tenantHeaderName;
+    private final String defaultTenant;
 
     @Autowired
     public TenantContextFilter(
             MasterTenantLookupService masterTenantLookupService,
             ObjectMapper objectMapper,
-            @Value("${app.tenant.header:" + AppConstants.TENANT_HEADER + "}") String tenantHeaderName) {
+            @Value("${app.tenant.header:" + AppConstants.TENANT_HEADER + "}") String tenantHeaderName,
+            @Value("${app.tenant.default:" + AppConstants.DEFAULT_TENANT + "}") String defaultTenant) {
         this.masterTenantLookupService = masterTenantLookupService;
         this.objectMapper = objectMapper;
         this.tenantHeaderName = tenantHeaderName;
+        this.defaultTenant = defaultTenant;
     }
 
     @Override
@@ -57,6 +61,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
         try {
             String requestUri = request.getRequestURI();
+            MDC.put("tenantId", defaultTenant);
 
             if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                 filterChain.doFilter(request, response);
@@ -77,6 +82,11 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
             // Extract tenant ID from header
             String tenantId = request.getHeader(tenantHeaderName);
+            if (tenantId != null && !tenantId.trim().isEmpty()) {
+                MDC.put("tenantId", tenantId.trim().toLowerCase());
+            } else {
+                MDC.put("tenantId", "unknown");
+            }
 
             // Validate tenant header for tenant endpoints
             if (tenantId == null || tenantId.trim().isEmpty()) {
@@ -105,6 +115,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
             // Set tenant context for this thread
             TenantContext.setTenantId(tenant.getTenantKey());
+            MDC.put("tenantId", tenant.getTenantKey());
             log.debug("Tenant context set: {}", tenantId);
 
             // Continue with the request
@@ -112,8 +123,9 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
         } finally {
             // Always clear tenant context after request completes
-            TenantContext.clear();
             log.debug("Tenant context cleared");
+            TenantContext.clear();
+            MDC.remove("tenantId");
         }
     }
 

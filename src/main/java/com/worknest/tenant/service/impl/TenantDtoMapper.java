@@ -13,6 +13,7 @@ public class TenantDtoMapper {
         }
         return EmployeeSimpleDto.builder()
                 .id(employee.getId())
+                .platformUserId(employee.getPlatformUserId())
                 .employeeCode(employee.getEmployeeCode())
                 .fullName(employee.getFirstName() + " " + employee.getLastName())
                 .email(employee.getEmail())

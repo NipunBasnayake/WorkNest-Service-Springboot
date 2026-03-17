@@ -1,42 +1,77 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
     name: worknest-service
 
   datasource:
-    url: jdbc:mysql://localhost:3306/platform_master
-    username: root
-    password: root
+    url: ${DB_URL:jdbc:mysql://localhost:3306/platform_master?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:1234}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: true
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:false}
     open-in-view: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: ${JPA_FORMAT_SQL:false}
         dialect: org.hibernate.dialect.MySQLDialect
 
   jackson:
     serialization:
       indent-output: true
+    default-property-inclusion: non_null
 
   output:
     ansi:
       enabled: ALWAYS
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:20MB}
 
 logging:
   level:
-    root: INFO
-    org.springframework: INFO
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql: TRACE
+    root: ${LOG_LEVEL_ROOT:INFO}
+    org.springframework: ${LOG_LEVEL_SPRING:INFO}
+    org.hibernate.SQL: ${LOG_LEVEL_HIBERNATE_SQL:INFO}
+    org.hibernate.type.descriptor.sql: ${LOG_LEVEL_HIBERNATE_TYPE:INFO}
+    org.springframework.security: ${LOG_LEVEL_SECURITY:INFO}
+    com.worknest: ${LOG_LEVEL_WORKNEST:DEBUG}
+    com.worknest.tenant.filter: ${LOG_LEVEL_TENANT_FILTER:INFO}
+    com.worknest.tenant.resolver: ${LOG_LEVEL_TENANT_RESOLVER:INFO}
+    com.worknest.tenant.connection: ${LOG_LEVEL_TENANT_CONNECTION:INFO}
 
 app:
   tenant:
-    header: X-Tenant-ID
-    default: master
+    header: ${TENANT_HEADER:X-Tenant-ID}
+    default: ${DEFAULT_TENANT:master}
+  jwt:
+    secret: ${JWT_SECRET:V29ya05lc3RTdXBlclNlY3JldEtleUZvckpXVDEyMzQ1Njc4OTAxMjM0NTY3ODkw}
+    access-token-expiration-minutes: ${JWT_ACCESS_EXPIRY_MINUTES:30}
+    refresh-token-expiration-days: ${JWT_REFRESH_EXPIRY_DAYS:7}
+  cors:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  websocket:
+    allowed-origins: ${WS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  bootstrap:
+    platform-admin:
+      name: ${BOOTSTRAP_PLATFORM_ADMIN_NAME:Platform Admin}
+      email: ${BOOTSTRAP_PLATFORM_ADMIN_EMAIL:platform.admin@worknest.local}
+      password: ${BOOTSTRAP_PLATFORM_ADMIN_PASSWORD:ChangeMe123!}
+    seed-demo-data: ${BOOTSTRAP_SEED_DEMO_DATA:false}
+  storage:
+    attachments-dir: ${ATTACHMENTS_DIR:storage/attachments}
+    max-file-size-bytes: ${ATTACHMENT_MAX_FILE_SIZE_BYTES:10485760}
+    allowed-mime-types: ${ATTACHMENT_ALLOWED_MIME_TYPES:image/png,image/jpeg,application/pdf,text/plain}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method

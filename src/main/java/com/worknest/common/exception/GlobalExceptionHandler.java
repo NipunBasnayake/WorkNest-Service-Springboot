@@ -111,7 +111,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidTokenException(
             InvalidTokenException ex, HttpServletRequest request) {
         logger.warn("Invalid token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "INVALID_TOKEN", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_INVALID" : "INVALID_TOKEN";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -119,7 +120,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleTokenExpiredException(
             TokenExpiredException ex, HttpServletRequest request) {
         logger.warn("Expired token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_EXPIRED", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_EXPIRED" : "TOKEN_EXPIRED";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -127,7 +129,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleTokenRevokedException(
             TokenRevokedException ex, HttpServletRequest request) {
         logger.warn("Revoked token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_REVOKED", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_REVOKED" : "TOKEN_REVOKED";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -268,6 +271,10 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return current;
+    }
+
+    private boolean isRefreshEndpoint(HttpServletRequest request) {
+        return "/api/auth/refresh".equals(request.getRequestURI());
     }
 }
 

@@ -16,11 +16,15 @@ import com.worknest.master.entity.RefreshToken;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.security.jwt.JwtService;
 import com.worknest.security.model.PlatformUserPrincipal;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Service
 @Transactional(transactionManager = "masterTransactionManager")
@@ -31,18 +35,21 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final MasterTenantLookupService masterTenantLookupService;
+    private final String tenantHeaderName;
 
     public AuthServiceImpl(
             PlatformUserService platformUserService,
             RefreshTokenService refreshTokenService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            MasterTenantLookupService masterTenantLookupService) {
+            MasterTenantLookupService masterTenantLookupService,
+            @Value("${app.tenant.header:X-Tenant-ID}") String tenantHeaderName) {
         this.platformUserService = platformUserService;
         this.refreshTokenService = refreshTokenService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.masterTenantLookupService = masterTenantLookupService;
+        this.tenantHeaderName = tenantHeaderName;
     }
 
     @Override
@@ -77,14 +84,15 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto) {
-        RefreshToken currentToken = refreshTokenService.validateToken(requestDto.getRefreshToken());
+        String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
+        RefreshToken currentToken = refreshTokenService.validateTokenForRefresh(requestDto.getRefreshToken());
         PlatformUser user = currentToken.getPlatformUser();
 
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new InactiveUserException("User account is inactive");
         }
 
-        validateUserTenantScope(user, requestDto.getTenantKey(), true);
+        validateRefreshTenantScope(currentToken, requestedTenantKey);
 
         RefreshToken rotatedToken = refreshTokenService.rotateToken(currentToken);
         String newAccessToken = jwtService.generateAccessToken(user);
@@ -100,10 +108,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LogoutResponseDto logout(LogoutRequestDto requestDto) {
+        String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
         RefreshToken token = refreshTokenService.validateToken(requestDto.getRefreshToken());
         PlatformUser tokenUser = token.getPlatformUser();
 
-        validateUserTenantScope(tokenUser, requestDto.getTenantKey(), true);
+        validateUserTenantScope(tokenUser, requestedTenantKey, true);
 
         PlatformUserPrincipal currentPrincipal = extractCurrentPrincipal();
         if (currentPrincipal == null || !currentPrincipal.getId().equals(tokenUser.getId())) {
@@ -166,6 +175,22 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
+    private void validateRefreshTenantScope(RefreshToken refreshToken, String requestedTenantKey) {
+        PlatformUser user = refreshToken.getPlatformUser();
+        validateUserTenantScope(user, requestedTenantKey, true);
+
+        if (!user.getRole().isTenantScoped()) {
+            return;
+        }
+
+        String tokenTenantKey = normalizeTenantKey(user.getTenantKey());
+        String normalizedRequestedTenant = normalizeTenantKey(requestedTenantKey);
+        if (tokenTenantKey == null || normalizedRequestedTenant == null ||
+                !tokenTenantKey.equalsIgnoreCase(normalizedRequestedTenant)) {
+            throw new ForbiddenOperationException("Refresh token tenant does not match the requested tenant");
+        }
+    }
+
     private PlatformUserPrincipal extractCurrentPrincipal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof PlatformUserPrincipal principal)) {
@@ -180,6 +205,33 @@ public class AuthServiceImpl implements AuthService {
         }
         String normalized = tenantKey.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private String resolveRequestedTenantKey(String tenantKeyFromPayload) {
+        String payloadTenantKey = normalizeTenantKey(tenantKeyFromPayload);
+        String headerTenantKey = extractTenantKeyFromHeader();
+
+        if (payloadTenantKey != null && headerTenantKey != null &&
+                !payloadTenantKey.equalsIgnoreCase(headerTenantKey)) {
+            throw new ForbiddenOperationException("Tenant key mismatch between payload and header");
+        }
+
+        return payloadTenantKey != null ? payloadTenantKey : headerTenantKey;
+    }
+
+    private String extractTenantKeyFromHeader() {
+        ServletRequestAttributes attributes =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes == null) {
+            return null;
+        }
+
+        HttpServletRequest request = attributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+
+        return normalizeTenantKey(request.getHeader(tenantHeaderName));
     }
 
     private AuthUserDto mapUser(PlatformUser user) {

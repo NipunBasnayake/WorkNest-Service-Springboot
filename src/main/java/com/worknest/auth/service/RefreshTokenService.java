@@ -9,6 +9,8 @@ public interface RefreshTokenService {
 
     RefreshToken validateToken(String tokenValue);
 
+    RefreshToken validateTokenForRefresh(String tokenValue);
+
     RefreshToken rotateToken(RefreshToken currentToken);
 
     void revokeToken(String tokenValue);

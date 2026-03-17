@@ -8,6 +8,8 @@ public interface HrChatService {
 
     HrConversationResponseDto createOrGetConversation(HrConversationCreateRequestDto requestDto);
 
+    HrConversationTargetsResponseDto listConversationTargets();
+
     List<HrConversationResponseDto> listMyConversations();
 
     List<HrMessageResponseDto> listMessages(Long conversationId);

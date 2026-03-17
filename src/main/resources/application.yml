@@ -88,8 +88,9 @@ app:
       validate-on-migrate: true
   jwt:
     secret: V29ya05lc3RTdXBlclNlY3JldEtleUZvckpXVDEyMzQ1Njc4OTAxMjM0NTY3ODkw
-    access-token-expiration-minutes: 30
-    refresh-token-expiration-days: 7
+    expiration: 900000
+    refresh-expiration: 604800000
+    refresh-rotation-grace-ms: 45000
   onboarding:
     provisioning:
       executor:

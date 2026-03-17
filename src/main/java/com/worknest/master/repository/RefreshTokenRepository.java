@@ -15,6 +15,8 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     Optional<RefreshToken> findByToken(String token);
 
+    Optional<RefreshToken> findByTokenAndRevokedFalse(String token);
+
     @Modifying
     @Query("""
             UPDATE RefreshToken rt
@@ -27,6 +29,20 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
             @Param("token") String token,
             @Param("now") LocalDateTime now,
             @Param("revokedAt") LocalDateTime revokedAt);
+
+    @Modifying
+    @Query("""
+            UPDATE RefreshToken rt
+            SET rt.revoked = true, rt.revokedAt = :revokedAt, rt.rotatedToToken = :rotatedToToken
+            WHERE rt.token = :token
+              AND rt.revoked = false
+              AND rt.expiresAt > :now
+            """)
+    int rotateIfActiveAndNotExpired(
+            @Param("token") String token,
+            @Param("now") LocalDateTime now,
+            @Param("revokedAt") LocalDateTime revokedAt,
+            @Param("rotatedToToken") String rotatedToToken);
 
     List<RefreshToken> findByPlatformUserAndRevokedFalseAndExpiresAtAfter(
             PlatformUser platformUser, LocalDateTime currentTime);

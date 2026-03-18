@@ -1,11 +1,14 @@
 package com.worknest.tenant.service.impl;
 
 import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.chat.*;
+import com.worknest.tenant.dto.common.EmployeeSimpleDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.HrConversation;
 import com.worknest.tenant.entity.HrMessage;
@@ -20,15 +23,21 @@ import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.ChatReadReceiptService;
 import com.worknest.tenant.service.HrChatService;
 import com.worknest.tenant.service.NotificationService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class HrChatServiceImpl implements HrChatService {
+
+    private static final EnumSet<PlatformRole> HR_PARTICIPANT_ROLES =
+            EnumSet.of(PlatformRole.HR, PlatformRole.ADMIN);
 
     private final HrConversationRepository hrConversationRepository;
     private final HrMessageRepository hrMessageRepository;
@@ -63,29 +72,66 @@ public class HrChatServiceImpl implements HrChatService {
 
     @Override
     public HrConversationResponseDto createOrGetConversation(HrConversationCreateRequestDto requestDto) {
-        Employee employee = getEmployeeOrThrow(requestDto.getEmployeeId());
-        Employee hr = getEmployeeOrThrow(requestDto.getHrId());
+        if (requestDto.getEmployeeId().equals(requestDto.getHrId())) {
+            throw new BadRequestException("Employee and HR participants must be different users");
+        }
+
+        Employee employee = getActiveEmployeeOrThrow(requestDto.getEmployeeId());
+        Employee hr = getActiveEmployeeOrThrow(requestDto.getHrId());
 
         validateConversationRoles(employee, hr);
         validateCurrentUserCanAccessParticipant(requestDto.getEmployeeId(), requestDto.getHrId());
 
-        HrConversation conversation = hrConversationRepository
-                .findByEmployeeIdAndHrId(employee.getId(), hr.getId())
-                .orElseGet(() -> {
-                    HrConversation created = new HrConversation();
-                    created.setEmployee(employee);
-                    created.setHr(hr);
-                    HrConversation saved = hrConversationRepository.save(created);
-                    auditLogService.logAction(
-                            AuditActionType.CREATE,
-                            AuditEntityType.HR_MESSAGE,
-                            saved.getId(),
-                            "{\"employeeId\":" + employee.getId() + ",\"hrId\":" + hr.getId() + "}"
-                    );
-                    return saved;
-                });
+        HrConversation conversation;
+        try {
+            conversation = hrConversationRepository
+                    .findByEmployeeIdAndHrId(employee.getId(), hr.getId())
+                    .orElseGet(() -> {
+                        HrConversation created = new HrConversation();
+                        created.setEmployee(employee);
+                        created.setHr(hr);
+                        HrConversation saved = hrConversationRepository.save(created);
+                        auditLogService.logAction(
+                                AuditActionType.CREATE,
+                                AuditEntityType.HR_MESSAGE,
+                                saved.getId(),
+                                "{\"employeeId\":" + employee.getId() + ",\"hrId\":" + hr.getId() + "}"
+                        );
+                        return saved;
+                    });
+        } catch (DataIntegrityViolationException ex) {
+            // Handle concurrent create requests that race on the unique employee/hr constraint.
+            conversation = hrConversationRepository.findByEmployeeIdAndHrId(employee.getId(), hr.getId())
+                    .orElseThrow(() -> ex);
+        }
 
         return toConversationResponse(conversation);
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public HrConversationTargetsResponseDto listConversationTargets() {
+        Employee me = getCurrentEmployeeOrThrow();
+        List<Employee> activeEmployees = employeeRepository.findByStatus(UserStatus.ACTIVE);
+
+        List<EmployeeSimpleDto> hrTargets = activeEmployees.stream()
+                .filter(candidate -> !candidate.getId().equals(me.getId()))
+                .filter(candidate -> isHrRole(candidate.getRole()))
+                .sorted(Comparator.comparing(this::toComparableName))
+                .map(tenantDtoMapper::toEmployeeSimple)
+                .toList();
+
+        List<EmployeeSimpleDto> employeeTargets = activeEmployees.stream()
+                .filter(candidate -> !candidate.getId().equals(me.getId()))
+                .filter(candidate -> isEmployeeParticipantRole(candidate.getRole()))
+                .sorted(Comparator.comparing(this::toComparableName))
+                .map(tenantDtoMapper::toEmployeeSimple)
+                .toList();
+
+        return HrConversationTargetsResponseDto.builder()
+                .hrTargets(hrTargets)
+                .employeeTargets(employeeTargets)
+                .build();
     }
 
     @Override
@@ -196,8 +242,28 @@ public class HrChatServiceImpl implements HrChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + employeeId));
     }
 
+    private Employee getActiveEmployeeOrThrow(Long employeeId) {
+        Employee employee = getEmployeeOrThrow(employeeId);
+        if (employee.getStatus() != UserStatus.ACTIVE) {
+            throw new BadRequestException("Only active employees can participate in HR conversations");
+        }
+        return employee;
+    }
+
     private Employee getCurrentEmployeeOrThrow() {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
+        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
+        if (principal.getId() != null) {
+            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
+            if (employeeByPlatformId != null) {
+                return employeeByPlatformId;
+            }
+        }
+
+        String currentEmail = principal.getEmail();
+        if (currentEmail == null || currentEmail.isBlank()) {
+            throw new ResourceNotFoundException("Current user does not have an employee profile");
+        }
+
         return employeeRepository.findByEmailIgnoreCase(currentEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
     }
@@ -211,11 +277,11 @@ public class HrChatServiceImpl implements HrChatService {
     }
 
     private void validateConversationRoles(Employee employee, Employee hr) {
-        if (employee.getRole() == PlatformRole.HR || employee.getRole() == PlatformRole.ADMIN) {
+        if (isHrRole(employee.getRole())) {
             throw new BadRequestException("Employee participant should not be an HR/Admin role");
         }
 
-        if (!(hr.getRole() == PlatformRole.HR || hr.getRole() == PlatformRole.ADMIN)) {
+        if (!isHrRole(hr.getRole())) {
             throw new BadRequestException("HR participant must have HR or ADMIN role");
         }
     }
@@ -225,6 +291,20 @@ public class HrChatServiceImpl implements HrChatService {
         if (!me.getId().equals(employeeId) && !me.getId().equals(hrId)) {
             throw new ForbiddenOperationException("You can only open conversations where you are a participant");
         }
+    }
+
+    private boolean isHrRole(PlatformRole role) {
+        return role != null && HR_PARTICIPANT_ROLES.contains(role);
+    }
+
+    private boolean isEmployeeParticipantRole(PlatformRole role) {
+        return role != null && !isHrRole(role);
+    }
+
+    private String toComparableName(Employee employee) {
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        return (firstName + " " + lastName).trim().toLowerCase();
     }
 
     private HrConversationResponseDto toConversationResponse(HrConversation conversation) {

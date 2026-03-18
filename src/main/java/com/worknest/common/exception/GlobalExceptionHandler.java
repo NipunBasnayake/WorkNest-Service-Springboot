@@ -5,9 +5,11 @@ import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 
+import java.sql.SQLException;
 import java.util.stream.Collectors;
 
 /**
@@ -60,6 +63,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    @ExceptionHandler(TenantContextMissingException.class)
+    public ResponseEntity<ErrorResponse> handleTenantContextMissingException(
+            TenantContextMissingException ex, HttpServletRequest request) {
+        logger.warn("Tenant context missing at {}: {}", request.getRequestURI(), ex.getMessage());
+        ErrorResponse error = ErrorResponse.of(
+                "Tenant context is required for this request",
+                "TENANT_CONTEXT_MISSING",
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
     @ExceptionHandler(DuplicateTenantKeyException.class)
     public ResponseEntity<ErrorResponse> handleDuplicateTenantKeyException(
             DuplicateTenantKeyException ex, HttpServletRequest request) {
@@ -96,7 +111,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidTokenException(
             InvalidTokenException ex, HttpServletRequest request) {
         logger.warn("Invalid token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "INVALID_TOKEN", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_INVALID" : "INVALID_TOKEN";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -104,7 +120,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleTokenExpiredException(
             TokenExpiredException ex, HttpServletRequest request) {
         logger.warn("Expired token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_EXPIRED", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_EXPIRED" : "TOKEN_EXPIRED";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -112,7 +129,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleTokenRevokedException(
             TokenRevokedException ex, HttpServletRequest request) {
         logger.warn("Revoked token at {}: {}", request.getRequestURI(), ex.getMessage());
-        ErrorResponse error = ErrorResponse.of(ex.getMessage(), "TOKEN_REVOKED", request.getRequestURI());
+        String errorCode = isRefreshEndpoint(request) ? "REFRESH_TOKEN_REVOKED" : "TOKEN_REVOKED";
+        ErrorResponse error = ErrorResponse.of(ex.getMessage(), errorCode, request.getRequestURI());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
     }
 
@@ -180,13 +198,36 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(
             DataIntegrityViolationException ex, HttpServletRequest request) {
-        logger.warn("Data integrity violation at {}: {}", request.getRequestURI(), ex.getMostSpecificCause().getMessage());
+        logger.error("Data integrity violation at {}", request.getRequestURI(), ex);
         ErrorResponse error = ErrorResponse.of(
                 "Request violates data integrity constraints",
                 "DATA_INTEGRITY_VIOLATION",
                 request.getRequestURI()
         );
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler({DataAccessException.class, JpaSystemException.class, SQLException.class})
+    public ResponseEntity<ErrorResponse> handleDatabaseException(
+            Exception ex, HttpServletRequest request) {
+        Throwable rootCause = getRootCause(ex);
+        if (rootCause instanceof TenantContextMissingException) {
+            logger.warn("Tenant context missing at {}: {}", request.getRequestURI(), rootCause.getMessage());
+            ErrorResponse error = ErrorResponse.of(
+                    "Tenant context is required for this request",
+                    "TENANT_CONTEXT_MISSING",
+                    request.getRequestURI()
+            );
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+
+        logger.error("Database exception at {}", request.getRequestURI(), ex);
+        ErrorResponse error = ErrorResponse.of(
+                "A database error occurred while processing your request",
+                "DATABASE_ERROR",
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
 
     @ExceptionHandler({MaxUploadSizeExceededException.class, MultipartException.class})
@@ -222,6 +263,18 @@ public class GlobalExceptionHandler {
      */
     private String formatFieldError(FieldError fieldError) {
         return fieldError.getField() + ": " + fieldError.getDefaultMessage();
+    }
+
+    private Throwable getRootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private boolean isRefreshEndpoint(HttpServletRequest request) {
+        return "/api/auth/refresh".equals(request.getRequestURI());
     }
 }
 

@@ -8,13 +8,18 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     List<Project> findByStatus(ProjectStatus status);
 
+    List<Project> findByCreatedById(Long createdById);
+
     long countByStatus(ProjectStatus status);
+
+    long countByStatusIn(Collection<ProjectStatus> statuses);
 
     @Query("""
             SELECT p

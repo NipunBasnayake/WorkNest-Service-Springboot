@@ -40,7 +40,7 @@ public class TenantHibernateConfig {
             @Qualifier("masterDataSource") DataSource dataSource,
             MultiTenantConnectionProvider<String> multiTenantConnectionProvider,
             CurrentTenantIdentifierResolver<String> tenantIdentifierResolver,
-            @Value("${spring.jpa.hibernate.ddl-auto:update}") String ddlAuto,
+            @Value("${app.tenant.jpa.hibernate.ddl-auto:none}") String ddlAuto,
             @Value("${spring.jpa.show-sql:false}") boolean showSql,
             @Value("${spring.jpa.properties.hibernate.format_sql:false}") boolean formatSql) {
 

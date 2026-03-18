@@ -27,13 +27,23 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     long countByProjectIdAndStatus(Long projectId, TaskStatus status);
 
+    long countByProjectIdAndDueDateBeforeAndStatusNot(Long projectId, LocalDate dueDate, TaskStatus status);
+
     long countByStatus(TaskStatus status);
 
     long countByDueDateBeforeAndStatusNot(LocalDate dueDate, TaskStatus status);
 
     long countByAssigneeId(Long assigneeId);
 
+    long countByAssigneeIdAndStatus(Long assigneeId, TaskStatus status);
+
     long countByAssigneeIdAndDueDateBeforeAndStatusNot(Long assigneeId, LocalDate dueDate, TaskStatus status);
+
+    long countByAssigneeIdAndDueDateBetweenAndStatusNot(
+            Long assigneeId,
+            LocalDate fromDate,
+            LocalDate toDate,
+            TaskStatus status);
 
     long countByAssigneeIdAndProjectIdInAndDueDateBeforeAndStatusNot(
             Long assigneeId,
@@ -120,10 +130,57 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Object[]> countByProjectForProjects(@Param("projectIds") List<Long> projectIds);
 
     @Query("""
+            SELECT DISTINCT t.project.id
+            FROM Task t
+            WHERE t.assignee.id = :employeeId
+               OR t.createdBy.id = :employeeId
+            """)
+    List<Long> findDistinctProjectIdsByParticipantEmployeeId(@Param("employeeId") Long employeeId);
+
+    @Query("""
+            SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END
+            FROM Task t
+            WHERE t.project.id = :projectId
+              AND (t.assignee.id = :employeeId OR t.createdBy.id = :employeeId)
+            """)
+    boolean existsByProjectIdAndParticipantEmployeeId(
+            @Param("projectId") Long projectId,
+            @Param("employeeId") Long employeeId);
+
+    @Query("""
             SELECT t.status, COUNT(t)
             FROM Task t
             WHERE t.assignee.id = :assigneeId
             GROUP BY t.status
             """)
     List<Object[]> countMyTasksByStatus(@Param("assigneeId") Long assigneeId);
+
+    @Query("""
+            SELECT t
+            FROM Task t
+            WHERE t.assignee.id = :assigneeId
+              AND t.status <> :excludedStatus
+              AND t.dueDate BETWEEN :fromDate AND :toDate
+            ORDER BY t.dueDate ASC, t.createdAt DESC
+            """)
+    List<Task> findDueSoonTasks(
+            @Param("assigneeId") Long assigneeId,
+            @Param("excludedStatus") TaskStatus excludedStatus,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate,
+            Pageable pageable);
+
+    @Query("""
+            SELECT t
+            FROM Task t
+            WHERE t.assignee.id = :assigneeId
+              AND t.status <> :excludedStatus
+              AND t.dueDate < :beforeDate
+            ORDER BY t.dueDate ASC, t.createdAt DESC
+            """)
+    List<Task> findOverdueTasks(
+            @Param("assigneeId") Long assigneeId,
+            @Param("excludedStatus") TaskStatus excludedStatus,
+            @Param("beforeDate") LocalDate beforeDate,
+            Pageable pageable);
 }

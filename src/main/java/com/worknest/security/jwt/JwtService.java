@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.security.Key;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
@@ -22,14 +23,18 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
+    private static final long MIN_ACCESS_TOKEN_EXPIRY_MILLIS = 60_000L;
+
     private final String jwtSecret;
-    private final long accessTokenExpiryMinutes;
+    private final long accessTokenExpiryMillis;
 
     public JwtService(
             @Value("${app.jwt.secret}") String jwtSecret,
-            @Value("${app.jwt.access-token-expiration-minutes:30}") long accessTokenExpiryMinutes) {
+            @Value("${app.jwt.expiration:0}") long configuredAccessTokenExpiryMillis,
+            @Value("${app.jwt.access-token-expiration-minutes:15}") long legacyAccessTokenExpiryMinutes) {
         this.jwtSecret = jwtSecret;
-        this.accessTokenExpiryMinutes = accessTokenExpiryMinutes;
+        this.accessTokenExpiryMillis = resolveAccessTokenExpiryMillis(
+                configuredAccessTokenExpiryMillis, legacyAccessTokenExpiryMinutes);
     }
 
     public String generateAccessToken(PlatformUser platformUser) {
@@ -62,7 +67,7 @@ public class JwtService {
     }
 
     public LocalDateTime getAccessTokenExpiryTime() {
-        return LocalDateTime.now().plusMinutes(accessTokenExpiryMinutes);
+        return LocalDateTime.now().plus(Duration.ofMillis(accessTokenExpiryMillis));
     }
 
     public LocalDateTime getTokenExpiryTime(String token) {
@@ -84,7 +89,7 @@ public class JwtService {
 
     private String buildToken(Map<String, Object> extraClaims, String username) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + (accessTokenExpiryMinutes * 60 * 1000));
+        Date expiryDate = new Date(now.getTime() + accessTokenExpiryMillis);
 
         return Jwts.builder()
                 .setClaims(extraClaims)
@@ -110,5 +115,16 @@ public class JwtService {
     private Key getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
         return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    private long resolveAccessTokenExpiryMillis(
+            long configuredAccessTokenExpiryMillis,
+            long legacyAccessTokenExpiryMinutes) {
+        if (configuredAccessTokenExpiryMillis > 0) {
+            return configuredAccessTokenExpiryMillis;
+        }
+        long resolvedLegacyMinutes = Math.max(1, legacyAccessTokenExpiryMinutes);
+        long legacyMillis = Duration.ofMinutes(resolvedLegacyMinutes).toMillis();
+        return Math.max(legacyMillis, MIN_ACCESS_TOKEN_EXPIRY_MILLIS);
     }
 }

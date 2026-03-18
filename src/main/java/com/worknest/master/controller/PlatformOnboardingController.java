@@ -24,7 +24,7 @@ public class PlatformOnboardingController {
             @Valid @RequestBody TenantRegistrationRequestDto requestDto) {
 
         TenantRegistrationResponseDto responseDto = platformOnboardingService.registerTenant(requestDto);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Tenant onboarded successfully", responseDto));
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.success("Tenant registration accepted. Provisioning in progress.", responseDto));
     }
 }

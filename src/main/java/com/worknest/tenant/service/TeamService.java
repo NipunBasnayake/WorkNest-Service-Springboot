@@ -23,6 +23,8 @@ public interface TeamService {
 
     List<TeamResponseDto> listTeams();
 
+    List<TeamResponseDto> listMyTeams();
+
     PagedResultDto<TeamResponseDto> listTeamsPaged(
             Long managerId,
             String search,

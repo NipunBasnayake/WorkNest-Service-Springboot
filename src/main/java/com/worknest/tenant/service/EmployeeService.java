@@ -41,4 +41,6 @@ public interface EmployeeService {
     void deleteSkill(Long employeeId, Long skillId);
 
     List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId);
+
+    List<EmployeeSkillResponseDto> listMySkills();
 }

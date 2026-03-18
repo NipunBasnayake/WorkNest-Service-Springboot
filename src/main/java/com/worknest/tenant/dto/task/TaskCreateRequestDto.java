@@ -30,7 +30,6 @@ public class TaskCreateRequestDto {
 
     private Long assigneeId;
 
-    @NotNull(message = "Creator employee ID is required")
     private Long createdByEmployeeId;
 
     private LocalDate dueDate;

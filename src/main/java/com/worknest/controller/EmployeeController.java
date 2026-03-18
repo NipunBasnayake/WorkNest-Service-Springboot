@@ -33,7 +33,7 @@ public class EmployeeController {
                 .body(ApiResponse.success("Employee created successfully", responseDto));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateEmployee(
             @PathVariable Long id,
@@ -42,7 +42,7 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee updated successfully", responseDto));
     }
 
-    @PatchMapping("/{id}/status")
+    @PatchMapping("/{id:\\d+}/status")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> updateEmployeeStatus(
             @PathVariable Long id,
@@ -51,7 +51,7 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee status updated successfully", responseDto));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> getEmployeeById(@PathVariable Long id) {
         EmployeeResponseDto responseDto = employeeService.getEmployeeById(id);
@@ -89,7 +89,7 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee profile updated", responseDto));
     }
 
-    @PostMapping("/{id}/provision-account")
+    @PostMapping("/{id:\\d+}/provision-account")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeAccountProvisionResponseDto>> provisionEmployeeAccount(
             @PathVariable Long id,
@@ -101,7 +101,7 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee login account provisioned successfully", responseDto));
     }
 
-    @PostMapping("/{id}/skills")
+    @PostMapping("/{id:\\d+}/skills")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeSkillResponseDto>> addSkill(
             @PathVariable Long id,
@@ -111,7 +111,7 @@ public class EmployeeController {
                 .body(ApiResponse.success("Employee skill added successfully", responseDto));
     }
 
-    @PutMapping("/{id}/skills/{skillId}")
+    @PutMapping("/{id:\\d+}/skills/{skillId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeSkillResponseDto>> updateSkill(
             @PathVariable Long id,
@@ -121,17 +121,24 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success("Employee skill updated successfully", responseDto));
     }
 
-    @DeleteMapping("/{id}/skills/{skillId}")
+    @DeleteMapping("/{id:\\d+}/skills/{skillId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<Void>> deleteSkill(@PathVariable Long id, @PathVariable Long skillId) {
         employeeService.deleteSkill(id, skillId);
         return ResponseEntity.ok(ApiResponse.success("Employee skill deleted successfully"));
     }
 
-    @GetMapping("/{id}/skills")
+    @GetMapping("/{id:\\d+}/skills")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<List<EmployeeSkillResponseDto>>> listSkills(@PathVariable Long id) {
         List<EmployeeSkillResponseDto> response = employeeService.listSkillsByEmployee(id);
         return ResponseEntity.ok(ApiResponse.success("Employee skills retrieved successfully", response));
+    }
+
+    @GetMapping("/me/skills")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<EmployeeSkillResponseDto>>> listMySkills() {
+        List<EmployeeSkillResponseDto> response = employeeService.listMySkills();
+        return ResponseEntity.ok(ApiResponse.success("My skills retrieved successfully", response));
     }
 }

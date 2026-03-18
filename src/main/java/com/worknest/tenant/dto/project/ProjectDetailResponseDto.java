@@ -12,4 +12,5 @@ import java.util.List;
 public class ProjectDetailResponseDto {
     private ProjectResponseDto project;
     private List<ProjectTeamResponseDto> teams;
+    private ProjectTaskSummaryDto taskSummary;
 }

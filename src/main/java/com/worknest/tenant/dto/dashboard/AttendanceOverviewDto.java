@@ -11,7 +11,10 @@ import java.time.LocalDate;
 @Builder
 public class AttendanceOverviewDto {
     private LocalDate date;
+    private long totalRecords;
     private long presentCount;
     private long halfDayCount;
     private long incompleteCount;
+    private long absentCount;
+    private double attendanceRatePercent;
 }

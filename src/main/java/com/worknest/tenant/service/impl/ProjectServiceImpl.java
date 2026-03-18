@@ -5,9 +5,17 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.common.PagedResultDto;
-import com.worknest.tenant.dto.project.*;
+import com.worknest.tenant.dto.project.ProjectCreateRequestDto;
+import com.worknest.tenant.dto.project.ProjectDetailResponseDto;
+import com.worknest.tenant.dto.project.ProjectResponseDto;
+import com.worknest.tenant.dto.project.ProjectStatusUpdateRequestDto;
+import com.worknest.tenant.dto.project.ProjectTaskSummaryDto;
+import com.worknest.tenant.dto.project.ProjectTeamAssignRequestDto;
+import com.worknest.tenant.dto.project.ProjectTeamResponseDto;
+import com.worknest.tenant.dto.project.ProjectUpdateRequestDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Project;
 import com.worknest.tenant.entity.ProjectTeam;
@@ -16,6 +24,7 @@ import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.ProjectStatus;
+import com.worknest.tenant.enums.TaskStatus;
 import com.worknest.tenant.repository.AttachmentRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.ProjectRepository;
@@ -26,14 +35,19 @@ import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.ProjectService;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -140,6 +154,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     public ProjectTeamResponseDto assignTeam(Long projectId, ProjectTeamAssignRequestDto requestDto) {
         Project project = getProjectOrThrow(projectId);
+        ensureProjectAllowsTeamAssignment(project);
         Team team = getTeamOrThrow(requestDto.getTeamId());
 
         if (projectTeamRepository.existsByProjectIdAndTeamId(project.getId(), team.getId())) {
@@ -162,6 +177,7 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public void removeTeamAssignment(Long projectId, Long teamId) {
+        getProjectOrThrow(projectId);
         ProjectTeam projectTeam = projectTeamRepository.findByProjectIdAndTeamId(projectId, teamId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project-team assignment not found"));
         projectTeamRepository.delete(projectTeam);
@@ -199,10 +215,27 @@ public class ProjectServiceImpl implements ProjectService {
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<ProjectResponseDto> listProjects() {
         PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        Long currentEmployeeId = role == PlatformRole.EMPLOYEE ? resolveCurrentEmployeeIdOrThrow() : null;
+        if (role == PlatformRole.EMPLOYEE) {
+            Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+            List<Project> readableProjects = listReadableProjectsForEmployee(currentEmployeeId);
+            readableProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
+            return readableProjects.stream()
+                    .map(this::toProjectResponse)
+                    .toList();
+        }
 
         return projectRepository.findAll().stream()
-                .filter(project -> canReadProject(project, role, currentEmployeeId))
+                .map(this::toProjectResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<ProjectResponseDto> listMyProjects() {
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        List<Project> myProjects = listReadableProjectsForEmployee(currentEmployeeId);
+        myProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
+        return myProjects.stream()
                 .map(this::toProjectResponse)
                 .toList();
     }
@@ -217,7 +250,6 @@ public class ProjectServiceImpl implements ProjectService {
             String sortBy,
             String sortDir) {
         PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        Long currentEmployeeId = role == PlatformRole.EMPLOYEE ? resolveCurrentEmployeeIdOrThrow() : null;
 
         int resolvedPage = Math.max(page, 0);
         int resolvedSize = Math.max(Math.min(size, 100), 1);
@@ -225,31 +257,16 @@ public class ProjectServiceImpl implements ProjectService {
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
 
         if (role == PlatformRole.EMPLOYEE) {
-            List<Project> filteredProjects = projectRepository.search(status, trimToNull(search), Pageable.unpaged())
-                    .getContent()
-                    .stream()
-                    .filter(project -> canReadProject(project, role, currentEmployeeId))
-                    .toList();
-
-            filteredProjects = new java.util.ArrayList<>(filteredProjects);
-            filteredProjects.sort(projectComparator(resolvedSortBy, direction));
-
-            List<ProjectResponseDto> filtered = filteredProjects.stream()
-                    .map(this::toProjectResponse)
-                    .toList();
-
-            int fromIndex = Math.min(resolvedPage * resolvedSize, filtered.size());
-            int toIndex = Math.min(fromIndex + resolvedSize, filtered.size());
-            long totalElements = filtered.size();
-            int totalPages = resolvedSize == 0 ? 0 : (int) Math.ceil((double) totalElements / resolvedSize);
-
-            return PagedResultDto.<ProjectResponseDto>builder()
-                    .items(filtered.subList(fromIndex, toIndex))
-                    .page(resolvedPage)
-                    .size(resolvedSize)
-                    .totalElements(totalElements)
-                    .totalPages(totalPages)
-                    .build();
+            Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+            return listProjectsPagedForEmployee(
+                    currentEmployeeId,
+                    status,
+                    search,
+                    resolvedPage,
+                    resolvedSize,
+                    resolvedSortBy,
+                    direction
+            );
         }
 
         Page<Project> resultPage = projectRepository.search(
@@ -273,10 +290,12 @@ public class ProjectServiceImpl implements ProjectService {
         Project project = getProjectOrThrow(projectId);
         enforceProjectReadAccess(project);
         List<ProjectTeamResponseDto> teams = listProjectTeams(projectId);
+        ProjectTaskSummaryDto taskSummary = buildProjectTaskSummary(projectId);
 
         return ProjectDetailResponseDto.builder()
                 .project(toProjectResponse(project))
                 .teams(teams)
+                .taskSummary(taskSummary)
                 .build();
     }
 
@@ -310,6 +329,31 @@ public class ProjectServiceImpl implements ProjectService {
         return employee;
     }
 
+    private ProjectTaskSummaryDto buildProjectTaskSummary(Long projectId) {
+        long totalTasks = taskRepository.countByProjectId(projectId);
+        long todoTasks = taskRepository.countByProjectIdAndStatus(projectId, TaskStatus.TODO);
+        long inProgressTasks = taskRepository.countByProjectIdAndStatus(projectId, TaskStatus.IN_PROGRESS);
+        long inReviewTasks = taskRepository.countByProjectIdAndStatus(projectId, TaskStatus.IN_REVIEW);
+        long doneTasks = taskRepository.countByProjectIdAndStatus(projectId, TaskStatus.DONE);
+        long blockedTasks = taskRepository.countByProjectIdAndStatus(projectId, TaskStatus.BLOCKED);
+        long overdueTasks = taskRepository.countByProjectIdAndDueDateBeforeAndStatusNot(
+                projectId,
+                LocalDate.now(),
+                TaskStatus.DONE
+        );
+
+        return ProjectTaskSummaryDto.builder()
+                .totalTasks(totalTasks)
+                .todoTasks(todoTasks)
+                .inProgressTasks(inProgressTasks)
+                .inReviewTasks(inReviewTasks)
+                .doneTasks(doneTasks)
+                .blockedTasks(blockedTasks)
+                .overdueTasks(overdueTasks)
+                .completionRatePercent(calculatePercent(doneTasks, totalTasks))
+                .build();
+    }
+
     private void validateProjectDates(LocalDate startDate, LocalDate endDate) {
         if (startDate == null) {
             throw new BadRequestException("Project start date is required");
@@ -327,6 +371,12 @@ public class ProjectServiceImpl implements ProjectService {
         if ((currentStatus == ProjectStatus.COMPLETED || currentStatus == ProjectStatus.CANCELLED)
                 && currentStatus != newStatus) {
             throw new BadRequestException("Cannot change status after project is " + currentStatus);
+        }
+    }
+
+    private void ensureProjectAllowsTeamAssignment(Project project) {
+        if (project.getStatus() == ProjectStatus.COMPLETED || project.getStatus() == ProjectStatus.CANCELLED) {
+            throw new BadRequestException("Cannot assign teams to a project in status: " + project.getStatus());
         }
     }
 
@@ -353,6 +403,88 @@ public class ProjectServiceImpl implements ProjectService {
                 .build();
     }
 
+    private PagedResultDto<ProjectResponseDto> listProjectsPagedForEmployee(
+            Long employeeId,
+            ProjectStatus status,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            Sort.Direction direction) {
+        String normalizedSearch = trimToNull(search);
+
+        List<Project> filteredProjects = listReadableProjectsForEmployee(employeeId).stream()
+                .filter(project -> status == null || status == project.getStatus())
+                .filter(project -> matchesProjectSearch(project, normalizedSearch))
+                .toList();
+
+        List<Project> sortedProjects = new ArrayList<>(filteredProjects);
+        sortedProjects.sort(projectComparator(sortBy, direction));
+
+        int fromIndex = Math.min(page * size, sortedProjects.size());
+        int toIndex = Math.min(fromIndex + size, sortedProjects.size());
+        long totalElements = sortedProjects.size();
+        int totalPages = (int) Math.ceil(totalElements / (double) size);
+
+        return PagedResultDto.<ProjectResponseDto>builder()
+                .items(sortedProjects.subList(fromIndex, toIndex).stream().map(this::toProjectResponse).toList())
+                .page(page)
+                .size(size)
+                .totalElements(totalElements)
+                .totalPages(totalPages)
+                .build();
+    }
+
+    private List<Project> listReadableProjectsForEmployee(Long employeeId) {
+        Map<Long, Project> readableProjects = new LinkedHashMap<>();
+
+        projectRepository.findByCreatedById(employeeId)
+                .forEach(project -> readableProjects.put(project.getId(), project));
+
+        Set<Long> employeeTeamIds = getEmployeeTeamIds(employeeId);
+        if (!employeeTeamIds.isEmpty()) {
+            projectRepository.findDistinctByAssignedTeamIds(new ArrayList<>(employeeTeamIds))
+                    .forEach(project -> readableProjects.put(project.getId(), project));
+        }
+
+        List<Long> participantProjectIds = taskRepository.findDistinctProjectIdsByParticipantEmployeeId(employeeId);
+        if (!participantProjectIds.isEmpty()) {
+            projectRepository.findAllById(participantProjectIds)
+                    .forEach(project -> readableProjects.put(project.getId(), project));
+        }
+
+        return new ArrayList<>(readableProjects.values());
+    }
+
+    private Set<Long> getEmployeeTeamIds(Long employeeId) {
+        Set<Long> teamIds = new LinkedHashSet<>();
+
+        teamRepository.findByManagerId(employeeId)
+                .stream()
+                .map(Team::getId)
+                .forEach(teamIds::add);
+
+        teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(employeeId)
+                .stream()
+                .map(teamMember -> teamMember.getTeam().getId())
+                .forEach(teamIds::add);
+
+        return teamIds;
+    }
+
+    private boolean matchesProjectSearch(Project project, String search) {
+        if (search == null) {
+            return true;
+        }
+
+        String loweredSearch = search.toLowerCase();
+        String name = project.getName();
+        String description = project.getDescription();
+
+        return (name != null && name.toLowerCase().contains(loweredSearch))
+                || (description != null && description.toLowerCase().contains(loweredSearch));
+    }
+
     private String trimToNull(String value) {
         if (value == null) {
             return null;
@@ -362,17 +494,43 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private void validateActorEmployeeId(Long actorEmployeeId) {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        employeeRepository.findByEmailIgnoreCase(currentEmail).ifPresentOrElse(currentEmployee -> {
-                    if (!currentEmployee.getId().equals(actorEmployeeId)) {
-                        throw new ForbiddenOperationException("Authenticated user cannot act on behalf of another employee");
-                    }
-                },
-                () -> {
-                    if (securityUtils.getCurrentRoleOrThrow() != PlatformRole.TENANT_ADMIN) {
-                        throw new ForbiddenOperationException("Current user is not linked to an employee profile");
-                    }
-                });
+        Employee currentEmployee = resolveCurrentEmployeeOrNull();
+        if (currentEmployee != null) {
+            if (!currentEmployee.getId().equals(actorEmployeeId)) {
+                throw new ForbiddenOperationException("Authenticated user cannot act on behalf of another employee");
+            }
+            return;
+        }
+
+        if (securityUtils.getCurrentRoleOrThrow() != PlatformRole.TENANT_ADMIN) {
+            throw new ForbiddenOperationException("Current user is not linked to an employee profile");
+        }
+    }
+
+    private Employee resolveCurrentEmployeeOrNull() {
+        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
+
+        if (principal.getId() != null) {
+            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
+            if (employeeByPlatformId != null) {
+                return employeeByPlatformId;
+            }
+        }
+
+        String currentEmail = principal.getEmail();
+        if (currentEmail == null || currentEmail.isBlank()) {
+            return null;
+        }
+
+        return employeeRepository.findByEmailIgnoreCase(currentEmail).orElse(null);
+    }
+
+    private Employee resolveCurrentEmployeeOrThrow() {
+        Employee currentEmployee = resolveCurrentEmployeeOrNull();
+        if (currentEmployee == null) {
+            throw new ForbiddenOperationException("Current user is not linked to an employee profile");
+        }
+        return currentEmployee;
     }
 
     private String escapeJson(String value) {
@@ -407,38 +565,63 @@ public class ProjectServiceImpl implements ProjectService {
         if (currentEmployeeId == null) {
             return false;
         }
+
         if (project.getCreatedBy() != null && currentEmployeeId.equals(project.getCreatedBy().getId())) {
             return true;
         }
 
+        if (taskRepository.existsByProjectIdAndParticipantEmployeeId(project.getId(), currentEmployeeId)) {
+            return true;
+        }
+
+        Set<Long> employeeTeamIds = getEmployeeTeamIds(currentEmployeeId);
+        if (employeeTeamIds.isEmpty()) {
+            return false;
+        }
+
         return projectTeamRepository.findByProjectId(project.getId()).stream()
-                .anyMatch(projectTeam -> {
-                    Team team = projectTeam.getTeam();
-                    if (team.getManager() != null && currentEmployeeId.equals(team.getManager().getId())) {
-                        return true;
-                    }
-                    return teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(
-                            team.getId(),
-                            currentEmployeeId
-                    ).isPresent();
-                });
+                .map(projectTeam -> projectTeam.getTeam().getId())
+                .anyMatch(employeeTeamIds::contains);
     }
 
     private Long resolveCurrentEmployeeIdOrThrow() {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        Employee employee = employeeRepository.findByEmailIgnoreCase(currentEmail)
-                .orElseThrow(() -> new ForbiddenOperationException("Current user is not linked to an employee profile"));
-        return employee.getId();
+        return resolveCurrentEmployeeOrThrow().getId();
     }
 
-    private java.util.Comparator<Project> projectComparator(String sortBy, Sort.Direction direction) {
-        java.util.Comparator<Project> comparator = switch (sortBy) {
-            case "updatedAt" -> java.util.Comparator.comparing(Project::getUpdatedAt, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-            case "name" -> java.util.Comparator.comparing(Project::getName, java.util.Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER));
-            case "startDate" -> java.util.Comparator.comparing(Project::getStartDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-            case "endDate" -> java.util.Comparator.comparing(Project::getEndDate, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-            case "status" -> java.util.Comparator.comparing(Project::getStatus, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
-            default -> java.util.Comparator.comparing(Project::getCreatedAt, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+    private double calculatePercent(long part, long total) {
+        if (total <= 0) {
+            return 0d;
+        }
+        double percentage = ((double) part * 100.0) / total;
+        return Math.round(percentage * 100.0) / 100.0;
+    }
+
+    private Comparator<Project> projectComparator(String sortBy, Sort.Direction direction) {
+        Comparator<Project> comparator = switch (sortBy) {
+            case "updatedAt" -> Comparator.comparing(
+                    Project::getUpdatedAt,
+                    Comparator.nullsLast(Comparator.naturalOrder())
+            );
+            case "name" -> Comparator.comparing(
+                    Project::getName,
+                    Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+            );
+            case "startDate" -> Comparator.comparing(
+                    Project::getStartDate,
+                    Comparator.nullsLast(Comparator.naturalOrder())
+            );
+            case "endDate" -> Comparator.comparing(
+                    Project::getEndDate,
+                    Comparator.nullsLast(Comparator.naturalOrder())
+            );
+            case "status" -> Comparator.comparing(
+                    Project::getStatus,
+                    Comparator.nullsLast(Comparator.naturalOrder())
+            );
+            default -> Comparator.comparing(
+                    Project::getCreatedAt,
+                    Comparator.nullsLast(Comparator.naturalOrder())
+            );
         };
         return direction.isAscending() ? comparator : comparator.reversed();
     }

@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
@@ -32,12 +33,23 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new));
+                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new))
+                .withSockJS();
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/queue");
+        // Configure simple message broker with executor
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(10);
+        scheduler.setThreadNamePrefix("simple-broker-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(60);
+        scheduler.initialize();
+        
+        registry.enableSimpleBroker("/topic", "/queue")
+                .setTaskScheduler(scheduler)
+                .setHeartbeatValue(new long[]{10000, 10000}); // Send heartbeat every 10 seconds
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
     }
@@ -45,5 +57,19 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(stompJwtChannelInterceptor);
+        registration.taskExecutor()
+                .corePoolSize(20)
+                .maxPoolSize(50)
+                .queueCapacity(5000)
+                .keepAliveSeconds(60);
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.taskExecutor()
+                .corePoolSize(20)
+                .maxPoolSize(50)
+                .queueCapacity(5000)
+                .keepAliveSeconds(60);
     }
 }

@@ -17,9 +17,13 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
 
     List<LeaveRequest> findByStatusOrderByCreatedAtAsc(LeaveStatus status);
 
+    Page<LeaveRequest> findByStatusOrderByCreatedAtDesc(LeaveStatus status, Pageable pageable);
+
     long countByStatus(LeaveStatus status);
 
     long countByEmployeeIdAndStatus(Long employeeId, LeaveStatus status);
+
+    Page<LeaveRequest> findByEmployeeIdOrderByCreatedAtDesc(Long employeeId, Pageable pageable);
 
     @Query("""
             SELECT lr
@@ -55,6 +59,14 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             GROUP BY lr.status
             """)
     List<Object[]> countByStatusGroup();
+
+    @Query("""
+            SELECT lr.status, COUNT(lr)
+            FROM LeaveRequest lr
+            WHERE lr.employee.id = :employeeId
+            GROUP BY lr.status
+            """)
+    List<Object[]> countByStatusGroupForEmployee(@Param("employeeId") Long employeeId);
 
     @Query(
             value = """

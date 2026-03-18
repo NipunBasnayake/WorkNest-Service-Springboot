@@ -2,13 +2,17 @@ package com.worknest.tenant.dto.employee;
 
 import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.enums.UserStatus;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PastOrPresent;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Getter
@@ -35,6 +39,20 @@ public class EmployeeUpdateRequestDto {
 
     @Size(max = 120, message = "Designation must not exceed 120 characters")
     private String designation;
+
+    @Size(max = 120, message = "Department must not exceed 120 characters")
+    private String department;
+
+    @Size(max = 30, message = "Phone must not exceed 30 characters")
+    @Pattern(
+            regexp = "^[0-9+()\\-\\s]*$",
+            message = "Phone can contain digits, spaces, and +()- symbols only"
+    )
+    private String phone;
+
+    @DecimalMin(value = "0.00", message = "Salary cannot be negative")
+    @Digits(integer = 12, fraction = 2, message = "Salary must be a valid amount with up to 2 decimals")
+    private BigDecimal salary;
 
     @PastOrPresent(message = "Joined date cannot be in the future")
     private LocalDate joinedDate;

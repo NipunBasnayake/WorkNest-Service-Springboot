@@ -5,6 +5,7 @@ import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.DuplicateTenantKeyException;
+import com.worknest.master.event.TenantProvisioningRequestedEvent;
 import com.worknest.master.dto.TenantRegistrationRequestDto;
 import com.worknest.master.dto.TenantRegistrationResponseDto;
 import com.worknest.master.entity.PlatformTenant;
@@ -13,10 +14,8 @@ import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.repository.PlatformUserRepository;
 import com.worknest.master.service.PlatformOnboardingService;
 import com.worknest.tenant.context.MasterTenantContextRunner;
-import com.worknest.tenant.service.TenantSchemaService;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,10 +31,9 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
 
     private final PlatformTenantRepository platformTenantRepository;
     private final PlatformUserRepository platformUserRepository;
-    private final JdbcTemplate masterJdbcTemplate;
     private final PasswordEncoder passwordEncoder;
     private final MasterTenantContextRunner masterTenantContextRunner;
-    private final TenantSchemaService tenantSchemaService;
+    private final ApplicationEventPublisher eventPublisher;
     private final String masterDbUrl;
     private final String masterDbUsername;
     private final String masterDbPassword;
@@ -43,19 +41,17 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
     public PlatformOnboardingServiceImpl(
             PlatformTenantRepository platformTenantRepository,
             PlatformUserRepository platformUserRepository,
-            @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
             PasswordEncoder passwordEncoder,
             MasterTenantContextRunner masterTenantContextRunner,
-            TenantSchemaService tenantSchemaService,
+            ApplicationEventPublisher eventPublisher,
             @Value("${spring.datasource.url}") String masterDbUrl,
             @Value("${spring.datasource.username}") String masterDbUsername,
             @Value("${spring.datasource.password}") String masterDbPassword) {
         this.platformTenantRepository = platformTenantRepository;
         this.platformUserRepository = platformUserRepository;
-        this.masterJdbcTemplate = masterJdbcTemplate;
         this.passwordEncoder = passwordEncoder;
         this.masterTenantContextRunner = masterTenantContextRunner;
-        this.tenantSchemaService = tenantSchemaService;
+        this.eventPublisher = eventPublisher;
         this.masterDbUrl = masterDbUrl;
         this.masterDbUsername = masterDbUsername;
         this.masterDbPassword = masterDbPassword;
@@ -91,11 +87,8 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
                         "Email already exists: " + normalizedAdminEmail);
             }
 
-            createTenantDatabaseIfMissing(databaseName);
-
             PlatformTenant tenant = buildTenantEntity(requestDto, normalizedTenantKey, databaseName);
             PlatformTenant savedTenant = platformTenantRepository.save(tenant);
-            tenantSchemaService.ensureTenantSchema(savedTenant);
 
             PlatformUser tenantAdmin = buildTenantAdminEntity(
                     requestDto,
@@ -103,6 +96,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
                     normalizedTenantKey
             );
             PlatformUser savedAdmin = platformUserRepository.save(tenantAdmin);
+            eventPublisher.publishEvent(new TenantProvisioningRequestedEvent(savedTenant.getId()));
 
             return TenantRegistrationResponseDto.builder()
                     .tenantId(savedTenant.getId())
@@ -129,7 +123,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         tenant.setDbUrl(buildTenantDbUrl(databaseName));
         tenant.setDbUsername(masterDbUsername);
         tenant.setDbPassword(masterDbPassword);
-        tenant.setStatus(TenantStatus.ACTIVE);
+        tenant.setStatus(TenantStatus.PROVISIONING);
         return tenant;
     }
 
@@ -146,10 +140,6 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         tenantAdmin.setStatus(UserStatus.ACTIVE);
         tenantAdmin.setTenantKey(tenantKey);
         return tenantAdmin;
-    }
-
-    private void createTenantDatabaseIfMissing(String databaseName) {
-        masterJdbcTemplate.execute("CREATE DATABASE IF NOT EXISTS `" + databaseName + "`");
     }
 
     private String buildTenantDbUrl(String tenantDatabaseName) {

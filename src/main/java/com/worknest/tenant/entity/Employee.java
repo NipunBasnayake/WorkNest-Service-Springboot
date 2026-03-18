@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -54,6 +55,15 @@ public class Employee {
 
     @Column(name = "designation", length = 120)
     private String designation;
+
+    @Column(name = "department", length = 120)
+    private String department;
+
+    @Column(name = "phone", length = 30)
+    private String phone;
+
+    @Column(name = "salary", precision = 12, scale = 2)
+    private BigDecimal salary;
 
     @Column(name = "joined_date", nullable = false)
     private LocalDate joinedDate;

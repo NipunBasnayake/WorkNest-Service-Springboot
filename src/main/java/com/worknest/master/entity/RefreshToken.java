@@ -41,6 +41,9 @@ public class RefreshToken {
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
 
+    @Column(name = "rotated_to_token", length = 255)
+    private String rotatedToToken;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

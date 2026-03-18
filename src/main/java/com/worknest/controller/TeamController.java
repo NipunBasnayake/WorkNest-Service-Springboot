@@ -30,7 +30,7 @@ public class TeamController {
                 .body(ApiResponse.success("Team created successfully", responseDto));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<TeamResponseDto>> updateTeam(
             @PathVariable Long id,
@@ -39,7 +39,7 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team updated successfully", responseDto));
     }
 
-    @PatchMapping("/{id}/manager/{managerId}")
+    @PatchMapping("/{id:\\d+}/manager/{managerId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<TeamResponseDto>> changeManager(
             @PathVariable Long id,
@@ -48,7 +48,7 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team manager updated successfully", responseDto));
     }
 
-    @PostMapping("/{id}/members")
+    @PostMapping("/{id:\\d+}/members")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<TeamMemberResponseDto>> addMember(
             @PathVariable Long id,
@@ -58,7 +58,7 @@ public class TeamController {
                 .body(ApiResponse.success("Team member added successfully", responseDto));
     }
 
-    @PatchMapping("/{id}/members/{employeeId}/functional-role")
+    @PatchMapping("/{id:\\d+}/members/{employeeId:\\d+}/functional-role")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<TeamMemberResponseDto>> updateMemberFunctionalRole(
             @PathVariable Long id,
@@ -68,7 +68,7 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team member functional role updated successfully", responseDto));
     }
 
-    @DeleteMapping("/{id}/members/{employeeId}")
+    @DeleteMapping("/{id:\\d+}/members/{employeeId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable Long id,
@@ -77,7 +77,7 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team member removed successfully"));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteTeam(@PathVariable Long id) {
         teamService.deleteTeam(id);
@@ -89,6 +89,13 @@ public class TeamController {
     public ResponseEntity<ApiResponse<List<TeamResponseDto>>> listTeams() {
         List<TeamResponseDto> response = teamService.listTeams();
         return ResponseEntity.ok(ApiResponse.success("Teams retrieved successfully", response));
+    }
+
+    @GetMapping("/my")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<TeamResponseDto>>> listMyTeams() {
+        List<TeamResponseDto> response = teamService.listMyTeams();
+        return ResponseEntity.ok(ApiResponse.success("My teams retrieved successfully", response));
     }
 
     @GetMapping("/paged")
@@ -111,14 +118,14 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Teams retrieved successfully", response));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<TeamDetailResponseDto>> getTeamDetails(@PathVariable Long id) {
         TeamDetailResponseDto response = teamService.getTeamDetails(id);
         return ResponseEntity.ok(ApiResponse.success("Team details retrieved successfully", response));
     }
 
-    @GetMapping("/{id}/members")
+    @GetMapping("/{id:\\d+}/members")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<TeamMemberResponseDto>>> listMembers(@PathVariable Long id) {
         List<TeamMemberResponseDto> response = teamService.listTeamMembers(id);

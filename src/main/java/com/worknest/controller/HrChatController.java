@@ -3,6 +3,7 @@ package com.worknest.controller;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.chat.HrConversationCreateRequestDto;
 import com.worknest.tenant.dto.chat.HrConversationResponseDto;
+import com.worknest.tenant.dto.chat.HrConversationTargetsResponseDto;
 import com.worknest.tenant.dto.chat.HrMessageResponseDto;
 import com.worknest.tenant.dto.chat.HrMessageSendRequestDto;
 import com.worknest.tenant.service.HrChatService;
@@ -31,6 +32,13 @@ public class HrChatController {
         HrConversationResponseDto response = hrChatService.createOrGetConversation(requestDto);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("HR conversation ready", response));
+    }
+
+    @GetMapping("/targets")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<HrConversationTargetsResponseDto>> listConversationTargets() {
+        HrConversationTargetsResponseDto response = hrChatService.listConversationTargets();
+        return ResponseEntity.ok(ApiResponse.success("HR conversation targets retrieved successfully", response));
     }
 
     @GetMapping("/conversations/my")

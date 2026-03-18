@@ -1,7 +1,6 @@
 package com.worknest.tenant.dto.task;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -10,7 +9,6 @@ import lombok.Setter;
 @Setter
 public class TaskCommentCreateRequestDto {
 
-    @NotNull(message = "Commenter employee ID is required")
     private Long commentedByEmployeeId;
 
     @NotBlank(message = "Comment is required")

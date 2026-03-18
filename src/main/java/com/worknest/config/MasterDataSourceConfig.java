@@ -25,6 +25,27 @@ public class MasterDataSourceConfig {
     @Value("${spring.datasource.driver-class-name}")
     private String driverClassName;
 
+    @Value("${app.master.datasource.pool.maximum-pool-size:15}")
+    private int maximumPoolSize;
+
+    @Value("${app.master.datasource.pool.minimum-idle:2}")
+    private int minimumIdle;
+
+    @Value("${app.master.datasource.pool.connection-timeout-ms:30000}")
+    private long connectionTimeoutMs;
+
+    @Value("${app.master.datasource.pool.idle-timeout-ms:300000}")
+    private long idleTimeoutMs;
+
+    @Value("${app.master.datasource.pool.max-lifetime-ms:1800000}")
+    private long maxLifetimeMs;
+
+    @Value("${app.master.datasource.pool.validation-timeout-ms:5000}")
+    private long validationTimeoutMs;
+
+    @Value("${app.master.datasource.pool.leak-detection-threshold-ms:0}")
+    private long leakDetectionThresholdMs;
+
     @Bean(name = "masterDataSource")
     @Primary
     public DataSource masterDataSource() {
@@ -34,13 +55,17 @@ public class MasterDataSourceConfig {
         config.setPassword(masterDbPassword);
         config.setDriverClassName(driverClassName);
 
-        // Connection pool settings
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        config.setConnectionTimeout(30000);
-        config.setIdleTimeout(600000);
-        config.setMaxLifetime(1800000);
+        config.setMaximumPoolSize(maximumPoolSize);
+        config.setMinimumIdle(minimumIdle);
+        config.setConnectionTimeout(connectionTimeoutMs);
+        config.setIdleTimeout(idleTimeoutMs);
+        config.setMaxLifetime(maxLifetimeMs);
+        config.setValidationTimeout(validationTimeoutMs);
+        if (leakDetectionThresholdMs > 0) {
+            config.setLeakDetectionThreshold(leakDetectionThresholdMs);
+        }
         config.setPoolName("MasterPool");
+        config.setRegisterMbeans(true);
 
         return new HikariDataSource(config);
     }

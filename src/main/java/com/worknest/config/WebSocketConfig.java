@@ -33,7 +33,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new));
+                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new))
+                .withSockJS();
     }
 
     @Override
@@ -47,7 +48,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         scheduler.initialize();
         
         registry.enableSimpleBroker("/topic", "/queue")
-                .setTaskScheduler(scheduler);
+                .setTaskScheduler(scheduler)
+                .setHeartbeatValue(new long[]{10000, 10000}); // Send heartbeat every 10 seconds
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
     }

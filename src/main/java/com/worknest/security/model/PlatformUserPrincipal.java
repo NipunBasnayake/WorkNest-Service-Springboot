@@ -21,6 +21,7 @@ public class PlatformUserPrincipal implements UserDetails {
     private final PlatformRole role;
     private final UserStatus status;
     private final String tenantKey;
+    private final boolean passwordChangeRequired;
 
     public PlatformUserPrincipal(PlatformUser platformUser) {
         this.id = platformUser.getId();
@@ -30,6 +31,7 @@ public class PlatformUserPrincipal implements UserDetails {
         this.role = platformUser.getRole();
         this.status = platformUser.getStatus();
         this.tenantKey = platformUser.getTenantKey();
+        this.passwordChangeRequired = platformUser.isPasswordChangeRequired();
     }
 
     @Override

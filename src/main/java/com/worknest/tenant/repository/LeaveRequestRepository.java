@@ -85,4 +85,17 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             LeaveStatus status,
             LocalDate endDate,
             LocalDate startDate);
+
+    @Query("""
+            SELECT lr
+            FROM LeaveRequest lr
+            WHERE lr.status = :status
+              AND lr.startDate BETWEEN :fromDate AND :toDate
+              AND (lr.lastReminderSentForDate IS NULL OR lr.lastReminderSentForDate <> lr.startDate)
+            ORDER BY lr.startDate ASC, lr.createdAt ASC
+            """)
+    List<LeaveRequest> findUpcomingLeavesForReminder(
+            @Param("status") LeaveStatus status,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate);
 }

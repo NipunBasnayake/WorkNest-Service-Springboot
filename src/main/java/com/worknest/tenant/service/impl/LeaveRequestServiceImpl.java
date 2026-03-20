@@ -6,6 +6,7 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.security.util.SecurityUtils;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.leave.*;
 import com.worknest.tenant.entity.Employee;
@@ -38,6 +39,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final EmailNotificationService emailNotificationService;
 
     public LeaveRequestServiceImpl(
             LeaveRequestRepository leaveRequestRepository,
@@ -45,13 +47,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             SecurityUtils securityUtils,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            EmailNotificationService emailNotificationService) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.employeeRepository = employeeRepository;
         this.securityUtils = securityUtils;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
+        this.emailNotificationService = emailNotificationService;
     }
 
     @Override
@@ -217,6 +221,13 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 AuditEntityType.LEAVE_REQUEST.name(),
                 updated.getId()
         );
+        emailNotificationService.sendLeaveApprovedEmail(
+                leaveRequest.getEmployee().getEmail(),
+                buildFullName(leaveRequest.getEmployee()),
+                leaveRequest.getStartDate(),
+                leaveRequest.getEndDate(),
+                buildFullName(approver)
+        );
         auditLogService.logAction(
                 AuditActionType.APPROVE,
                 AuditEntityType.LEAVE_REQUEST,
@@ -248,6 +259,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 "Your leave request has been rejected",
                 AuditEntityType.LEAVE_REQUEST.name(),
                 updated.getId()
+        );
+        emailNotificationService.sendLeaveRejectedEmail(
+                leaveRequest.getEmployee().getEmail(),
+                buildFullName(leaveRequest.getEmployee()),
+                leaveRequest.getStartDate(),
+                leaveRequest.getEndDate(),
+                buildFullName(approver),
+                requestDto.getReason()
         );
         auditLogService.logAction(
                 AuditActionType.REJECT,
@@ -418,6 +437,13 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                     AuditEntityType.LEAVE_REQUEST.name(),
                     leaveRequest.getId()
             );
+            emailNotificationService.sendLeaveCancelledAlertEmail(
+                    recipient.getEmail(),
+                    buildFullName(recipient),
+                    buildFullName(employee),
+                    leaveRequest.getStartDate(),
+                    leaveRequest.getEndDate()
+            );
         }
     }
 
@@ -427,5 +453,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 "startDate".equals(sortBy) ||
                 "endDate".equals(sortBy) ||
                 "status".equals(sortBy);
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

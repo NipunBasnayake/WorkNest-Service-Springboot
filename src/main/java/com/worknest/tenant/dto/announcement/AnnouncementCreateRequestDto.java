@@ -20,4 +20,7 @@ public class AnnouncementCreateRequestDto {
 
     @Positive(message = "Creator employee ID must be positive")
     private Long createdByEmployeeId;
+
+    @Positive(message = "Team ID must be positive")
+    private Long teamId;
 }

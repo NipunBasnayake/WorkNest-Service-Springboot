@@ -28,6 +28,10 @@ public class Announcement {
     @JoinColumn(name = "created_by_id", nullable = false)
     private Employee createdBy;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_id")
+    private Team team;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

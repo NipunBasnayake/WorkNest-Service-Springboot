@@ -20,4 +20,5 @@ public class AuthUserDto {
     private PlatformRole role;
     private UserStatus status;
     private String tenantKey;
+    private boolean passwordChangeRequired;
 }

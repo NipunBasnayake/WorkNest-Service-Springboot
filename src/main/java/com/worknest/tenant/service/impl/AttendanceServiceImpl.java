@@ -3,6 +3,7 @@ package com.worknest.tenant.service.impl;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.tenant.dto.attendance.*;
 import com.worknest.tenant.entity.AttendanceRecord;
 import com.worknest.tenant.entity.Employee;
@@ -26,14 +27,17 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final AttendanceRecordRepository attendanceRecordRepository;
     private final EmployeeRepository employeeRepository;
     private final TenantDtoMapper tenantDtoMapper;
+    private final EmailNotificationService emailNotificationService;
 
     public AttendanceServiceImpl(
             AttendanceRecordRepository attendanceRecordRepository,
             EmployeeRepository employeeRepository,
-            TenantDtoMapper tenantDtoMapper) {
+            TenantDtoMapper tenantDtoMapper,
+            EmailNotificationService emailNotificationService) {
         this.attendanceRecordRepository = attendanceRecordRepository;
         this.employeeRepository = employeeRepository;
         this.tenantDtoMapper = tenantDtoMapper;
+        this.emailNotificationService = emailNotificationService;
     }
 
     @Override
@@ -58,6 +62,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         record.setStatus(AttendanceStatus.INCOMPLETE);
 
         AttendanceRecord saved = attendanceRecordRepository.save(record);
+        emailNotificationService.sendAttendanceConfirmationEmail(
+                employee.getEmail(),
+                buildFullName(employee),
+                "Check-in recorded",
+                saved.getCheckIn()
+        );
         return toAttendanceResponse(saved);
     }
 
@@ -86,6 +96,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         record.setStatus(resolveAttendanceStatus(record.getCheckIn(), record.getCheckOut()));
 
         AttendanceRecord saved = attendanceRecordRepository.save(record);
+        emailNotificationService.sendAttendanceConfirmationEmail(
+                employee.getEmail(),
+                buildFullName(employee),
+                "Check-out recorded",
+                saved.getCheckOut()
+        );
         return toAttendanceResponse(saved);
     }
 
@@ -185,5 +201,15 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .status(attendanceRecord.getStatus())
                 .createdAt(attendanceRecord.getCreatedAt())
                 .build();
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

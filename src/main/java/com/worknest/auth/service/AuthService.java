@@ -11,4 +11,12 @@ public interface AuthService {
     LogoutResponseDto logout(LogoutRequestDto requestDto);
 
     AuthUserDto getCurrentUser();
+
+    void forgotPassword(ForgotPasswordRequestDto requestDto);
+
+    void resetPassword(ResetPasswordRequestDto requestDto);
+
+    void changePassword(ChangePasswordRequestDto requestDto);
+
+    ForceResetPasswordResponseDto forceResetPassword(Long userId);
 }

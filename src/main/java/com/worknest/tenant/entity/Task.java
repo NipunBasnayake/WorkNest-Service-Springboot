@@ -56,6 +56,9 @@ public class Task {
     @Column(name = "due_date")
     private LocalDate dueDate;
 
+    @Column(name = "last_due_reminder_sent_for_date")
+    private LocalDate lastDueReminderSentForDate;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

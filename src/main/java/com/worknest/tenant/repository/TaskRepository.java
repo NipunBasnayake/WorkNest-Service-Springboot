@@ -183,4 +183,18 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             @Param("excludedStatus") TaskStatus excludedStatus,
             @Param("beforeDate") LocalDate beforeDate,
             Pageable pageable);
+
+    @Query("""
+            SELECT t
+            FROM Task t
+            WHERE t.assignee IS NOT NULL
+              AND t.status <> :excludedStatus
+              AND t.dueDate BETWEEN :fromDate AND :toDate
+              AND (t.lastDueReminderSentForDate IS NULL OR t.lastDueReminderSentForDate <> t.dueDate)
+            ORDER BY t.dueDate ASC, t.createdAt DESC
+            """)
+    List<Task> findUpcomingDueTasksForReminder(
+            @Param("excludedStatus") TaskStatus excludedStatus,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate);
 }

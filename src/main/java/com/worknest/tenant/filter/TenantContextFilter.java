@@ -154,7 +154,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 
-        ErrorResponse errorResponse = ErrorResponse.of(message, errorCode, path);
+        ErrorResponse errorResponse = ErrorResponse.of(status, errorCode, message, path);
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 }

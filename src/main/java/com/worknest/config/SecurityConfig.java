@@ -53,6 +53,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/refresh",
+                                "/api/auth/forgot-password",
+                                "/api/auth/reset-password",
                                 "/actuator/health",
                                 "/error",
                                 "/v3/api-docs/**",
@@ -62,7 +64,7 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers("/api/platform/onboarding/**")
                         .permitAll()
-                        .requestMatchers("/api/auth/logout", "/api/auth/me")
+                        .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
                         .authenticated()
                         .requestMatchers("/api/platform/**")
                         .hasRole("PLATFORM_ADMIN")

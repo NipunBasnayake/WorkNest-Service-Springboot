@@ -1,28 +1,36 @@
 package com.worknest.common.api;
 
 import lombok.AllArgsConstructor;
-import lombok.Data;
+import lombok.Builder;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.springframework.http.HttpStatus;
 
 import java.time.LocalDateTime;
 
-@Data
+@Getter
+@Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class ErrorResponse {
 
-    private boolean success;
-    private String message;
-    private String errorCode;
-    private String path;
     private LocalDateTime timestamp;
+    private int status;
+    private String error;
+    private String code;
+    private String message;
+    private String path;
 
-    public static ErrorResponse of(String message, String errorCode, String path) {
-        return new ErrorResponse(false, message, errorCode, path, LocalDateTime.now());
-    }
-
-    public static ErrorResponse of(String message, String errorCode) {
-        return new ErrorResponse(false, message, errorCode, null, LocalDateTime.now());
+    public static ErrorResponse of(HttpStatus status, String code, String message, String path) {
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .code(code)
+                .message(message)
+                .path(path)
+                .build();
     }
 }
-

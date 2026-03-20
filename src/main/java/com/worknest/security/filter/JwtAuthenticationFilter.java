@@ -150,7 +150,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        ErrorResponse errorResponse = ErrorResponse.of(message, errorCode, requestUri);
+        ErrorResponse errorResponse = ErrorResponse.of(status, errorCode, message, requestUri);
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 }

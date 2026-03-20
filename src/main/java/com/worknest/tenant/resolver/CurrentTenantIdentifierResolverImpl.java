@@ -19,6 +19,11 @@ public class CurrentTenantIdentifierResolverImpl implements CurrentTenantIdentif
     @Override
     public String resolveCurrentTenantIdentifier() {
         if (RequestContextHolder.getRequestAttributes() == null) {
+            String asyncTenantId = normalizeTenantId(TenantContext.getTenantId());
+            if (asyncTenantId != null && !DEFAULT_TENANT.equalsIgnoreCase(asyncTenantId)) {
+                logger.debug("Resolved async tenant identifier: {}", asyncTenantId);
+                return asyncTenantId;
+            }
             logger.debug("No active request context detected, using bootstrap tenant identifier");
             return BOOTSTRAP_TENANT;
         }

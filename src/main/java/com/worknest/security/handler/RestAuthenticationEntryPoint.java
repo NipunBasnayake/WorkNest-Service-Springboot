@@ -5,6 +5,7 @@ import com.worknest.common.api.ErrorResponse;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -29,7 +30,12 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        ErrorResponse error = ErrorResponse.of("Authentication is required", "UNAUTHORIZED", request.getRequestURI());
+        ErrorResponse error = ErrorResponse.of(
+                HttpStatus.UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Authentication is required",
+                request.getRequestURI()
+        );
         response.getWriter().write(objectMapper.writeValueAsString(error));
     }
 }

@@ -25,4 +25,52 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
                   )
             """)
     Page<Announcement> search(@Param("search") String search, Pageable pageable);
+
+    @Query("""
+            SELECT a
+            FROM Announcement a
+            WHERE (
+                   :isPrivileged = true
+                   OR a.team IS NULL
+                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR EXISTS (
+                        SELECT tm.id
+                        FROM TeamMember tm
+                        WHERE tm.team.id = a.team.id
+                          AND tm.employee.id = :employeeId
+                          AND tm.leftAt IS NULL
+                   )
+                  )
+            ORDER BY a.createdAt DESC
+            """)
+    List<Announcement> findVisibleAnnouncements(
+            @Param("employeeId") Long employeeId,
+            @Param("isPrivileged") boolean isPrivileged);
+
+    @Query("""
+            SELECT a
+            FROM Announcement a
+            WHERE (
+                   :isPrivileged = true
+                   OR a.team IS NULL
+                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR EXISTS (
+                        SELECT tm.id
+                        FROM TeamMember tm
+                        WHERE tm.team.id = a.team.id
+                          AND tm.employee.id = :employeeId
+                          AND tm.leftAt IS NULL
+                   )
+                  )
+              AND (
+                    :search IS NULL OR :search = ''
+                    OR LOWER(a.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(a.message) LIKE LOWER(CONCAT('%', :search, '%'))
+                  )
+            """)
+    Page<Announcement> searchVisible(
+            @Param("employeeId") Long employeeId,
+            @Param("isPrivileged") boolean isPrivileged,
+            @Param("search") String search,
+            Pageable pageable);
 }

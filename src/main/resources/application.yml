@@ -11,6 +11,21 @@ spring:
     password: 1234
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: nipunsathsara1999@gmail.com
+    password: ljwd rzec csus prje
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -112,6 +127,24 @@ app:
     attachments-dir: storage/attachments
     max-file-size-bytes: 10485760
     allowed-mime-types: image/png,image/jpeg,application/pdf,text/plain
+  email:
+    from: nipunsathsara1999@gmail.com
+    executor:
+      core-pool-size: 2
+      max-pool-size: 10
+      queue-capacity: 500
+      keep-alive-seconds: 60
+  auth:
+    password-reset:
+      token-expiry-minutes: 20
+      link-base-url: http://localhost:5173/reset-password
+  reminders:
+    cron: "0 0 */6 * * *"
+    timezone: UTC
+    leave:
+      days-before-start: 1,2
+    task:
+      days-before-due: 1,2,3
 
 springdoc:
   api-docs:

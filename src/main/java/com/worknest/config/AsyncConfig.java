@@ -32,4 +32,23 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean(name = "emailExecutor")
+    public Executor emailExecutor(
+            @Value("${app.email.executor.core-pool-size:2}") int corePoolSize,
+            @Value("${app.email.executor.max-pool-size:10}") int maxPoolSize,
+            @Value("${app.email.executor.queue-capacity:500}") int queueCapacity,
+            @Value("${app.email.executor.keep-alive-seconds:60}") int keepAliveSeconds) {
+
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setKeepAliveSeconds(keepAliveSeconds);
+        executor.setThreadNamePrefix("email-dispatch-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

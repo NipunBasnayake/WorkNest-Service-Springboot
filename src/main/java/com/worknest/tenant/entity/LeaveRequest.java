@@ -52,6 +52,9 @@ public class LeaveRequest {
     @Column(name = "reason", columnDefinition = "TEXT")
     private String reason;
 
+    @Column(name = "last_reminder_sent_for_date")
+    private LocalDate lastReminderSentForDate;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

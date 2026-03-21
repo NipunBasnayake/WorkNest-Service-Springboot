@@ -5,6 +5,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.common.PagedResultDto;
@@ -52,6 +53,7 @@ public class TeamServiceImpl implements TeamService {
     private final SecurityUtils securityUtils;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
+    private final EmailNotificationService emailNotificationService;
 
     public TeamServiceImpl(
             TeamRepository teamRepository,
@@ -62,7 +64,8 @@ public class TeamServiceImpl implements TeamService {
             EmployeeRepository employeeRepository,
             SecurityUtils securityUtils,
             TenantDtoMapper tenantDtoMapper,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            EmailNotificationService emailNotificationService) {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.projectTeamRepository = projectTeamRepository;
@@ -72,6 +75,7 @@ public class TeamServiceImpl implements TeamService {
         this.securityUtils = securityUtils;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
+        this.emailNotificationService = emailNotificationService;
     }
 
     @Override
@@ -127,6 +131,7 @@ public class TeamServiceImpl implements TeamService {
         Employee manager = getActiveEmployeeOrThrow(managerEmployeeId);
         team.setManager(manager);
         Team updated = teamRepository.save(team);
+        notifyTeamLeaderChange(updated);
         auditLogService.logAction(
                 AuditActionType.ASSIGN,
                 AuditEntityType.TEAM,
@@ -153,6 +158,13 @@ public class TeamServiceImpl implements TeamService {
         teamMember.setJoinedAt(LocalDateTime.now());
 
         TeamMember savedMember = teamMemberRepository.save(teamMember);
+        emailNotificationService.sendTeamAddedEmail(
+                employee.getEmail(),
+                buildFullName(employee),
+                team.getName(),
+                buildFullName(team.getManager()),
+                (int) teamMemberRepository.countByTeamIdAndLeftAtIsNull(teamId)
+        );
         auditLogService.logAction(
                 AuditActionType.ASSIGN,
                 AuditEntityType.TEAM,
@@ -198,6 +210,11 @@ public class TeamServiceImpl implements TeamService {
 
         teamMember.setLeftAt(LocalDateTime.now());
         teamMemberRepository.save(teamMember);
+        emailNotificationService.sendTeamRemovedEmail(
+                teamMember.getEmployee().getEmail(),
+                buildFullName(teamMember.getEmployee()),
+                team.getName()
+        );
         auditLogService.logAction(
                 AuditActionType.DELETE,
                 AuditEntityType.TEAM,
@@ -532,5 +549,38 @@ public class TeamServiceImpl implements TeamService {
 
     private String escapeJson(String value) {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private void notifyTeamLeaderChange(Team team) {
+        Set<Long> recipientIds = new LinkedHashSet<>();
+        if (team.getManager() != null) {
+            recipientIds.add(team.getManager().getId());
+        }
+        teamMemberRepository.findByTeamIdAndLeftAtIsNull(team.getId()).stream()
+                .map(teamMember -> teamMember.getEmployee().getId())
+                .forEach(recipientIds::add);
+
+        for (Long recipientId : recipientIds) {
+            Employee recipient = employeeRepository.findById(recipientId).orElse(null);
+            if (recipient == null) {
+                continue;
+            }
+            emailNotificationService.sendTeamLeaderChangedEmail(
+                    recipient.getEmail(),
+                    buildFullName(recipient),
+                    team.getName(),
+                    buildFullName(team.getManager())
+            );
+        }
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

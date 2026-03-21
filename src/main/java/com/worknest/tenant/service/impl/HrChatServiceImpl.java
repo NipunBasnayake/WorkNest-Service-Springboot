@@ -5,6 +5,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.chat.*;
@@ -30,7 +31,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -38,6 +43,7 @@ public class HrChatServiceImpl implements HrChatService {
 
     private static final EnumSet<PlatformRole> HR_PARTICIPANT_ROLES =
             EnumSet.of(PlatformRole.HR, PlatformRole.ADMIN);
+    private static final Pattern MENTION_PATTERN = Pattern.compile("@([A-Za-z0-9._-]{2,64})");
 
     private final HrConversationRepository hrConversationRepository;
     private final HrMessageRepository hrMessageRepository;
@@ -48,6 +54,7 @@ public class HrChatServiceImpl implements HrChatService {
     private final AuditLogService auditLogService;
     private final NotificationService notificationService;
     private final TenantRealtimePublisher tenantRealtimePublisher;
+    private final EmailNotificationService emailNotificationService;
 
     public HrChatServiceImpl(
             HrConversationRepository hrConversationRepository,
@@ -58,7 +65,8 @@ public class HrChatServiceImpl implements HrChatService {
             ChatReadReceiptService chatReadReceiptService,
             AuditLogService auditLogService,
             NotificationService notificationService,
-            TenantRealtimePublisher tenantRealtimePublisher) {
+            TenantRealtimePublisher tenantRealtimePublisher,
+            EmailNotificationService emailNotificationService) {
         this.hrConversationRepository = hrConversationRepository;
         this.hrMessageRepository = hrMessageRepository;
         this.employeeRepository = employeeRepository;
@@ -68,6 +76,7 @@ public class HrChatServiceImpl implements HrChatService {
         this.auditLogService = auditLogService;
         this.notificationService = notificationService;
         this.tenantRealtimePublisher = tenantRealtimePublisher;
+        this.emailNotificationService = emailNotificationService;
     }
 
     @Override
@@ -197,6 +206,7 @@ public class HrChatServiceImpl implements HrChatService {
                 AuditEntityType.HR_MESSAGE.name(),
                 saved.getId()
         );
+        notifyMentionedParticipants(conversation, sender, saved.getMessage(), saved.getId());
 
         tenantRealtimePublisher.publishHrMessage(
                 securityUtils.getCurrentTenantKeyOrThrow(),
@@ -326,5 +336,105 @@ public class HrChatServiceImpl implements HrChatService {
                 .read(message.isRead())
                 .createdAt(message.getCreatedAt())
                 .build();
+    }
+
+    private void notifyMentionedParticipants(
+            HrConversation conversation,
+            Employee sender,
+            String message,
+            Long messageId) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+
+        Set<String> mentions = extractMentions(message);
+        if (mentions.isEmpty()) {
+            return;
+        }
+
+        Set<Employee> candidateRecipients = new LinkedHashSet<>();
+        if (!conversation.getEmployee().getId().equals(sender.getId())) {
+            candidateRecipients.add(conversation.getEmployee());
+        }
+        if (!conversation.getHr().getId().equals(sender.getId())) {
+            candidateRecipients.add(conversation.getHr());
+        }
+
+        for (Employee recipient : candidateRecipients) {
+            if (!matchesMention(recipient, mentions)) {
+                continue;
+            }
+            notificationService.createSystemNotification(
+                    recipient.getId(),
+                    NotificationType.HR_MESSAGE,
+                    "You were mentioned in HR chat",
+                    AuditEntityType.HR_MESSAGE.name(),
+                    messageId
+            );
+            emailNotificationService.sendHrMentionEmail(
+                    recipient.getEmail(),
+                    buildFullName(recipient),
+                    buildFullName(sender),
+                    truncateMessage(message, 300)
+            );
+        }
+    }
+
+    private Set<String> extractMentions(String message) {
+        Set<String> mentions = new LinkedHashSet<>();
+        Matcher matcher = MENTION_PATTERN.matcher(message);
+        while (matcher.find()) {
+            mentions.add(matcher.group(1).toLowerCase());
+        }
+        return mentions;
+    }
+
+    private boolean matchesMention(Employee employee, Set<String> mentions) {
+        Set<String> aliases = new LinkedHashSet<>();
+        if (employee.getEmail() != null) {
+            String email = employee.getEmail().trim().toLowerCase();
+            aliases.add(email);
+            int atIndex = email.indexOf('@');
+            if (atIndex > 0) {
+                aliases.add(email.substring(0, atIndex));
+            }
+        }
+        if (employee.getEmployeeCode() != null) {
+            aliases.add(employee.getEmployeeCode().trim().toLowerCase());
+        }
+        if (employee.getFirstName() != null) {
+            aliases.add(employee.getFirstName().trim().toLowerCase());
+        }
+        if (employee.getLastName() != null) {
+            aliases.add(employee.getLastName().trim().toLowerCase());
+        }
+
+        for (String mention : mentions) {
+            if (aliases.contains(mention)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
+    }
+
+    private String truncateMessage(String message, int maxLength) {
+        if (message == null) {
+            return "";
+        }
+        String normalized = message.trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength - 3) + "...";
     }
 }

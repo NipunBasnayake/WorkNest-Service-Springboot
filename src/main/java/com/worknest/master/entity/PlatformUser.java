@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
         name = "platform_users",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_platform_users_email", columnNames = "email")
+        },
+        indexes = {
+                @Index(name = "idx_platform_users_password_reset_token_hash", columnList = "password_reset_token_hash")
         }
 )
 @Getter
@@ -46,6 +49,15 @@ public class PlatformUser {
 
     @Column(name = "tenant_key", length = 50)
     private String tenantKey;
+
+    @Column(name = "password_reset_token_hash", length = 255)
+    private String passwordResetTokenHash;
+
+    @Column(name = "password_reset_token_expires_at")
+    private LocalDateTime passwordResetTokenExpiresAt;
+
+    @Column(name = "password_change_required", nullable = false)
+    private boolean passwordChangeRequired;
 
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;

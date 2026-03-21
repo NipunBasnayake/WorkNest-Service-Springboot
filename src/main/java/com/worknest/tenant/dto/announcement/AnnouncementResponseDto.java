@@ -15,6 +15,8 @@ public class AnnouncementResponseDto {
     private String title;
     private String message;
     private EmployeeSimpleDto createdBy;
+    private Long teamId;
+    private String teamName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

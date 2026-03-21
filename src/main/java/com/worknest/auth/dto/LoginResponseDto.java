@@ -19,5 +19,6 @@ public class LoginResponseDto {
     private LocalDateTime accessTokenExpiresAt;
     private String refreshToken;
     private LocalDateTime refreshTokenExpiresAt;
+    private boolean passwordChangeRequired;
     private AuthUserDto user;
 }

@@ -5,6 +5,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.common.PagedResultDto;
@@ -68,6 +69,7 @@ public class TaskServiceImpl implements TaskService {
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final EmailNotificationService emailNotificationService;
 
     public TaskServiceImpl(
             TaskRepository taskRepository,
@@ -80,7 +82,8 @@ public class TaskServiceImpl implements TaskService {
             SecurityUtils securityUtils,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            EmailNotificationService emailNotificationService) {
         this.taskRepository = taskRepository;
         this.taskCommentRepository = taskCommentRepository;
         this.projectRepository = projectRepository;
@@ -92,6 +95,7 @@ public class TaskServiceImpl implements TaskService {
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
+        this.emailNotificationService = emailNotificationService;
     }
 
     @Override
@@ -368,6 +372,7 @@ public class TaskServiceImpl implements TaskService {
         comment.setComment(requestDto.getComment().trim());
 
         TaskComment saved = taskCommentRepository.save(comment);
+        notifyTaskCommentParticipants(task, commenter, saved.getComment());
         auditLogService.logAction(
                 AuditActionType.CREATE,
                 AuditEntityType.TASK,
@@ -597,6 +602,16 @@ public class TaskServiceImpl implements TaskService {
                 AuditEntityType.TASK.name(),
                 task.getId()
         );
+        emailNotificationService.sendTaskAssignedEmail(
+                task.getAssignee().getEmail(),
+                buildFullName(task.getAssignee()),
+                task.getTitle(),
+                task.getDescription(),
+                task.getDueDate(),
+                task.getPriority() == null ? null : task.getPriority().name(),
+                buildFullName(task.getAssignee()),
+                buildFullName(task.getCreatedBy())
+        );
     }
 
     private void notifyTaskStatusChange(Task task) {
@@ -614,12 +629,60 @@ public class TaskServiceImpl implements TaskService {
         }
 
         for (Long recipientId : recipients) {
+            Employee recipient = employeeRepository.findById(recipientId).orElse(null);
             notificationService.createSystemNotification(
                     recipientId,
                     NotificationType.TASK_STATUS_CHANGED,
                     "Task status changed to " + task.getStatus() + ": " + task.getTitle(),
                     AuditEntityType.TASK.name(),
                     task.getId()
+            );
+            if (recipient != null) {
+                emailNotificationService.sendTaskStatusChangedEmail(
+                        recipient.getEmail(),
+                        buildFullName(recipient),
+                        task.getTitle(),
+                        task.getStatus().name(),
+                        buildFullName(actor)
+                );
+            }
+        }
+    }
+
+    private void notifyTaskCommentParticipants(Task task, Employee commenter, String comment) {
+        Set<Long> recipientIds = new java.util.LinkedHashSet<>();
+        if (task.getCreatedBy() != null) {
+            recipientIds.add(task.getCreatedBy().getId());
+        }
+        if (task.getAssignee() != null) {
+            recipientIds.add(task.getAssignee().getId());
+        }
+        taskCommentRepository.findByTaskIdOrderByCreatedAtAsc(task.getId()).stream()
+                .map(taskComment -> taskComment.getCommentedBy().getId())
+                .forEach(recipientIds::add);
+
+        if (commenter != null) {
+            recipientIds.remove(commenter.getId());
+        }
+
+        for (Long recipientId : recipientIds) {
+            Employee recipient = employeeRepository.findById(recipientId).orElse(null);
+            if (recipient == null) {
+                continue;
+            }
+            notificationService.createSystemNotification(
+                    recipientId,
+                    NotificationType.TASK_STATUS_CHANGED,
+                    "New task comment on: " + task.getTitle(),
+                    AuditEntityType.TASK.name(),
+                    task.getId()
+            );
+            emailNotificationService.sendTaskCommentAddedEmail(
+                    recipient.getEmail(),
+                    buildFullName(recipient),
+                    task.getTitle(),
+                    buildFullName(commenter),
+                    comment
             );
         }
     }
@@ -719,5 +782,15 @@ public class TaskServiceImpl implements TaskService {
                 "priority".equals(sortBy) ||
                 "status".equals(sortBy) ||
                 "title".equals(sortBy);
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

@@ -15,8 +15,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.UUID;
+import java.util.HexFormat;
 
 @Service
 @Transactional(transactionManager = "masterTransactionManager")
@@ -45,7 +49,9 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     @Override
     public RefreshToken createToken(PlatformUser platformUser) {
         LocalDateTime now = LocalDateTime.now();
-        RefreshToken refreshToken = buildToken(platformUser, generateTokenValue(), now);
+        String rawToken = generateTokenValue();
+        RefreshToken refreshToken = buildToken(platformUser, rawToken, now);
+        refreshToken.setRawToken(rawToken);
         return masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.save(refreshToken));
     }
 
@@ -70,40 +76,32 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
             return refreshToken;
         }
 
-        if (isWithinRotationGrace(refreshToken)) {
-            // Ensure a valid replacement exists before allowing refresh to continue.
-            resolveRotatedToken(refreshToken);
-            return refreshToken;
-        }
-
         throw new TokenRevokedException("Refresh token has already been rotated or revoked");
     }
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public RefreshToken rotateToken(RefreshToken currentToken) {
-        validateNotExpired(currentToken, currentToken.getToken());
+        validateNotExpired(currentToken, currentToken.getRawToken());
 
         LocalDateTime now = LocalDateTime.now();
         String rotatedToToken = generateTokenValue();
+        String rotatedToTokenHash = hashToken(rotatedToToken);
         int updatedRows = masterTenantContextRunner.runInMasterContext(() ->
                 refreshTokenRepository.rotateIfActiveAndNotExpired(
-                        currentToken.getToken(),
+                        currentToken.getTokenHash(),
                         now,
                         now,
-                        rotatedToToken));
+                        rotatedToTokenHash));
 
         if (updatedRows == 1) {
             RefreshToken newToken = buildToken(currentToken.getPlatformUser(), rotatedToToken, now);
+            newToken.setRawToken(rotatedToToken);
             return masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.save(newToken));
         }
 
-        RefreshToken latestState = findTokenOrThrow(currentToken.getToken());
-        validateNotExpired(latestState, currentToken.getToken());
-
-        if (latestState.isRevoked() && isWithinRotationGrace(latestState)) {
-            return resolveRotatedToken(latestState);
-        }
+        RefreshToken latestState = findTokenOrThrow(currentToken.getRawToken());
+        validateNotExpired(latestState, currentToken.getRawToken());
 
         if (latestState.isRevoked()) {
             throw new TokenRevokedException("Refresh token has already been rotated or revoked");
@@ -115,8 +113,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     @Override
     public void revokeToken(String tokenValue) {
         masterTenantContextRunner.runInMasterContext(() -> {
-            RefreshToken refreshToken = refreshTokenRepository.findByToken(tokenValue)
-                    .orElseThrow(() -> new InvalidTokenException("Refresh token is invalid"));
+            RefreshToken refreshToken = findTokenOrThrow(tokenValue);
             if (!refreshToken.isRevoked()) {
                 refreshToken.setRevoked(true);
                 refreshToken.setRevokedAt(LocalDateTime.now());
@@ -143,7 +140,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     private RefreshToken buildToken(PlatformUser platformUser, String tokenValue, LocalDateTime issuedAt) {
         RefreshToken refreshToken = new RefreshToken();
-        refreshToken.setToken(tokenValue);
+        refreshToken.setToken(UUID.randomUUID().toString());
+        refreshToken.setTokenHash(hashToken(tokenValue));
         refreshToken.setPlatformUser(platformUser);
         refreshToken.setRevoked(false);
         refreshToken.setRevokedAt(null);
@@ -156,8 +154,12 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         if (tokenValue == null || tokenValue.isBlank()) {
             throw new InvalidTokenException("Refresh token is invalid");
         }
+        String normalizedToken = tokenValue.trim();
+        String tokenHash = hashToken(normalizedToken);
         return masterTenantContextRunner.runInMasterContext(() ->
-                refreshTokenRepository.findByToken(tokenValue)
+                refreshTokenRepository.findByTokenHash(tokenHash)
+                        .or(() -> refreshTokenRepository.findByToken(normalizedToken))
+                        .map(token -> attachRawToken(token, normalizedToken))
                         .orElseThrow(() -> new InvalidTokenException("Refresh token is invalid")));
     }
 
@@ -185,20 +187,45 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     }
 
     private RefreshToken resolveRotatedToken(RefreshToken revokedToken) {
-        String rotatedToTokenValue = revokedToken.getRotatedToToken();
-        if (rotatedToTokenValue == null || rotatedToTokenValue.isBlank()) {
+        String rotatedToTokenHash = revokedToken.getRotatedToToken();
+        if (rotatedToTokenHash == null || rotatedToTokenHash.isBlank()) {
             throw new TokenRevokedException("Refresh token has already been rotated or revoked");
         }
 
         RefreshToken refreshToken = masterTenantContextRunner.runInMasterContext(() ->
-                refreshTokenRepository.findByTokenAndRevokedFalse(rotatedToTokenValue)
+                refreshTokenRepository.findByTokenHashAndRevokedFalse(rotatedToTokenHash)
                         .orElseThrow(() -> new TokenRevokedException("Rotated refresh token is no longer active")));
+        if (refreshToken.getToken() == null || refreshToken.getToken().isBlank()) {
+            throw new TokenRevokedException("Refresh token has already been rotated or revoked");
+        }
+        refreshToken.setRawToken(refreshToken.getToken());
         if (refreshToken.getExpiresAt().isBefore(LocalDateTime.now())) {
-            revokeToken(rotatedToTokenValue);
+            if (refreshToken.getRawToken() != null) {
+                revokeToken(refreshToken.getRawToken());
+            }
             throw new TokenExpiredException("Refresh token has expired");
         }
 
         return refreshToken;
+    }
+
+    private RefreshToken attachRawToken(RefreshToken refreshToken, String rawToken) {
+        refreshToken.setRawToken(rawToken);
+        if (refreshToken.getTokenHash() == null || refreshToken.getTokenHash().isBlank()) {
+            refreshToken.setTokenHash(hashToken(rawToken));
+            refreshTokenRepository.save(refreshToken);
+        }
+        return refreshToken;
+    }
+
+    private String hashToken(String rawToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", ex);
+        }
     }
 
     private long resolveRefreshTokenExpiryMillis(

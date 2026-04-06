@@ -15,7 +15,11 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     Optional<RefreshToken> findByToken(String token);
 
+    Optional<RefreshToken> findByTokenHash(String tokenHash);
+
     Optional<RefreshToken> findByTokenAndRevokedFalse(String token);
+
+    Optional<RefreshToken> findByTokenHashAndRevokedFalse(String tokenHash);
 
     @Modifying
     @Query("""
@@ -34,12 +38,12 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     @Query("""
             UPDATE RefreshToken rt
             SET rt.revoked = true, rt.revokedAt = :revokedAt, rt.rotatedToToken = :rotatedToToken
-            WHERE rt.token = :token
+            WHERE rt.tokenHash = :tokenHash
               AND rt.revoked = false
               AND rt.expiresAt > :now
             """)
     int rotateIfActiveAndNotExpired(
-            @Param("token") String token,
+            @Param("tokenHash") String tokenHash,
             @Param("now") LocalDateTime now,
             @Param("revokedAt") LocalDateTime revokedAt,
             @Param("rotatedToToken") String rotatedToToken);

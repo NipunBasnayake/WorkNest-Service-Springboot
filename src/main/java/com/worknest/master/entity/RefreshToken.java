@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "refresh_tokens",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_refresh_tokens_token", columnNames = "token")
+                @UniqueConstraint(name = "uk_refresh_tokens_token", columnNames = "token"),
+                @UniqueConstraint(name = "uk_refresh_tokens_token_hash", columnNames = "token_hash")
         }
 )
 @Getter
@@ -25,8 +26,11 @@ public class RefreshToken {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "token", nullable = false, length = 255)
+    @Column(name = "token", length = 255)
     private String token;
+
+    @Column(name = "token_hash", length = 64)
+    private String tokenHash;
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "platform_user_id", nullable = false)
@@ -43,6 +47,9 @@ public class RefreshToken {
 
     @Column(name = "rotated_to_token", length = 255)
     private String rotatedToToken;
+
+    @Transient
+    private String rawToken;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

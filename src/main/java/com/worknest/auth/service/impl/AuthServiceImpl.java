@@ -107,7 +107,7 @@ public class AuthServiceImpl implements AuthService {
                 .tokenType("Bearer")
                 .accessToken(accessToken)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
-                .refreshToken(refreshToken.getToken())
+                .refreshToken(resolveRefreshTokenValue(refreshToken))
                 .refreshTokenExpiresAt(refreshToken.getExpiresAt())
                 .passwordChangeRequired(user.isPasswordChangeRequired())
                 .user(mapUser(user))
@@ -133,7 +133,7 @@ public class AuthServiceImpl implements AuthService {
                 .tokenType("Bearer")
                 .accessToken(newAccessToken)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
-                .refreshToken(rotatedToken.getToken())
+                .refreshToken(resolveRefreshTokenValue(rotatedToken))
                 .refreshTokenExpiresAt(rotatedToken.getExpiresAt())
                 .build();
     }
@@ -480,5 +480,20 @@ public class AuthServiceImpl implements AuthService {
             password.append(TEMP_PASSWORD_CHARSET.charAt(index));
         }
         return password.toString();
+    }
+
+    private String resolveRefreshTokenValue(RefreshToken refreshToken) {
+        if (refreshToken == null) {
+            throw new InvalidTokenException("Refresh token is invalid");
+        }
+        String raw = refreshToken.getRawToken();
+        if (raw != null && !raw.isBlank()) {
+            return raw;
+        }
+        String legacy = refreshToken.getToken();
+        if (legacy != null && !legacy.isBlank()) {
+            return legacy;
+        }
+        throw new InvalidTokenException("Refresh token is invalid");
     }
 }

@@ -2,6 +2,8 @@ package com.worknest.config;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +14,8 @@ import javax.sql.DataSource;
 
 @Configuration
 public class MasterDataSourceConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(MasterDataSourceConfig.class);
 
     @Value("${spring.datasource.url}")
     private String masterDbUrl;
@@ -49,6 +53,7 @@ public class MasterDataSourceConfig {
     @Bean(name = "masterDataSource")
     @Primary
     public DataSource masterDataSource() {
+        validateMasterDataSourceProperties();
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(masterDbUrl);
         config.setUsername(masterDbUsername);
@@ -73,6 +78,22 @@ public class MasterDataSourceConfig {
     @Bean(name = "masterJdbcTemplate")
     public JdbcTemplate masterJdbcTemplate() {
         return new JdbcTemplate(masterDataSource());
+    }
+
+    private void validateMasterDataSourceProperties() {
+        if (masterDbUrl == null || masterDbUrl.isBlank()) {
+            throw new IllegalStateException("spring.datasource.url must be configured for master database connectivity");
+        }
+        if (masterDbUsername == null || masterDbUsername.isBlank()) {
+            throw new IllegalStateException("spring.datasource.username must be configured for master database connectivity");
+        }
+
+        if (masterDbPassword == null || masterDbPassword.isBlank()) {
+            log.warn("Master DB password is blank. Set DB_PASSWORD for secured environments.");
+        }
+        if ("root".equalsIgnoreCase(masterDbUsername)) {
+            log.warn("Master DB is configured with root user. Prefer a dedicated least-privileged DB account.");
+        }
     }
 }
 

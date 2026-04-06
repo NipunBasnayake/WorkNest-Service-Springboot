@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -204,6 +205,73 @@ public class AttachmentServiceImpl implements AttachmentService {
         if (mimeType == null || !allowedMimeTypes.contains(mimeType.toLowerCase(Locale.ROOT))) {
             throw new BadRequestException("Unsupported file type");
         }
+
+        String normalizedMimeType = mimeType.toLowerCase(Locale.ROOT);
+        String detectedMimeType = detectMimeTypeByMagic(file);
+        if (detectedMimeType == null) {
+            throw new BadRequestException("Unable to verify file signature");
+        }
+        if (!normalizedMimeType.equals(detectedMimeType)) {
+            throw new BadRequestException("File content does not match declared MIME type");
+        }
+    }
+
+    private String detectMimeTypeByMagic(MultipartFile file) {
+        try (InputStream inputStream = file.getInputStream()) {
+            byte[] header = inputStream.readNBytes(16);
+            if (header.length == 0) {
+                return null;
+            }
+
+            if (header.length >= 8
+                    && (header[0] & 0xFF) == 0x89
+                    && header[1] == 0x50
+                    && header[2] == 0x4E
+                    && header[3] == 0x47
+                    && header[4] == 0x0D
+                    && header[5] == 0x0A
+                    && header[6] == 0x1A
+                    && header[7] == 0x0A) {
+                return "image/png";
+            }
+
+            if (header.length >= 3
+                    && (header[0] & 0xFF) == 0xFF
+                    && (header[1] & 0xFF) == 0xD8
+                    && (header[2] & 0xFF) == 0xFF) {
+                return "image/jpeg";
+            }
+
+            if (header.length >= 4
+                    && header[0] == 0x25
+                    && header[1] == 0x50
+                    && header[2] == 0x44
+                    && header[3] == 0x46) {
+                return "application/pdf";
+            }
+
+            if (isLikelyText(header)) {
+                return "text/plain";
+            }
+
+            return null;
+        } catch (IOException ex) {
+            throw new BadRequestException("Failed to inspect attachment file");
+        }
+    }
+
+    private boolean isLikelyText(byte[] header) {
+        for (byte value : header) {
+            int unsigned = value & 0xFF;
+            if (unsigned == 0x09 || unsigned == 0x0A || unsigned == 0x0D) {
+                continue;
+            }
+            if (unsigned >= 0x20 && unsigned <= 0x7E) {
+                continue;
+            }
+            return false;
+        }
+        return true;
     }
 
     private void validateEntityAccess(AttachmentEntityType entityType, Long entityId, Employee currentEmployee, boolean write) {

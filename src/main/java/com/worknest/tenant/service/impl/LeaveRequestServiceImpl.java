@@ -200,9 +200,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto approveLeave(Long leaveRequestId, LeaveDecisionRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
-        validateActorEmployeeId(requestDto.getApproverEmployeeId());
-        Employee approver = getActiveEmployeeOrThrow(requestDto.getApproverEmployeeId());
+        Employee approver = getCurrentEmployeeOrThrow();
+        if (approver.getStatus() != UserStatus.ACTIVE) {
+            throw new BadRequestException("Approver account is not active");
+        }
         validateApproverRole(approver);
 
         if (leaveRequest.getStatus() != LeaveStatus.PENDING) {
@@ -211,7 +214,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest.setStatus(LeaveStatus.APPROVED);
         leaveRequest.setApprover(approver);
-        leaveRequest.setReason(mergeReason(leaveRequest.getReason(), requestDto.getReason()));
+        leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
         notificationService.createSystemNotification(
@@ -239,9 +242,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto rejectLeave(Long leaveRequestId, LeaveDecisionRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
-        validateActorEmployeeId(requestDto.getApproverEmployeeId());
-        Employee approver = getActiveEmployeeOrThrow(requestDto.getApproverEmployeeId());
+        Employee approver = getCurrentEmployeeOrThrow();
+        if (approver.getStatus() != UserStatus.ACTIVE) {
+            throw new BadRequestException("Approver account is not active");
+        }
         validateApproverRole(approver);
 
         if (leaveRequest.getStatus() != LeaveStatus.PENDING) {
@@ -250,7 +256,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest.setStatus(LeaveStatus.REJECTED);
         leaveRequest.setApprover(approver);
-        leaveRequest.setReason(mergeReason(leaveRequest.getReason(), requestDto.getReason()));
+        leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
         notificationService.createSystemNotification(
@@ -266,7 +272,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 leaveRequest.getStartDate(),
                 leaveRequest.getEndDate(),
                 buildFullName(approver),
-                requestDto.getReason()
+                requestDto.getDecisionComment()
         );
         auditLogService.logAction(
                 AuditActionType.REJECT,
@@ -327,18 +333,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
     }
 
-    private Employee getActiveEmployeeOrThrow(Long employeeId) {
-        Employee employee = employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + employeeId));
-        if (employee.getStatus() != UserStatus.ACTIVE) {
-            throw new BadRequestException("Employee is not active: " + employeeId);
-        }
-        return employee;
-    }
-
     private void validateLeaveDates(java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (startDate == null || endDate == null) {
             throw new BadRequestException("Leave start and end dates are required");
+        }
+        if (startDate.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Leave start date cannot be in the past");
         }
         if (endDate.isBefore(startDate)) {
             throw new BadRequestException("Leave end date cannot be before start date");
@@ -374,23 +374,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 .status(leaveRequest.getStatus())
                 .approver(tenantDtoMapper.toEmployeeSimple(leaveRequest.getApprover()))
                 .reason(leaveRequest.getReason())
+                .decisionComment(leaveRequest.getDecisionComment())
                 .createdAt(leaveRequest.getCreatedAt())
                 .updatedAt(leaveRequest.getUpdatedAt())
                 .build();
     }
 
-    private String mergeReason(String requestReason, String decisionReason) {
-        String baseReason = trimToNull(requestReason);
-        String cleanDecision = trimToNull(decisionReason);
-
-        if (cleanDecision == null) {
-            return baseReason;
-        }
-        if (baseReason == null) {
-            return "Decision note: " + cleanDecision;
-        }
-        return baseReason + "\nDecision note: " + cleanDecision;
-    }
 
     private String trimToNull(String value) {
         if (value == null) {
@@ -400,19 +389,6 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private void validateActorEmployeeId(Long actorEmployeeId) {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        employeeRepository.findByEmailIgnoreCase(currentEmail).ifPresentOrElse(currentEmployee -> {
-                    if (!currentEmployee.getId().equals(actorEmployeeId)) {
-                        throw new ForbiddenOperationException("Authenticated user cannot act on behalf of another employee");
-                    }
-                },
-                () -> {
-                    if (securityUtils.getCurrentRoleOrThrow() != PlatformRole.TENANT_ADMIN) {
-                        throw new ForbiddenOperationException("Current user is not linked to an employee profile");
-                    }
-                });
-    }
 
     private void validateApproverRole(Employee approver) {
         if (!(approver.getRole() == PlatformRole.ADMIN || approver.getRole() == PlatformRole.HR)) {

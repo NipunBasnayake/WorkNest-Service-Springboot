@@ -37,4 +37,17 @@ public class SecurityUtils {
     public boolean isCurrentUser(Long platformUserId) {
         return getCurrentPrincipalOrThrow().getId().equals(platformUserId);
     }
+
+    public void requireAnyRole(PlatformRole... allowedRoles) {
+        PlatformRole currentRole = getCurrentRoleOrThrow();
+        if (allowedRoles == null || allowedRoles.length == 0) {
+            throw new ForbiddenOperationException("No allowed roles configured");
+        }
+        for (PlatformRole allowedRole : allowedRoles) {
+            if (currentRole == allowedRole) {
+                return;
+            }
+        }
+        throw new ForbiddenOperationException("Current user is not authorized for this action");
+    }
 }

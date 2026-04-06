@@ -9,6 +9,7 @@ public enum AuditEntityType {
     ANNOUNCEMENT,
     ATTACHMENT,
     HR_MESSAGE,
+    TEAM_CHAT,
     TEAM_CHAT_MESSAGE,
     NOTIFICATION
 }

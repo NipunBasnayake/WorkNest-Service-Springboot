@@ -28,6 +28,7 @@ public class TaskCreateRequestDto {
 
     private TaskPriority priority;
 
+    @NotNull(message = "Assignee ID is required")
     private Long assigneeId;
 
     private Long createdByEmployeeId;

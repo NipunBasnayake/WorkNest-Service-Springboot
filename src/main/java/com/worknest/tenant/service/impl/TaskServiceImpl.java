@@ -48,6 +48,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.EnumSet;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,14 @@ import java.util.stream.Collectors;
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class TaskServiceImpl implements TaskService {
+
+    private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
+            TaskStatus.TODO, EnumSet.of(TaskStatus.IN_PROGRESS),
+            TaskStatus.IN_PROGRESS, EnumSet.of(TaskStatus.TODO, TaskStatus.IN_REVIEW, TaskStatus.BLOCKED),
+            TaskStatus.IN_REVIEW, EnumSet.of(TaskStatus.DONE, TaskStatus.IN_PROGRESS),
+            TaskStatus.BLOCKED, EnumSet.of(TaskStatus.IN_PROGRESS),
+            TaskStatus.DONE, EnumSet.noneOf(TaskStatus.class)
+    );
 
     private final TaskRepository taskRepository;
     private final TaskCommentRepository taskCommentRepository;
@@ -100,8 +109,10 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto createTask(TaskCreateRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Project project = getProjectOrThrow(requestDto.getProjectId());
         ensureProjectAllowsTaskCreation(project);
+        validateAssigneeRequired(requestDto.getAssigneeId());
 
         Long creatorEmployeeId = resolveActorEmployeeId(requestDto.getCreatedByEmployeeId());
         Employee creator = getActiveEmployeeOrThrow(creatorEmployeeId);
@@ -132,9 +143,13 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto updateTask(Long taskId, TaskUpdateRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Task task = getTaskOrThrow(taskId);
         Long previousAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
         TaskStatus previousStatus = task.getStatus();
+        String previousTitle = task.getTitle();
+        String previousDescription = task.getDescription();
+        LocalDate previousDueDate = task.getDueDate();
 
         if (requestDto.getStatus() != null) {
             validateTaskStatusTransition(task.getStatus(), requestDto.getStatus());
@@ -152,6 +167,9 @@ public class TaskServiceImpl implements TaskService {
 
         validateDueDate(task.getProject(), requestDto.getDueDate());
         task.setDueDate(requestDto.getDueDate());
+        if (task.getAssignee() == null) {
+            throw new BadRequestException("Task assignee is required");
+        }
 
         Task updated = taskRepository.save(task);
         if (assigneeChanged(previousAssigneeId, updated)) {
@@ -159,6 +177,10 @@ public class TaskServiceImpl implements TaskService {
         }
         if (statusChanged(previousStatus, updated)) {
             notifyTaskStatusChange(updated);
+        }
+        if (hasTaskContentChanged(previousTitle, previousDescription, previousDueDate, updated)
+                && !statusChanged(previousStatus, updated)) {
+            notifyTaskUpdated(updated);
         }
         auditLogService.logAction(
                 AuditActionType.UPDATE,
@@ -174,6 +196,12 @@ public class TaskServiceImpl implements TaskService {
         Task task = getTaskOrThrow(taskId);
 
         PlatformRole currentRole = securityUtils.getCurrentRoleOrThrow();
+        if (currentRole != PlatformRole.TENANT_ADMIN
+                && currentRole != PlatformRole.ADMIN
+                && currentRole != PlatformRole.MANAGER
+                && currentRole != PlatformRole.EMPLOYEE) {
+            throw new ForbiddenOperationException("Current user is not authorized to update task status");
+        }
         if (currentRole == PlatformRole.EMPLOYEE) {
             Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
             if (task.getAssignee() == null || !currentEmployeeId.equals(task.getAssignee().getId())) {
@@ -197,6 +225,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changePriority(Long taskId, TaskPriorityUpdateRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Task task = getTaskOrThrow(taskId);
         task.setPriority(requestDto.getPriority());
         Task updated = taskRepository.save(task);
@@ -211,7 +240,9 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changeAssignee(Long taskId, TaskAssigneeUpdateRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Task task = getTaskOrThrow(taskId);
+        validateAssigneeRequired(requestDto.getAssigneeId());
         Employee assignee = resolveAssignee(task.getProject().getId(), requestDto.getAssigneeId());
         task.setAssignee(assignee);
         Task updated = taskRepository.save(task);
@@ -227,6 +258,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changeDueDate(Long taskId, TaskDueDateUpdateRequestDto requestDto) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Task task = getTaskOrThrow(taskId);
         validateDueDate(task.getProject(), requestDto.getDueDate());
         task.setDueDate(requestDto.getDueDate());
@@ -342,6 +374,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public void deleteTask(Long taskId) {
+        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR);
         Task task = getTaskOrThrow(taskId);
 
         if (attachmentRepository.existsByEntityTypeAndEntityId(AttachmentEntityType.TASK, taskId)) {
@@ -487,6 +520,10 @@ public class TaskServiceImpl implements TaskService {
             return;
         }
 
+        if (dueDate.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Task due date cannot be in the past");
+        }
+
         if (project.getStartDate() != null && dueDate.isBefore(project.getStartDate())) {
             throw new BadRequestException("Task due date cannot be before project start date");
         }
@@ -500,8 +537,16 @@ public class TaskServiceImpl implements TaskService {
             return;
         }
 
-        if (currentStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
-            throw new BadRequestException("Completed task cannot be moved back to another status");
+        if (currentStatus == newStatus) {
+            return;
+        }
+
+        Set<TaskStatus> allowedTransitions = ALLOWED_STATUS_TRANSITIONS.getOrDefault(
+                currentStatus,
+                EnumSet.noneOf(TaskStatus.class)
+        );
+        if (!allowedTransitions.contains(newStatus)) {
+            throw new BadRequestException("Invalid task status transition: " + currentStatus + " -> " + newStatus);
         }
     }
 
@@ -672,7 +717,7 @@ public class TaskServiceImpl implements TaskService {
             }
             notificationService.createSystemNotification(
                     recipientId,
-                    NotificationType.TASK_STATUS_CHANGED,
+                    NotificationType.TASK_COMMENT_ADDED,
                     "New task comment on: " + task.getTitle(),
                     AuditEntityType.TASK.name(),
                     task.getId()
@@ -782,6 +827,51 @@ public class TaskServiceImpl implements TaskService {
                 "priority".equals(sortBy) ||
                 "status".equals(sortBy) ||
                 "title".equals(sortBy);
+    }
+
+    private void validateAssigneeRequired(Long assigneeId) {
+        if (assigneeId == null) {
+            throw new BadRequestException("Task assignee is required");
+        }
+    }
+
+    private boolean hasTaskContentChanged(
+            String previousTitle,
+            String previousDescription,
+            LocalDate previousDueDate,
+            Task updatedTask) {
+        if (!java.util.Objects.equals(previousTitle, updatedTask.getTitle())) {
+            return true;
+        }
+        if (!java.util.Objects.equals(previousDescription, updatedTask.getDescription())) {
+            return true;
+        }
+        return !java.util.Objects.equals(previousDueDate, updatedTask.getDueDate());
+    }
+
+    private void notifyTaskUpdated(Task task) {
+        Set<Long> recipients = new java.util.LinkedHashSet<>();
+        if (task.getCreatedBy() != null) {
+            recipients.add(task.getCreatedBy().getId());
+        }
+        if (task.getAssignee() != null) {
+            recipients.add(task.getAssignee().getId());
+        }
+
+        Employee actor = resolveCurrentEmployeeOrNull();
+        if (actor != null) {
+            recipients.remove(actor.getId());
+        }
+
+        for (Long recipientId : recipients) {
+            notificationService.createSystemNotification(
+                    recipientId,
+                    NotificationType.TASK_UPDATED,
+                    "Task updated: " + task.getTitle(),
+                    AuditEntityType.TASK.name(),
+                    task.getId()
+            );
+        }
     }
 
     private String buildFullName(Employee employee) {

@@ -22,6 +22,7 @@ public class LeaveResponseDto {
     private LeaveStatus status;
     private EmployeeSimpleDto approver;
     private String reason;
+    private String decisionComment;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

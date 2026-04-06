@@ -1,6 +1,6 @@
 package com.worknest.tenant.dto.leave;
 
-import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,9 +9,7 @@ import lombok.Setter;
 @Setter
 public class LeaveDecisionRequestDto {
 
-    @NotNull(message = "Approver employee ID is required")
-    private Long approverEmployeeId;
-
-    @Size(max = 2000, message = "Reason must not exceed 2000 characters")
-    private String reason;
+    @JsonAlias("reason")
+    @Size(max = 2000, message = "Decision comment must not exceed 2000 characters")
+    private String decisionComment;
 }

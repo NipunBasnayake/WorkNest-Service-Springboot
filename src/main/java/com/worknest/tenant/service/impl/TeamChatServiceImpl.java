@@ -89,7 +89,7 @@ public class TeamChatServiceImpl implements TeamChatService {
                     TeamChat saved = teamChatRepository.save(created);
                     auditLogService.logAction(
                             AuditActionType.CREATE,
-                            AuditEntityType.TEAM_CHAT_MESSAGE,
+                            AuditEntityType.TEAM_CHAT,
                             saved.getId(),
                             "{\"teamId\":" + teamId + "}"
                     );

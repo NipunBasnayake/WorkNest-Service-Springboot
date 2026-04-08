@@ -21,9 +21,17 @@ Multi-tenant backend for the WorkNest Software Company Management Platform.
   - `tenant_<tenantKey>`
 
 ## Run locally (IDE)
-1. Configure environment variables (or use defaults in `application.yml`).
+1. Copy `.env.example` to `.env` and set values (or export vars in your shell/IDE run config).
 2. Start MySQL.
 3. Run Spring Boot app.
+
+Security note: do not commit real credentials. For production, use a secret manager (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, Vault).
+If this repository has ever contained live credentials, rotate them immediately.
+
+## Profiles
+- `application.yml`: shared baseline, env-driven settings only
+- `application-dev.yml`: local development defaults
+- `application-prod.yml`: production-safe overrides (no `ddl-auto=update`, swagger disabled by default)
 
 ## Run with Docker
 ```bash
@@ -56,12 +64,14 @@ Seed creates:
 
 ## Important environment variables
 - `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
-- `JWT_SECRET`, `JWT_ACCESS_EXPIRY_MINUTES`, `JWT_REFRESH_EXPIRY_DAYS`
+- `JWT_SECRET`
+- `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`
 - `TENANT_HEADER`
 - `ALLOWED_ORIGINS`, `WS_ALLOWED_ORIGINS`
 - `ATTACHMENTS_DIR`, `ATTACHMENT_MAX_FILE_SIZE_BYTES`, `ATTACHMENT_ALLOWED_MIME_TYPES`
 - `BOOTSTRAP_PLATFORM_ADMIN_NAME`, `BOOTSTRAP_PLATFORM_ADMIN_EMAIL`, `BOOTSTRAP_PLATFORM_ADMIN_PASSWORD`
 - `BOOTSTRAP_SEED_DEMO_DATA`
+- `BOOTSTRAP_DEMO_USER_PASSWORD` (required only when demo data seeding is enabled)
 
 ## Phase coverage
 - Phase 1: multi-tenant infrastructure

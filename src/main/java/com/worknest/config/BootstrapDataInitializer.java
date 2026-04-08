@@ -22,6 +22,7 @@ public class BootstrapDataInitializer implements CommandLineRunner {
     private final PlatformUserRepository platformUserRepository;
     private final PasswordEncoder passwordEncoder;
     private final MasterTenantContextRunner masterTenantContextRunner;
+    private final boolean bootstrapPlatformAdminEnabled;
     private final String bootstrapAdminEmail;
     private final String bootstrapAdminPassword;
     private final String bootstrapAdminName;
@@ -30,12 +31,14 @@ public class BootstrapDataInitializer implements CommandLineRunner {
             PlatformUserRepository platformUserRepository,
             PasswordEncoder passwordEncoder,
             MasterTenantContextRunner masterTenantContextRunner,
-            @Value("${app.bootstrap.platform-admin.email:platform.admin@worknest.local}") String bootstrapAdminEmail,
-            @Value("${app.bootstrap.platform-admin.password:ChangeMe123!}") String bootstrapAdminPassword,
-            @Value("${app.bootstrap.platform-admin.name:Platform Admin}") String bootstrapAdminName) {
+            @Value("${app.bootstrap.platform-admin.enabled:false}") boolean bootstrapPlatformAdminEnabled,
+            @Value("${app.bootstrap.platform-admin.email:}") String bootstrapAdminEmail,
+            @Value("${app.bootstrap.platform-admin.password:}") String bootstrapAdminPassword,
+            @Value("${app.bootstrap.platform-admin.name:}") String bootstrapAdminName) {
         this.platformUserRepository = platformUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.masterTenantContextRunner = masterTenantContextRunner;
+        this.bootstrapPlatformAdminEnabled = bootstrapPlatformAdminEnabled;
         this.bootstrapAdminEmail = bootstrapAdminEmail;
         this.bootstrapAdminPassword = bootstrapAdminPassword;
         this.bootstrapAdminName = bootstrapAdminName;
@@ -43,6 +46,16 @@ public class BootstrapDataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        if (!bootstrapPlatformAdminEnabled) {
+            log.info("Bootstrap platform admin creation is disabled (app.bootstrap.platform-admin.enabled=false)");
+            return;
+        }
+        if (isBlank(bootstrapAdminEmail) || isBlank(bootstrapAdminPassword) || isBlank(bootstrapAdminName)) {
+            throw new IllegalStateException(
+                    "Bootstrap platform admin is enabled but credentials are incomplete. " +
+                            "Set BOOTSTRAP_PLATFORM_ADMIN_EMAIL, BOOTSTRAP_PLATFORM_ADMIN_PASSWORD and BOOTSTRAP_PLATFORM_ADMIN_NAME.");
+        }
+
         masterTenantContextRunner.runInMasterContext(() -> {
             if (platformUserRepository.existsByRole(PlatformRole.PLATFORM_ADMIN)) {
                 return;
@@ -59,5 +72,9 @@ public class BootstrapDataInitializer implements CommandLineRunner {
             platformUserRepository.save(platformAdmin);
             log.info("Bootstrap PLATFORM_ADMIN created with email: {}", platformAdmin.getEmail());
         });
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

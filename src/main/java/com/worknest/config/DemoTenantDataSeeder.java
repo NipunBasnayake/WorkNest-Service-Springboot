@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -29,7 +30,7 @@ import java.util.List;
 
 @Component
 @Order(30)
-@ConditionalOnProperty(name = "app.bootstrap.seed-demo-data", havingValue = "true")
+@ConditionalOnProperty(name = "bootstrap.seed-demo-data", havingValue = "true")
 public class DemoTenantDataSeeder implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DemoTenantDataSeeder.class);
@@ -50,6 +51,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
     private final HrConversationRepository hrConversationRepository;
     private final HrMessageRepository hrMessageRepository;
     private final PasswordEncoder passwordEncoder;
+    private final String demoUserPassword;
 
     public DemoTenantDataSeeder(
             PlatformTenantRepository platformTenantRepository,
@@ -67,7 +69,8 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             TeamChatMessageRepository teamChatMessageRepository,
             HrConversationRepository hrConversationRepository,
             HrMessageRepository hrMessageRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            @Value("${bootstrap.demo-user-password:}") String demoUserPassword) {
         this.platformTenantRepository = platformTenantRepository;
         this.platformUserRepository = platformUserRepository;
         this.masterTenantContextRunner = masterTenantContextRunner;
@@ -84,6 +87,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
         this.hrConversationRepository = hrConversationRepository;
         this.hrMessageRepository = hrMessageRepository;
         this.passwordEncoder = passwordEncoder;
+        this.demoUserPassword = demoUserPassword;
     }
 
     @Override
@@ -107,6 +111,10 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             if (employeeRepository.count() > 0) {
                 log.info("Skipping demo seed for tenant {} because employees already exist", tenant.getTenantKey());
                 return;
+            }
+            if (demoUserPassword == null || demoUserPassword.isBlank()) {
+                throw new IllegalStateException(
+                        "Demo tenant seeding is enabled but bootstrap.demo-user-password is not configured");
             }
 
             Employee admin = createEmployee(tenant.getTenantKey(), "ADM", "Tenant", "Admin", PlatformRole.ADMIN);
@@ -206,7 +214,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
         employee.setFirstName(firstName);
         employee.setLastName(lastName);
         employee.setEmail(role.name().toLowerCase() + "." + tenantKey + "@demo.worknest.local");
-        employee.setPasswordHash(passwordEncoder.encode("ChangeMe123!"));
+        employee.setPasswordHash(passwordEncoder.encode(demoUserPassword));
         employee.setRole(role);
         employee.setDesignation(role.name());
         employee.setJoinedDate(LocalDate.now().minusMonths(6));

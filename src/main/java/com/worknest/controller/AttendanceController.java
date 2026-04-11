@@ -6,16 +6,21 @@ import com.worknest.tenant.dto.employee.EmployeeResponseDto;
 import com.worknest.tenant.service.AttendanceService;
 import com.worknest.tenant.service.EmployeeService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
 
 @RestController
+@Validated
 @RequestMapping("/api/tenant/attendance")
 public class AttendanceController {
 
@@ -28,7 +33,7 @@ public class AttendanceController {
     }
 
     @PostMapping("/my/check-in")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<AttendanceResponseDto>> myCheckIn() {
         EmployeeResponseDto me = employeeService.getMyProfile();
         AttendanceCheckInRequestDto requestDto = new AttendanceCheckInRequestDto();
@@ -39,7 +44,7 @@ public class AttendanceController {
     }
 
     @PostMapping("/my/check-out")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<AttendanceResponseDto>> myCheckOut() {
         EmployeeResponseDto me = employeeService.getMyProfile();
         AttendanceCheckOutRequestDto requestDto = new AttendanceCheckOutRequestDto();
@@ -66,7 +71,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/my")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> myAttendance() {
         EmployeeResponseDto me = employeeService.getMyProfile();
         List<AttendanceResponseDto> response = attendanceService.getByEmployee(me.getId());
@@ -75,7 +80,7 @@ public class AttendanceController {
 
     @GetMapping("/employee/{employeeId}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
-    public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByEmployee(@PathVariable Long employeeId) {
+    public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByEmployee(@PathVariable("employeeId") @Positive Long employeeId) {
         List<AttendanceResponseDto> response = attendanceService.getByEmployee(employeeId);
         return ResponseEntity.ok(ApiResponse.success("Attendance records retrieved", response));
     }
@@ -83,7 +88,7 @@ public class AttendanceController {
     @GetMapping("/date/{workDate}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByDate(
-            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
+            @PathVariable("workDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
         List<AttendanceResponseDto> response = attendanceService.getByDate(workDate);
         return ResponseEntity.ok(ApiResponse.success("Attendance by date retrieved", response));
     }
@@ -91,7 +96,7 @@ public class AttendanceController {
     @GetMapping("/summary/daily")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<AttendanceDailySummaryDto>> getDailySummary(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
+            @RequestParam("workDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
         AttendanceDailySummaryDto response = attendanceService.getDailySummary(workDate);
         return ResponseEntity.ok(ApiResponse.success("Daily attendance summary retrieved", response));
     }
@@ -99,18 +104,18 @@ public class AttendanceController {
     @GetMapping("/summary/monthly")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
     public ResponseEntity<ApiResponse<AttendanceMonthlySummaryDto>> getMonthlySummary(
-            @RequestParam Long employeeId,
-            @RequestParam int year,
-            @RequestParam int month) {
+            @RequestParam("employeeId") @Positive Long employeeId,
+            @RequestParam("year") @Min(2000) int year,
+            @RequestParam("month") @Min(1) @Max(12) int month) {
         AttendanceMonthlySummaryDto response = attendanceService.getMonthlySummary(employeeId, year, month);
         return ResponseEntity.ok(ApiResponse.success("Monthly attendance summary retrieved", response));
     }
 
     @GetMapping("/summary/my-monthly")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<AttendanceMonthlySummaryDto>> getMyMonthlySummary(
-            @RequestParam int year,
-            @RequestParam int month) {
+            @RequestParam("year") @Min(2000) int year,
+            @RequestParam("month") @Min(1) @Max(12) int month) {
         EmployeeResponseDto me = employeeService.getMyProfile();
         AttendanceMonthlySummaryDto response = attendanceService.getMonthlySummary(me.getId(), year, month);
         return ResponseEntity.ok(ApiResponse.success("My monthly attendance summary retrieved", response));

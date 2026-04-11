@@ -6,8 +6,8 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.notification.email.EmailNotificationService;
-import com.worknest.security.model.PlatformUserPrincipal;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.chat.*;
 import com.worknest.tenant.dto.common.EmployeeSimpleDto;
 import com.worknest.tenant.entity.Employee;
@@ -30,7 +30,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -41,14 +40,12 @@ import java.util.regex.Pattern;
 @Transactional(transactionManager = "transactionManager")
 public class HrChatServiceImpl implements HrChatService {
 
-    private static final EnumSet<PlatformRole> HR_PARTICIPANT_ROLES =
-            EnumSet.of(PlatformRole.HR, PlatformRole.ADMIN);
     private static final Pattern MENTION_PATTERN = Pattern.compile("@([A-Za-z0-9._-]{2,64})");
 
     private final HrConversationRepository hrConversationRepository;
     private final HrMessageRepository hrMessageRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final ChatReadReceiptService chatReadReceiptService;
     private final AuditLogService auditLogService;
@@ -60,7 +57,7 @@ public class HrChatServiceImpl implements HrChatService {
             HrConversationRepository hrConversationRepository,
             HrMessageRepository hrMessageRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             ChatReadReceiptService chatReadReceiptService,
             AuditLogService auditLogService,
@@ -70,7 +67,7 @@ public class HrChatServiceImpl implements HrChatService {
         this.hrConversationRepository = hrConversationRepository;
         this.hrMessageRepository = hrMessageRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.chatReadReceiptService = chatReadReceiptService;
         this.auditLogService = auditLogService;
@@ -81,6 +78,7 @@ public class HrChatServiceImpl implements HrChatService {
 
     @Override
     public HrConversationResponseDto createOrGetConversation(HrConversationCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         if (requestDto.getEmployeeId().equals(requestDto.getHrId())) {
             throw new BadRequestException("Employee and HR participants must be different users");
         }
@@ -120,18 +118,19 @@ public class HrChatServiceImpl implements HrChatService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public HrConversationTargetsResponseDto listConversationTargets() {
-        Employee me = getCurrentEmployeeOrThrow();
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
+        Employee me = authorizationService.getCurrentEmployeeOrNull();
         List<Employee> activeEmployees = employeeRepository.findByStatus(UserStatus.ACTIVE);
 
         List<EmployeeSimpleDto> hrTargets = activeEmployees.stream()
-                .filter(candidate -> !candidate.getId().equals(me.getId()))
+                .filter(candidate -> me == null || !candidate.getId().equals(me.getId()))
                 .filter(candidate -> isHrRole(candidate.getRole()))
                 .sorted(Comparator.comparing(this::toComparableName))
                 .map(tenantDtoMapper::toEmployeeSimple)
                 .toList();
 
         List<EmployeeSimpleDto> employeeTargets = activeEmployees.stream()
-                .filter(candidate -> !candidate.getId().equals(me.getId()))
+                .filter(candidate -> me == null || !candidate.getId().equals(me.getId()))
                 .filter(candidate -> isEmployeeParticipantRole(candidate.getRole()))
                 .sorted(Comparator.comparing(this::toComparableName))
                 .map(tenantDtoMapper::toEmployeeSimple)
@@ -146,6 +145,13 @@ public class HrChatServiceImpl implements HrChatService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<HrConversationResponseDto> listMyConversations() {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
+        if (authorizationService.getCurrentRoleOrThrow().isTenantAdminEquivalent()) {
+            return hrConversationRepository.findAll().stream()
+                    .sorted(Comparator.comparing(HrConversation::getUpdatedAt).reversed())
+                    .map(this::toConversationResponse)
+                    .toList();
+        }
         Employee me = getCurrentEmployeeOrThrow();
         return hrConversationRepository.findByEmployeeIdOrHrIdOrderByUpdatedAtDesc(me.getId(), me.getId())
                 .stream()
@@ -156,8 +162,9 @@ public class HrChatServiceImpl implements HrChatService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<HrMessageResponseDto> listMessages(Long conversationId) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         HrConversation conversation = getConversationOrThrow(conversationId);
-        Employee me = getCurrentEmployeeOrThrow();
+        Employee me = authorizationService.getCurrentEmployeeOrNull();
         ensureConversationAccess(conversation, me);
 
         return hrMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
@@ -168,15 +175,12 @@ public class HrChatServiceImpl implements HrChatService {
 
     @Override
     public HrMessageResponseDto sendMessage(Long conversationId, HrMessageSendRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         HrConversation conversation = getConversationOrThrow(conversationId);
-        Employee sender = getEmployeeOrThrow(requestDto.getSenderEmployeeId());
         Employee me = getCurrentEmployeeOrThrow();
+        Employee sender = me;
 
         ensureConversationAccess(conversation, me);
-        if (!sender.getId().equals(me.getId())) {
-            throw new ForbiddenOperationException("Sender must match the authenticated employee");
-        }
-
         boolean senderIsParticipant = conversation.getEmployee().getId().equals(sender.getId())
                 || conversation.getHr().getId().equals(sender.getId());
         if (!senderIsParticipant) {
@@ -209,7 +213,7 @@ public class HrChatServiceImpl implements HrChatService {
         notifyMentionedParticipants(conversation, sender, saved.getMessage(), saved.getId());
 
         tenantRealtimePublisher.publishHrMessage(
-                securityUtils.getCurrentTenantKeyOrThrow(),
+                authorizationService.getCurrentTenantKeyOrThrow(),
                 conversationId,
                 response
         );
@@ -226,9 +230,14 @@ public class HrChatServiceImpl implements HrChatService {
 
     @Override
     public long markConversationMessagesAsRead(Long conversationId) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         HrConversation conversation = getConversationOrThrow(conversationId);
-        Employee me = getCurrentEmployeeOrThrow();
+        Employee me = authorizationService.getCurrentEmployeeOrNull();
         ensureConversationAccess(conversation, me);
+
+        if (me == null) {
+            return 0L;
+        }
 
         List<HrMessage> unreadMessages = hrMessageRepository
                 .findByConversationIdAndSenderIdNotAndReadFalse(conversationId, me.getId());
@@ -261,24 +270,16 @@ public class HrChatServiceImpl implements HrChatService {
     }
 
     private Employee getCurrentEmployeeOrThrow() {
-        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
-        if (principal.getId() != null) {
-            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
-            if (employeeByPlatformId != null) {
-                return employeeByPlatformId;
-            }
-        }
-
-        String currentEmail = principal.getEmail();
-        if (currentEmail == null || currentEmail.isBlank()) {
-            throw new ResourceNotFoundException("Current user does not have an employee profile");
-        }
-
-        return employeeRepository.findByEmailIgnoreCase(currentEmail)
-                .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private void ensureConversationAccess(HrConversation conversation, Employee employee) {
+        if (authorizationService.getCurrentRoleOrThrow().isTenantAdminEquivalent()) {
+            return;
+        }
+        if (employee == null) {
+            throw new ForbiddenOperationException("You are not allowed to access this HR conversation");
+        }
         boolean allowed = conversation.getEmployee().getId().equals(employee.getId())
                 || conversation.getHr().getId().equals(employee.getId());
         if (!allowed) {
@@ -297,6 +298,9 @@ public class HrChatServiceImpl implements HrChatService {
     }
 
     private void validateCurrentUserCanAccessParticipant(Long employeeId, Long hrId) {
+        if (authorizationService.getCurrentRoleOrThrow().isTenantAdminEquivalent()) {
+            return;
+        }
         Employee me = getCurrentEmployeeOrThrow();
         if (!me.getId().equals(employeeId) && !me.getId().equals(hrId)) {
             throw new ForbiddenOperationException("You can only open conversations where you are a participant");
@@ -304,7 +308,7 @@ public class HrChatServiceImpl implements HrChatService {
     }
 
     private boolean isHrRole(PlatformRole role) {
-        return role != null && HR_PARTICIPANT_ROLES.contains(role);
+        return role != null && (role.isHrEquivalent() || role.isTenantAdminEquivalent());
     }
 
     private boolean isEmployeeParticipantRole(PlatformRole role) {

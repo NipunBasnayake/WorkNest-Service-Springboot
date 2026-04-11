@@ -36,7 +36,7 @@ public class AnnouncementController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AnnouncementResponseDto>> updateAnnouncement(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @Valid @RequestBody AnnouncementUpdateRequestDto requestDto) {
         AnnouncementResponseDto response = announcementService.updateAnnouncement(id, requestDto);
         return ResponseEntity.ok(ApiResponse.success("Announcement updated successfully", response));
@@ -44,7 +44,7 @@ public class AnnouncementController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
-    public ResponseEntity<ApiResponse<Void>> deleteAnnouncement(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> deleteAnnouncement(@PathVariable("id") Long id) {
         announcementService.deleteAnnouncement(id);
         return ResponseEntity.ok(ApiResponse.success("Announcement deleted successfully"));
     }
@@ -59,11 +59,11 @@ public class AnnouncementController {
     @GetMapping("/paged")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<PagedResultDto<AnnouncementResponseDto>>> listAnnouncementsPaged(
-            @RequestParam(required = false) String search,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
         PagedResultDto<AnnouncementResponseDto> response = announcementService.listAnnouncementsPaged(
                 search,
                 page,
@@ -76,7 +76,7 @@ public class AnnouncementController {
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<AnnouncementResponseDto>> getAnnouncement(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AnnouncementResponseDto>> getAnnouncement(@PathVariable("id") Long id) {
         AnnouncementResponseDto response = announcementService.getAnnouncement(id);
         return ResponseEntity.ok(ApiResponse.success("Announcement retrieved successfully", response));
     }

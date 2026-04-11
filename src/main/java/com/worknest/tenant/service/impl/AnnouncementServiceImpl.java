@@ -6,7 +6,8 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.notification.email.EmailNotificationService;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.announcement.AnnouncementCreateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
 import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
@@ -17,6 +18,7 @@ import com.worknest.tenant.entity.Team;
 import com.worknest.tenant.entity.TeamMember;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
+import com.worknest.tenant.enums.AnnouncementCreatorRole;
 import com.worknest.tenant.enums.NotificationType;
 import com.worknest.tenant.repository.AnnouncementRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
@@ -43,7 +45,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private final EmployeeRepository employeeRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
@@ -55,7 +57,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             EmployeeRepository employeeRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
@@ -65,7 +67,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         this.employeeRepository = employeeRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
@@ -75,20 +77,22 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public AnnouncementResponseDto createAnnouncement(AnnouncementCreateRequestDto requestDto) {
-        Employee creator = resolveCreatorForAnnouncement(requestDto);
+        authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
+        Employee creator = resolveCreatorForAnnouncement();
         Team targetTeam = resolveTeamOrNull(requestDto.getTeamId());
 
         Announcement announcement = new Announcement();
         announcement.setTitle(requestDto.getTitle().trim());
         announcement.setMessage(requestDto.getMessage().trim());
         announcement.setCreatedBy(creator);
+        announcement.setCreatedByRole(resolveCreatedByRole());
         announcement.setTeam(targetTeam);
 
         Announcement saved = announcementRepository.save(announcement);
         AnnouncementResponseDto response = toResponse(saved);
 
         notifyRecipients(saved);
-        tenantRealtimePublisher.publishAnnouncement(securityUtils.getCurrentTenantKeyOrThrow(), response);
+        tenantRealtimePublisher.publishAnnouncement(authorizationService.getCurrentTenantKeyOrThrow(), response);
 
         auditLogService.logAction(
                 AuditActionType.CREATE,
@@ -102,6 +106,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public AnnouncementResponseDto updateAnnouncement(Long announcementId, AnnouncementUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
         if (!canManageAnnouncement(announcement)) {
             throw new ForbiddenOperationException("You are not allowed to update this announcement");
@@ -124,6 +129,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public void deleteAnnouncement(Long announcementId) {
+        authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
         if (!canManageAnnouncement(announcement)) {
             throw new ForbiddenOperationException("You are not allowed to delete this announcement");
@@ -141,6 +147,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<AnnouncementResponseDto> listAnnouncements() {
+        authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         VisibilityContext visibilityContext = resolveVisibilityContext();
         return announcementRepository.findVisibleAnnouncements(
                         visibilityContext.employeeId(),
@@ -158,6 +165,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             int size,
             String sortBy,
             String sortDir) {
+        authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
 
         VisibilityContext visibilityContext = resolveVisibilityContext();
         int resolvedPage = Math.max(page, 0);
@@ -184,6 +192,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public AnnouncementResponseDto getAnnouncement(Long announcementId) {
+        authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
         enforceAnnouncementReadAccess(announcement);
         return toResponse(announcement);
@@ -247,27 +256,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                 .orElseThrow(() -> new ResourceNotFoundException("Announcement not found with id: " + announcementId));
     }
 
-    private Employee resolveCreatorForAnnouncement(AnnouncementCreateRequestDto requestDto) {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        Employee currentEmployee = employeeRepository.findByEmailIgnoreCase(currentEmail).orElse(null);
-        if (currentEmployee != null) {
-            return currentEmployee;
-        }
-
-        if (securityUtils.getCurrentRoleOrThrow() != PlatformRole.TENANT_ADMIN) {
-            throw new ResourceNotFoundException("Current user does not have an employee profile");
-        }
-
-        if (requestDto.getCreatedByEmployeeId() == null) {
-            throw new BadRequestException("createdByEmployeeId is required for TENANT_ADMIN users");
-        }
-
-        Employee creator = employeeRepository.findById(requestDto.getCreatedByEmployeeId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Employee not found with id: " + requestDto.getCreatedByEmployeeId()));
-
+    private Employee resolveCreatorForAnnouncement() {
+        Employee creator = authorizationService.getCurrentEmployeeOrThrow();
         if (creator.getStatus() != UserStatus.ACTIVE) {
-            throw new BadRequestException("Creator employee must be active");
+            throw new BadRequestException("Current employee must be active");
         }
         return creator;
     }
@@ -281,14 +273,12 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     private boolean canManageAnnouncement(Announcement announcement) {
-        PlatformRole currentRole = securityUtils.getCurrentRoleOrThrow();
-        if (currentRole == PlatformRole.TENANT_ADMIN ||
-                currentRole == PlatformRole.ADMIN ||
-                currentRole == PlatformRole.HR) {
+        PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
+        if (currentRole.isTenantAdminEquivalent() || currentRole.isHrEquivalent()) {
             return true;
         }
 
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
+        String currentEmail = authorizationService.getCurrentEmployeeOrThrow().getEmail();
         return announcement.getCreatedBy().getEmail().equalsIgnoreCase(currentEmail);
     }
 
@@ -315,14 +305,13 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     private VisibilityContext resolveVisibilityContext() {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        boolean privileged = role == PlatformRole.TENANT_ADMIN || role == PlatformRole.ADMIN || role == PlatformRole.HR;
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        boolean privileged = role.isTenantAdminEquivalent() || role.isHrEquivalent();
         if (privileged) {
             return new VisibilityContext(null, true);
         }
 
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        Employee employee = employeeRepository.findByEmailIgnoreCase(currentEmail).orElse(null);
+        Employee employee = authorizationService.getCurrentEmployeeOrNull();
         Long employeeId = employee == null ? null : employee.getId();
         return new VisibilityContext(employeeId, false);
     }
@@ -333,11 +322,23 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                 .title(announcement.getTitle())
                 .message(announcement.getMessage())
                 .createdBy(tenantDtoMapper.toEmployeeSimple(announcement.getCreatedBy()))
+                .createdByRole(announcement.getCreatedByRole())
                 .teamId(announcement.getTeam() == null ? null : announcement.getTeam().getId())
                 .teamName(announcement.getTeam() == null ? null : announcement.getTeam().getName())
                 .createdAt(announcement.getCreatedAt())
                 .updatedAt(announcement.getUpdatedAt())
                 .build();
+    }
+
+    private AnnouncementCreatorRole resolveCreatedByRole() {
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (role.isPlatformAdmin()) {
+            return AnnouncementCreatorRole.PLATFORM_ADMIN;
+        }
+        if (role.isHrEquivalent()) {
+            return AnnouncementCreatorRole.HR;
+        }
+        return AnnouncementCreatorRole.ADMIN;
     }
 
     private String buildFullName(Employee employee) {

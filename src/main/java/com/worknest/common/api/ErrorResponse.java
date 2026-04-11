@@ -8,6 +8,7 @@ import lombok.Setter;
 import org.springframework.http.HttpStatus;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Setter
@@ -18,19 +19,38 @@ public class ErrorResponse {
 
     private LocalDateTime timestamp;
     private int status;
-    private String error;
     private String code;
     private String message;
     private String path;
+    private String traceId;
+    private List<FieldValidationError> errors;
 
-    public static ErrorResponse of(HttpStatus status, String code, String message, String path) {
+    public static ErrorResponse of(
+            HttpStatus status,
+            String code,
+            String message,
+            String path,
+            String traceId,
+            List<FieldValidationError> errors) {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(status.value())
-                .error(status.getReasonPhrase())
                 .code(code)
                 .message(message)
                 .path(path)
+                .traceId(traceId)
+                .errors(errors == null ? List.of() : errors)
                 .build();
+    }
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FieldValidationError {
+        private String field;
+        private String message;
+        private Object rejectedValue;
     }
 }

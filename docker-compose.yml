@@ -4,14 +4,16 @@ services:
     container_name: worknest-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: 1234
-      MYSQL_DATABASE: platform_master
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-platform_master}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p1234"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -26,12 +28,33 @@ services:
       db:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://worknest-repo-worknestdb-fowcw1:3306/platform_master?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: worknest_user
-      SPRING_DATASOURCE_PASSWORD: worknestdbpassword@1234
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-platform_master}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      BOOTSTRAP_PLATFORM_ADMIN_ENABLED: ${BOOTSTRAP_PLATFORM_ADMIN_ENABLED:-false}
+      BOOTSTRAP_PLATFORM_ADMIN_NAME: ${BOOTSTRAP_PLATFORM_ADMIN_NAME:-}
+      BOOTSTRAP_PLATFORM_ADMIN_EMAIL: ${BOOTSTRAP_PLATFORM_ADMIN_EMAIL:-}
+      BOOTSTRAP_PLATFORM_ADMIN_PASSWORD: ${BOOTSTRAP_PLATFORM_ADMIN_PASSWORD:-}
+      BOOTSTRAP_SEED_DEMO_DATA: ${BOOTSTRAP_SEED_DEMO_DATA:-false}
+      BOOTSTRAP_DEMO_USER_PASSWORD: ${BOOTSTRAP_DEMO_USER_PASSWORD:-}
+      PUBLIC_HEALTH_ENABLED: ${PUBLIC_HEALTH_ENABLED:-true}
+      SWAGGER_PUBLIC_ENABLED: ${SWAGGER_PUBLIC_ENABLED:-true}
     ports:
-      - "8081:8080"
+      - "${BACKEND_PORT:-8080}:8080"
 
 volumes:
   mysql-data:
+
+# Security note:
+# - Never commit a real ".env" file.
+# - Rotate any credentials that were previously committed to this repository.

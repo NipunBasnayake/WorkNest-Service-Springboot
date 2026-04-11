@@ -11,7 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mail.MailException;
 import org.springframework.orm.jpa.JpaSystemException;
-import org.springframework.validation.FieldError;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -22,7 +22,8 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 
 import java.sql.SQLException;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -132,13 +133,43 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentNotValidException(
             MethodArgumentNotValidException ex, HttpServletRequest request) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
-                .map(this::formatFieldError)
-                .collect(Collectors.joining(", "));
-        if (message.isBlank()) {
-            message = "Validation failed";
-        }
-        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message, request, ex, false);
+        List<ErrorResponse.FieldValidationError> errors = ex.getBindingResult().getFieldErrors().stream()
+                .map(fieldError -> ErrorResponse.FieldValidationError.builder()
+                        .field(fieldError.getField())
+                        .message(fieldError.getDefaultMessage())
+                        .rejectedValue(fieldError.getRejectedValue())
+                        .build())
+                .toList();
+        return build(
+                HttpStatus.BAD_REQUEST,
+                "VALIDATION_ERROR",
+                "Validation failed",
+                request,
+                ex,
+                false,
+                errors
+        );
+    }
+
+    @ExceptionHandler(BindException.class)
+    public ResponseEntity<ErrorResponse> handleBindException(
+            BindException ex, HttpServletRequest request) {
+        List<ErrorResponse.FieldValidationError> errors = ex.getFieldErrors().stream()
+                .map(fieldError -> ErrorResponse.FieldValidationError.builder()
+                        .field(fieldError.getField())
+                        .message(fieldError.getDefaultMessage())
+                        .rejectedValue(fieldError.getRejectedValue())
+                        .build())
+                .toList();
+        return build(
+                HttpStatus.BAD_REQUEST,
+                "VALIDATION_ERROR",
+                "Validation failed",
+                request,
+                ex,
+                false,
+                errors
+        );
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -150,13 +181,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ErrorResponse> handleConstraintViolationException(
             ConstraintViolationException ex, HttpServletRequest request) {
-        String message = ex.getConstraintViolations().stream()
-                .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
-                .collect(Collectors.joining(", "));
-        if (message.isBlank()) {
-            message = "Validation failed";
-        }
-        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message, request, ex, false);
+        List<ErrorResponse.FieldValidationError> errors = ex.getConstraintViolations().stream()
+                .map(violation -> ErrorResponse.FieldValidationError.builder()
+                        .field(violation.getPropertyPath() == null ? null : violation.getPropertyPath().toString())
+                        .message(violation.getMessage())
+                        .rejectedValue(violation.getInvalidValue())
+                        .build())
+                .toList();
+        return build(
+                HttpStatus.BAD_REQUEST,
+                "VALIDATION_ERROR",
+                "Validation failed",
+                request,
+                ex,
+                false,
+                errors
+        );
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -259,10 +299,6 @@ public class GlobalExceptionHandler {
         );
     }
 
-    private String formatFieldError(FieldError fieldError) {
-        return fieldError.getField() + ": " + fieldError.getDefaultMessage();
-    }
-
     private Throwable getRootCause(Throwable throwable) {
         Throwable current = throwable;
         while (current.getCause() != null && current.getCause() != current) {
@@ -282,12 +318,44 @@ public class GlobalExceptionHandler {
             HttpServletRequest request,
             Exception exception,
             boolean logStackTrace) {
+        return build(status, code, message, request, exception, logStackTrace, List.of());
+    }
+
+    private ResponseEntity<ErrorResponse> build(
+            HttpStatus status,
+            String code,
+            String message,
+            HttpServletRequest request,
+            Exception exception,
+            boolean logStackTrace,
+            List<ErrorResponse.FieldValidationError> errors) {
         if (logStackTrace) {
             logger.error("{} at {}: {}", code, request.getRequestURI(), exception.getMessage(), exception);
         } else {
             logger.warn("{} at {}: {}", code, request.getRequestURI(), message);
         }
-        ErrorResponse error = ErrorResponse.of(status, code, message, request.getRequestURI());
+        ErrorResponse error = ErrorResponse.of(
+                status,
+                code,
+                message,
+                request.getRequestURI(),
+                resolveTraceId(request),
+                errors
+        );
         return ResponseEntity.status(status).body(error);
+    }
+
+    private String resolveTraceId(HttpServletRequest request) {
+        String headerTraceId = request.getHeader("X-Trace-Id");
+        if (headerTraceId != null && !headerTraceId.isBlank()) {
+            return headerTraceId.trim();
+        }
+
+        Object traceIdAttribute = request.getAttribute("traceId");
+        if (traceIdAttribute instanceof String traceId && !traceId.isBlank()) {
+            return traceId;
+        }
+
+        return UUID.randomUUID().toString();
     }
 }

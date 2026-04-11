@@ -153,38 +153,36 @@ src/main/resources
 ### Prerequisites
 
 - Java 21
-- Maven 3.9+
-- MySQL 8+
+- Spring Boot
+- Spring Security + JWT
+- Spring Data JPA / Hibernate
+- MySQL
+- WebSocket/STOMP
+- OpenAPI/Swagger
+- Docker / Docker Compose
 
-### 1) Clone and enter project
+## Core architecture
+- `platform_master` database for platform metadata/auth:
+  - `platform_tenants`
+  - `platform_users`
+  - `refresh_tokens`
+- tenant business data in separate DBs:
+  - `tenant_<tenantKey>`
 
-```bash
-git clone <your-repository-url>
-cd WorkNest-Service-Springboot
-```
+## Run locally (IDE)
+1. Copy `.env.example` to `.env` and set values (or export vars in your shell/IDE run config).
+2. Start MySQL.
+3. Run Spring Boot app.
 
-### 2) Configure application settings
+Security note: do not commit real credentials. For production, use a secret manager (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, Vault).
+If this repository has ever contained live credentials, rotate them immediately.
 
-Update `src/main/resources/application.yml` for your environment:
+## Profiles
+- `application.yml`: shared baseline, env-driven settings only
+- `application-dev.yml`: local development defaults
+- `application-prod.yml`: production-safe overrides (no `ddl-auto=update`, swagger disabled by default)
 
-- Master datasource (`spring.datasource.*`)
-- Tenant header (`app.tenant.header`, default `X-Tenant-ID`)
-- JWT settings (`app.jwt.*`)
-- CORS/WebSocket origins
-
-### 3) Build and run locally
-
-```bash
-mvn clean package
-mvn spring-boot:run
-```
-
-Service URL:
-
-- `http://localhost:8080`
-
-### 4) Run with Docker
-
+## Run with Docker
 ```bash
 docker compose up --build
 ```
@@ -219,52 +217,34 @@ When enabled, startup seeding creates sample users, teams, projects, tasks, chat
 
 ### WebSocket (STOMP)
 
-- Endpoint: `/ws` (SockJS enabled)
-- App destination prefix: `/app`
-- Broker destinations: `/topic`, `/queue`
-- User destination prefix: `/user`
+## Auth flow
+1. `POST /api/auth/login`
+2. Use `Authorization: Bearer <accessToken>`
+3. Refresh via `POST /api/auth/refresh`
+4. Logout/revoke via `POST /api/auth/logout`
 
-Clients should provide JWT during STOMP connection according to client implementation.
+## Demo seed
+Set:
+- `BOOTSTRAP_SEED_DEMO_DATA=true`
 
----
+Seed creates:
+- bootstrap platform admin
+- tenant demo employees/teams/projects/tasks/chats/announcements/notifications for active tenants
 
-## Troubleshooting
+## Important environment variables
+- `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
+- `JWT_SECRET`
+- `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`
+- `TENANT_HEADER`
+- `ALLOWED_ORIGINS`, `WS_ALLOWED_ORIGINS`
+- `ATTACHMENTS_DIR`, `ATTACHMENT_MAX_FILE_SIZE_BYTES`, `ATTACHMENT_ALLOWED_MIME_TYPES`
+- `BOOTSTRAP_PLATFORM_ADMIN_NAME`, `BOOTSTRAP_PLATFORM_ADMIN_EMAIL`, `BOOTSTRAP_PLATFORM_ADMIN_PASSWORD`
+- `BOOTSTRAP_SEED_DEMO_DATA`
+- `BOOTSTRAP_DEMO_USER_PASSWORD` (required only when demo data seeding is enabled)
 
-### 401 or 403 on tenant APIs
-
-Verify:
-
-- Bearer token is valid and not expired
-- User role has required permission
-- `X-Tenant-ID` is present and valid
-
-### Swagger UI not loading
-
-Verify application startup and availability of `/v3/api-docs`.
-
-### WebSocket connection failures
-
-Verify configured allowed origins for CORS and WebSockets.
-
-### Docker DB connection issues
-
-Verify compose datasource host, username, and password values.
-
----
-
-## Testing
-
-Automated tests are currently pending implementation.
-
-Recommended coverage:
-
-- Controller integration tests for auth and tenant header behavior
-- Service tests for onboarding and schema provisioning
-- Security authorization tests for role-based endpoint access
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License.
-See the LICENSE file for more details.
+## Phase coverage
+- Phase 1: multi-tenant infrastructure
+- Phase 2: auth + JWT + refresh + revoke
+- Phase 3: employee/team/project/task/attendance/leave
+- Phase 4: announcements/notifications/attachments/audit/chats/read-receipts
+- Phase 5: dashboards/analytics/hardening/pagination/openapi/docker/demo readiness

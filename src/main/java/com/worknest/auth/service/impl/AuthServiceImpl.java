@@ -265,7 +265,7 @@ public class AuthServiceImpl implements AuthService {
             throw new ForbiddenOperationException("No authenticated user found");
         }
 
-        if (actor.getRole() != PlatformRole.TENANT_ADMIN && actor.getRole() != PlatformRole.HR) {
+        if (!(actor.getRole().isTenantAdminEquivalent() || actor.getRole().isHrEquivalent())) {
             throw new ForbiddenOperationException("Only TENANT_ADMIN or HR can force reset passwords");
         }
 
@@ -286,7 +286,7 @@ public class AuthServiceImpl implements AuthService {
             throw new ForbiddenOperationException("Cannot force reset users from another tenant");
         }
 
-        if (targetUser.getRole() == PlatformRole.PLATFORM_ADMIN || targetUser.getRole() == PlatformRole.TENANT_ADMIN) {
+        if (targetUser.getRole().isPlatformAdmin() || targetUser.getRole().isTenantAdminEquivalent()) {
             throw new ForbiddenOperationException("Force reset is allowed only for tenant employee accounts");
         }
 

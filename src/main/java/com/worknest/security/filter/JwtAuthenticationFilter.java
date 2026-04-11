@@ -27,6 +27,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -150,7 +152,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        ErrorResponse errorResponse = ErrorResponse.of(status, errorCode, message, requestUri);
+        ErrorResponse errorResponse = ErrorResponse.of(
+                status,
+                errorCode,
+                message,
+                requestUri,
+                UUID.randomUUID().toString(),
+                List.of()
+        );
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 }

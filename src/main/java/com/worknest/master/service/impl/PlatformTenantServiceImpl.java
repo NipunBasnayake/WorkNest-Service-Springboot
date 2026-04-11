@@ -3,6 +3,7 @@ package com.worknest.master.service.impl;
 import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.master.dto.PlatformTenantUpdateRequestDto;
 import com.worknest.master.dto.PlatformTenantResponseDto;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.repository.PlatformTenantRepository;
@@ -61,6 +62,27 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager")
+    public PlatformTenantResponseDto updateTenant(String tenantKey, PlatformTenantUpdateRequestDto requestDto) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            throw new BadRequestException("Tenant key is required");
+        }
+        if (requestDto == null || requestDto.getCompanyName() == null || requestDto.getCompanyName().isBlank()) {
+            throw new BadRequestException("Company name is required");
+        }
+
+        return masterTenantContextRunner.runInMasterContext(() -> {
+            PlatformTenant tenant = tenantRepository.findByTenantKey(normalizedTenantKey)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Tenant not found with key: " + normalizedTenantKey));
+            tenant.setCompanyName(requestDto.getCompanyName().trim());
+            PlatformTenant updated = tenantRepository.save(tenant);
+            return mapToResponseDto(updated);
+        });
+    }
+
+    @Override
+    @Transactional(transactionManager = "masterTransactionManager")
     public PlatformTenantResponseDto updateTenantStatus(String tenantKey, TenantStatus status) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
         if (normalizedTenantKey == null) {
@@ -77,6 +99,24 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
             tenant.setStatus(status);
             PlatformTenant updated = tenantRepository.save(tenant);
             return mapToResponseDto(updated);
+        });
+    }
+
+    @Override
+    @Transactional(transactionManager = "masterTransactionManager")
+    public void deleteTenant(String tenantKey) {
+        String normalizedTenantKey = normalizeTenantKey(tenantKey);
+        if (normalizedTenantKey == null) {
+            throw new BadRequestException("Tenant key is required");
+        }
+
+        masterTenantContextRunner.runInMasterContext(() -> {
+            PlatformTenant tenant = tenantRepository.findByTenantKey(normalizedTenantKey)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Tenant not found with key: " + normalizedTenantKey));
+            tenant.setStatus(TenantStatus.SUSPENDED);
+            tenantRepository.save(tenant);
+            return null;
         });
     }
 

@@ -16,6 +16,8 @@ public class AttachmentResponseDto {
     private AttachmentEntityType entityType;
     private Long entityId;
     private String fileName;
+    private String fileUrl;
+    private String fileType;
     private String mimeType;
     private Long fileSize;
     private EmployeeSimpleDto uploadedBy;

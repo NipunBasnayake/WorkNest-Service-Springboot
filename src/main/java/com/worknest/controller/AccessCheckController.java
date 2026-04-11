@@ -3,6 +3,7 @@ package com.worknest.controller;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.tenant.context.TenantContext;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -11,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
+@Profile("dev")
 public class AccessCheckController {
 
     @GetMapping("/api/platform/access-check")

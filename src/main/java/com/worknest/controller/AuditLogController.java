@@ -30,11 +30,11 @@ public class AuditLogController {
     @GetMapping
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<List<AuditLogResponseDto>>> searchAuditLogs(
-            @RequestParam(required = false) AuditActionType action,
-            @RequestParam(required = false) AuditEntityType entityType,
-            @RequestParam(required = false) Long actorId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate) {
+            @RequestParam(value = "action", required = false) AuditActionType action,
+            @RequestParam(value = "entityType", required = false) AuditEntityType entityType,
+            @RequestParam(value = "actorId", required = false) Long actorId,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate) {
 
         List<AuditLogResponseDto> response = auditLogService.search(action, entityType, actorId, fromDate, toDate);
         return ResponseEntity.ok(ApiResponse.success("Audit logs retrieved successfully", response));
@@ -43,15 +43,15 @@ public class AuditLogController {
     @GetMapping("/paged")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN')")
     public ResponseEntity<ApiResponse<PagedResultDto<AuditLogResponseDto>>> searchAuditLogsPaged(
-            @RequestParam(required = false) AuditActionType action,
-            @RequestParam(required = false) AuditEntityType entityType,
-            @RequestParam(required = false) Long actorId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
+            @RequestParam(value = "action", required = false) AuditActionType action,
+            @RequestParam(value = "entityType", required = false) AuditEntityType entityType,
+            @RequestParam(value = "actorId", required = false) Long actorId,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
         PagedResultDto<AuditLogResponseDto> response = auditLogService.searchPaged(
                 action,
                 entityType,

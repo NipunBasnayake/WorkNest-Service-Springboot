@@ -23,6 +23,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Filter to extract and validate tenant ID from request header.
@@ -62,6 +64,9 @@ public class TenantContextFilter extends OncePerRequestFilter {
         try {
             String requestUri = request.getRequestURI();
             MDC.put("tenantId", defaultTenant);
+            String traceId = resolveTraceId(request);
+            request.setAttribute("traceId", traceId);
+            MDC.put("traceId", traceId);
 
             if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
                 filterChain.doFilter(request, response);
@@ -126,6 +131,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
             log.debug("Tenant context cleared");
             TenantContext.clear();
             MDC.remove("tenantId");
+            MDC.remove("traceId");
         }
     }
 
@@ -154,8 +160,23 @@ public class TenantContextFilter extends OncePerRequestFilter {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 
-        ErrorResponse errorResponse = ErrorResponse.of(status, errorCode, message, path);
+        ErrorResponse errorResponse = ErrorResponse.of(
+                status,
+                errorCode,
+                message,
+                path,
+                UUID.randomUUID().toString(),
+                List.of()
+        );
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
+    }
+
+    private String resolveTraceId(HttpServletRequest request) {
+        String traceId = request.getHeader("X-Trace-Id");
+        if (traceId != null && !traceId.isBlank()) {
+            return traceId.trim();
+        }
+        return UUID.randomUUID().toString();
     }
 }
 

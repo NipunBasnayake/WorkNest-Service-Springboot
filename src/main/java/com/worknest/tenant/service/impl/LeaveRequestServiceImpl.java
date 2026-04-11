@@ -5,8 +5,9 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
-import com.worknest.security.util.SecurityUtils;
 import com.worknest.notification.email.EmailNotificationService;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.leave.*;
 import com.worknest.tenant.entity.Employee;
@@ -35,7 +36,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
@@ -44,14 +45,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     public LeaveRequestServiceImpl(
             LeaveRequestRepository leaveRequestRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
             EmailNotificationService emailNotificationService) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
@@ -60,6 +61,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto applyLeave(LeaveApplyRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.APPLY_LEAVE);
         Employee employee = getCurrentEmployeeOrThrow();
         validateLeaveDates(requestDto.getStartDate(), requestDto.getEndDate());
         validateNoApprovedOverlap(employee.getId(), requestDto.getStartDate(), requestDto.getEndDate());
@@ -84,6 +86,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto updateLeave(Long leaveRequestId, LeaveUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.APPLY_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         Employee currentEmployee = getCurrentEmployeeOrThrow();
 
@@ -116,6 +119,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<LeaveResponseDto> listMyLeaveRequests() {
+        authorizationService.requirePermission(Permission.VIEW_LEAVE);
         Employee currentEmployee = getCurrentEmployeeOrThrow();
         return leaveRequestRepository.findByEmployeeIdOrderByCreatedAtDesc(currentEmployee.getId()).stream()
                 .map(this::toLeaveResponse)
@@ -125,6 +129,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<LeaveResponseDto> listPendingLeaveRequests() {
+        authorizationService.requirePermission(Permission.APPROVE_LEAVE);
         return leaveRequestRepository.findByStatusOrderByCreatedAtAsc(LeaveStatus.PENDING).stream()
                 .map(this::toLeaveResponse)
                 .toList();
@@ -140,6 +145,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             int size,
             String sortBy,
             String sortDir) {
+        authorizationService.requirePermission(Permission.VIEW_LEAVE);
         Employee currentEmployee = getCurrentEmployeeOrThrow();
         validateDateRange(fromDate, toDate);
 
@@ -175,6 +181,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             int size,
             String sortBy,
             String sortDir) {
+        authorizationService.requirePermission(Permission.APPROVE_LEAVE);
         validateDateRange(fromDate, toDate);
 
         int resolvedPage = Math.max(page, 0);
@@ -200,7 +207,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto approveLeave(Long leaveRequestId, LeaveDecisionRequestDto requestDto) {
-        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR);
+        authorizationService.requirePermission(Permission.APPROVE_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         Employee approver = getCurrentEmployeeOrThrow();
         if (approver.getStatus() != UserStatus.ACTIVE) {
@@ -242,7 +249,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto rejectLeave(Long leaveRequestId, LeaveDecisionRequestDto requestDto) {
-        securityUtils.requireAnyRole(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR);
+        authorizationService.requirePermission(Permission.APPROVE_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         Employee approver = getCurrentEmployeeOrThrow();
         if (approver.getStatus() != UserStatus.ACTIVE) {
@@ -285,6 +292,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
     @Override
     public LeaveResponseDto cancelLeave(Long leaveRequestId) {
+        authorizationService.requirePermission(Permission.APPLY_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         Employee currentEmployee = getCurrentEmployeeOrThrow();
         if (!leaveRequest.getEmployee().getId().equals(currentEmployee.getId())) {
@@ -311,8 +319,9 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public LeaveResponseDto getLeaveDetails(Long leaveRequestId) {
+        authorizationService.requirePermission(Permission.VIEW_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
-        PlatformRole currentRole = securityUtils.getCurrentRoleOrThrow();
+        PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
         if (currentRole == PlatformRole.EMPLOYEE) {
             Employee currentEmployee = getCurrentEmployeeOrThrow();
             if (!leaveRequest.getEmployee().getId().equals(currentEmployee.getId())) {
@@ -328,9 +337,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     }
 
     private Employee getCurrentEmployeeOrThrow() {
-        String email = securityUtils.getCurrentUserEmailOrThrow();
-        return employeeRepository.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private void validateLeaveDates(java.time.LocalDate startDate, java.time.LocalDate endDate) {
@@ -391,14 +398,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
 
     private void validateApproverRole(Employee approver) {
-        if (!(approver.getRole() == PlatformRole.ADMIN || approver.getRole() == PlatformRole.HR)) {
-            throw new BadRequestException("Leave approver must be an ADMIN or HR employee");
+        if (!(approver.getRole().isTenantAdminEquivalent() || approver.getRole().isHrEquivalent())) {
+            throw new BadRequestException("Leave approver must be a TENANT_ADMIN/ADMIN or HR employee");
         }
     }
 
     private void notifyApproversAboutCancellation(Employee employee, LeaveRequest leaveRequest) {
         List<Employee> recipients = employeeRepository.findByRoleInAndStatus(
-                List.of(PlatformRole.ADMIN, PlatformRole.HR),
+                List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR),
                 UserStatus.ACTIVE
         ).stream()
                 .filter(candidate -> !candidate.getId().equals(employee.getId()))

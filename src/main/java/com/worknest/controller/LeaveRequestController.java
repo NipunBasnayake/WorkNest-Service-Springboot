@@ -6,16 +6,21 @@ import com.worknest.tenant.dto.leave.*;
 import com.worknest.tenant.enums.LeaveStatus;
 import com.worknest.tenant.service.LeaveRequestService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
 
 @RestController
+@Validated
 @RequestMapping("/api/tenant/leaves")
 public class LeaveRequestController {
 
@@ -26,7 +31,7 @@ public class LeaveRequestController {
     }
 
     @PostMapping("/apply")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<LeaveResponseDto>> applyLeave(
             @Valid @RequestBody LeaveApplyRequestDto requestDto) {
         LeaveResponseDto response = leaveRequestService.applyLeave(requestDto);
@@ -34,32 +39,72 @@ public class LeaveRequestController {
                 .body(ApiResponse.success("Leave request submitted successfully", response));
     }
 
+    @PostMapping
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> createLeave(
+            @Valid @RequestBody LeaveApplyRequestDto requestDto) {
+        LeaveResponseDto response = leaveRequestService.applyLeave(requestDto);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Leave request submitted successfully", response));
+    }
+
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<LeaveResponseDto>> updateLeave(
-            @PathVariable Long id,
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody LeaveUpdateRequestDto requestDto) {
+        LeaveResponseDto response = leaveRequestService.updateLeave(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Leave request updated successfully", response));
+    }
+
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> patchLeave(
+            @PathVariable("id") @Positive Long id,
             @Valid @RequestBody LeaveUpdateRequestDto requestDto) {
         LeaveResponseDto response = leaveRequestService.updateLeave(id, requestDto);
         return ResponseEntity.ok(ApiResponse.success("Leave request updated successfully", response));
     }
 
     @GetMapping("/my")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<LeaveResponseDto>>> listMyLeaveRequests() {
         List<LeaveResponseDto> response = leaveRequestService.listMyLeaveRequests();
         return ResponseEntity.ok(ApiResponse.success("My leave requests retrieved", response));
     }
 
+    @GetMapping(value = "/my", params = {"page", "size"})
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<PagedResultDto<LeaveResponseDto>>> listMyLeaveRequestsByQuery(
+            @RequestParam(value = "status", required = false) LeaveStatus status,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
+            @RequestParam(value = "size", defaultValue = "20") @Min(1) int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
+        PagedResultDto<LeaveResponseDto> response = leaveRequestService.listMyLeaveRequestsPaged(
+                status,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                sortDir
+        );
+        return ResponseEntity.ok(ApiResponse.success("My leave requests retrieved", response));
+    }
+
     @GetMapping("/my/paged")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<PagedResultDto<LeaveResponseDto>>> listMyLeaveRequestsPaged(
-            @RequestParam(required = false) LeaveStatus status,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
+            @RequestParam(value = "status", required = false) LeaveStatus status,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
+            @RequestParam(value = "size", defaultValue = "20") @Min(1) int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
         PagedResultDto<LeaveResponseDto> response = leaveRequestService.listMyLeaveRequestsPaged(
                 status,
                 fromDate,
@@ -82,13 +127,13 @@ public class LeaveRequestController {
     @GetMapping("/paged")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<LeaveResponseDto>>> listLeaveRequestsPaged(
-            @RequestParam(required = false) LeaveStatus status,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
+            @RequestParam(value = "status", required = false) LeaveStatus status,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
+            @RequestParam(value = "size", defaultValue = "20") @Min(1) int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
         PagedResultDto<LeaveResponseDto> response = leaveRequestService.listLeaveRequestsPaged(
                 status,
                 fromDate,
@@ -101,10 +146,50 @@ public class LeaveRequestController {
         return ResponseEntity.ok(ApiResponse.success("Leave requests retrieved", response));
     }
 
-    @PostMapping("/{id}/approve")
+    @GetMapping(params = {"page", "size"})
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<PagedResultDto<LeaveResponseDto>>> listLeaveRequestsByQuery(
+            @RequestParam(value = "status", required = false) LeaveStatus status,
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
+            @RequestParam(value = "size", defaultValue = "20") @Min(1) int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
+        PagedResultDto<LeaveResponseDto> response = leaveRequestService.listLeaveRequestsPaged(
+                status,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                sortDir
+        );
+        return ResponseEntity.ok(ApiResponse.success("Leave requests retrieved", response));
+    }
+
+    @PatchMapping("/{id}/approve")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<LeaveResponseDto>> approveLeave(
-            @PathVariable Long id,
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody LeaveDecisionRequestDto requestDto) {
+        LeaveResponseDto response = leaveRequestService.approveLeave(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Leave request approved", response));
+    }
+
+    @PatchMapping("/{id}/reject")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> rejectLeave(
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody LeaveDecisionRequestDto requestDto) {
+        LeaveResponseDto response = leaveRequestService.rejectLeave(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Leave request rejected", response));
+    }
+
+    @PostMapping("/{id}/approve")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> approveLeaveLegacy(
+            @PathVariable("id") @Positive Long id,
             @Valid @RequestBody LeaveDecisionRequestDto requestDto) {
         LeaveResponseDto response = leaveRequestService.approveLeave(id, requestDto);
         return ResponseEntity.ok(ApiResponse.success("Leave request approved", response));
@@ -112,23 +197,30 @@ public class LeaveRequestController {
 
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
-    public ResponseEntity<ApiResponse<LeaveResponseDto>> rejectLeave(
-            @PathVariable Long id,
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> rejectLeaveLegacy(
+            @PathVariable("id") @Positive Long id,
             @Valid @RequestBody LeaveDecisionRequestDto requestDto) {
         LeaveResponseDto response = leaveRequestService.rejectLeave(id, requestDto);
         return ResponseEntity.ok(ApiResponse.success("Leave request rejected", response));
     }
 
+    @PatchMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> cancelLeave(@PathVariable("id") @Positive Long id) {
+        LeaveResponseDto response = leaveRequestService.cancelLeave(id);
+        return ResponseEntity.ok(ApiResponse.success("Leave request cancelled", response));
+    }
+
     @PostMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<LeaveResponseDto>> cancelLeave(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> cancelLeaveLegacy(@PathVariable("id") @Positive Long id) {
         LeaveResponseDto response = leaveRequestService.cancelLeave(id);
         return ResponseEntity.ok(ApiResponse.success("Leave request cancelled", response));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<LeaveResponseDto>> getLeaveDetails(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<LeaveResponseDto>> getLeaveDetails(@PathVariable("id") @Positive Long id) {
         LeaveResponseDto response = leaveRequestService.getLeaveDetails(id);
         return ResponseEntity.ok(ApiResponse.success("Leave request retrieved", response));
     }

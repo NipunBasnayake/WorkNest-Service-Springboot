@@ -35,21 +35,21 @@ public class NotificationController {
     }
 
     @GetMapping("/my")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<NotificationResponseDto>>> listMyNotifications() {
         List<NotificationResponseDto> response = notificationService.listMyNotifications();
         return ResponseEntity.ok(ApiResponse.success("Notifications retrieved successfully", response));
     }
 
     @GetMapping("/my/paged")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<PagedResultDto<NotificationResponseDto>>> listMyNotificationsPaged(
-            @RequestParam(required = false) Boolean read,
-            @RequestParam(required = false) NotificationType type,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
+            @RequestParam(value = "read", required = false) Boolean read,
+            @RequestParam(value = "type", required = false) NotificationType type,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "sortBy", defaultValue = "createdAt") String sortBy,
+            @RequestParam(value = "sortDir", defaultValue = "desc") String sortDir) {
         PagedResultDto<NotificationResponseDto> response = notificationService.listMyNotificationsPaged(
                 read,
                 type,
@@ -62,21 +62,21 @@ public class NotificationController {
     }
 
     @PatchMapping("/{id}/read")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<NotificationResponseDto>> markAsRead(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<NotificationResponseDto>> markAsRead(@PathVariable("id") Long id) {
         NotificationResponseDto response = notificationService.markAsRead(id);
         return ResponseEntity.ok(ApiResponse.success("Notification marked as read", response));
     }
 
     @PatchMapping("/read-all")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<Long>> markAllAsRead() {
         long count = notificationService.markAllAsRead();
         return ResponseEntity.ok(ApiResponse.success("Notifications marked as read", count));
     }
 
     @GetMapping("/my/unread-count")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<NotificationUnreadCountDto>> getUnreadCount() {
         NotificationUnreadCountDto response = NotificationUnreadCountDto.builder()
                 .unreadCount(notificationService.getMyUnreadCount())

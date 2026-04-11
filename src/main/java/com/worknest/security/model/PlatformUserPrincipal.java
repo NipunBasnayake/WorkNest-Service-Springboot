@@ -35,6 +35,11 @@ public class PlatformUserPrincipal implements UserDetails {
     }
 
     @Override
+    public String getUsername() {
+        return email;
+    }
+
+    @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
@@ -42,11 +47,6 @@ public class PlatformUserPrincipal implements UserDetails {
     @Override
     public String getPassword() {
         return passwordHash;
-    }
-
-    @Override
-    public String getUsername() {
-        return email;
     }
 
     @Override

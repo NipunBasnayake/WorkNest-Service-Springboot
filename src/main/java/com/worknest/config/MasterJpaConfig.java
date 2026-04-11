@@ -28,7 +28,7 @@ public class MasterJpaConfig {
     public LocalContainerEntityManagerFactoryBean masterEntityManagerFactory(
             @Qualifier("masterDataSource") DataSource masterDataSource,
             @Qualifier("jpaVendorAdapter") JpaVendorAdapter jpaVendorAdapter,
-            @Value("${spring.jpa.hibernate.ddl-auto:update}") String ddlAuto,
+            @Value("${spring.jpa.hibernate.ddl-auto:validate}") String ddlAuto,
             @Value("${spring.jpa.show-sql:false}") boolean showSql,
             @Value("${spring.jpa.properties.hibernate.format_sql:false}") boolean formatSql) {
 

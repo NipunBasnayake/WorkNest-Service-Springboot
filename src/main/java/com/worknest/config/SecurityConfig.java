@@ -3,6 +3,7 @@ package com.worknest.config;
 import com.worknest.security.filter.JwtAuthenticationFilter;
 import com.worknest.security.handler.RestAccessDeniedHandler;
 import com.worknest.security.handler.RestAuthenticationEntryPoint;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -25,14 +26,20 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final RestAuthenticationEntryPoint restAuthenticationEntryPoint;
     private final RestAccessDeniedHandler restAccessDeniedHandler;
+    private final boolean publicHealthEnabled;
+    private final boolean swaggerPublicEnabled;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             RestAuthenticationEntryPoint restAuthenticationEntryPoint,
-            RestAccessDeniedHandler restAccessDeniedHandler) {
+            RestAccessDeniedHandler restAccessDeniedHandler,
+            @Value("${app.security.public-health-enabled:true}") boolean publicHealthEnabled,
+            @Value("${app.security.swagger-public-enabled:false}") boolean swaggerPublicEnabled) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.restAuthenticationEntryPoint = restAuthenticationEntryPoint;
         this.restAccessDeniedHandler = restAccessDeniedHandler;
+        this.publicHealthEnabled = publicHealthEnabled;
+        this.swaggerPublicEnabled = swaggerPublicEnabled;
     }
 
     @Bean
@@ -49,21 +56,27 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(restAuthenticationEntryPoint)
                         .accessDeniedHandler(restAccessDeniedHandler))
-                .authorizeHttpRequests(authorize -> authorize
+                .authorizeHttpRequests(authorize -> {
+                    authorize
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/refresh",
                                 "/api/auth/forgot-password",
                                 "/api/auth/reset-password",
-                                "/actuator/health",
+                                "/api/platform/onboarding/tenants",
                                 "/error",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
                                 "/ws/**")
-                        .permitAll()
-                        .requestMatchers("/api/platform/onboarding/**")
-                        .permitAll()
+                        .permitAll();
+
+                    if (publicHealthEnabled) {
+                        authorize.requestMatchers("/actuator/health", "/actuator/health/**").permitAll();
+                    }
+
+                    if (swaggerPublicEnabled) {
+                        authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+                    }
+
+                    authorize
                         .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
                         .authenticated()
                         .requestMatchers("/api/platform/**")
@@ -73,10 +86,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/tenant/**")
                         .hasAnyRole("TENANT_ADMIN", "ADMIN", "MANAGER", "HR", "EMPLOYEE")
                         .anyRequest()
-                        .authenticated())
+                        .authenticated();
+                })
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 }
-

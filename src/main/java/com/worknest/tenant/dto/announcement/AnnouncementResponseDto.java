@@ -1,6 +1,7 @@
 package com.worknest.tenant.dto.announcement;
 
 import com.worknest.tenant.dto.common.EmployeeSimpleDto;
+import com.worknest.tenant.enums.AnnouncementCreatorRole;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,6 +16,7 @@ public class AnnouncementResponseDto {
     private String title;
     private String message;
     private EmployeeSimpleDto createdBy;
+    private AnnouncementCreatorRole createdByRole;
     private Long teamId;
     private String teamName;
     private LocalDateTime createdAt;

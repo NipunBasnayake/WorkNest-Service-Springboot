@@ -6,8 +6,8 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.notification.email.EmailNotificationService;
-import com.worknest.security.model.PlatformUserPrincipal;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.team.*;
 import com.worknest.tenant.entity.Employee;
@@ -32,8 +32,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -50,7 +48,7 @@ public class TeamServiceImpl implements TeamService {
     private final TeamChatRepository teamChatRepository;
     private final TeamChatMessageRepository teamChatMessageRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
     private final EmailNotificationService emailNotificationService;
@@ -62,7 +60,7 @@ public class TeamServiceImpl implements TeamService {
             TeamChatRepository teamChatRepository,
             TeamChatMessageRepository teamChatMessageRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             AuditLogService auditLogService,
             EmailNotificationService emailNotificationService) {
@@ -72,7 +70,7 @@ public class TeamServiceImpl implements TeamService {
         this.teamChatRepository = teamChatRepository;
         this.teamChatMessageRepository = teamChatMessageRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
         this.emailNotificationService = emailNotificationService;
@@ -80,6 +78,7 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public TeamResponseDto createTeam(TeamCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CREATE_TEAM);
         String teamName = normalizeTeamName(requestDto.getName());
         if (teamRepository.existsByNameIgnoreCase(teamName)) {
             throw new BadRequestException("Team name already exists: " + teamName);
@@ -92,6 +91,7 @@ public class TeamServiceImpl implements TeamService {
         team.setManager(manager);
 
         Team saved = teamRepository.save(team);
+        ensureManagerMembership(saved, manager);
         auditLogService.logAction(
                 AuditActionType.CREATE,
                 AuditEntityType.TEAM,
@@ -103,6 +103,7 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public TeamResponseDto updateTeam(Long teamId, TeamUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
         String teamName = normalizeTeamName(requestDto.getName());
 
@@ -116,6 +117,7 @@ public class TeamServiceImpl implements TeamService {
         team.setManager(manager);
 
         Team updated = teamRepository.save(team);
+        ensureManagerMembership(updated, manager);
         auditLogService.logAction(
                 AuditActionType.UPDATE,
                 AuditEntityType.TEAM,
@@ -127,10 +129,12 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public TeamResponseDto changeManager(Long teamId, Long managerEmployeeId) {
+        authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
         Employee manager = getActiveEmployeeOrThrow(managerEmployeeId);
         team.setManager(manager);
         Team updated = teamRepository.save(team);
+        ensureManagerMembership(updated, manager);
         notifyTeamLeaderChange(updated);
         auditLogService.logAction(
                 AuditActionType.ASSIGN,
@@ -143,6 +147,7 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public TeamMemberResponseDto addMember(Long teamId, TeamMemberAddRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.ASSIGN_TEAM_ROLE);
         Team team = getTeamOrThrow(teamId);
         Employee employee = getActiveEmployeeOrThrow(requestDto.getEmployeeId());
 
@@ -179,6 +184,7 @@ public class TeamServiceImpl implements TeamService {
             Long teamId,
             Long employeeId,
             TeamMemberRoleUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.ASSIGN_TEAM_ROLE);
         getTeamOrThrow(teamId);
 
         TeamMember teamMember = teamMemberRepository
@@ -199,6 +205,7 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public void removeMember(Long teamId, Long employeeId) {
+        authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
         TeamMember teamMember = teamMemberRepository
                 .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, employeeId)
@@ -225,6 +232,7 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     public void deleteTeam(Long teamId) {
+        authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
         if (projectTeamRepository.existsByTeamId(teamId)) {
             throw new BadRequestException("Cannot delete team while it is assigned to one or more projects");
@@ -249,9 +257,10 @@ public class TeamServiceImpl implements TeamService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<TeamResponseDto> listTeams() {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        authorizationService.requirePermission(Permission.VIEW_TEAM);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
         List<Team> teams = role == PlatformRole.EMPLOYEE
-                ? findTeamsForEmployee(resolveCurrentEmployeeOrThrow().getId())
+                ? findTeamsForEmployee(authorizationService.getCurrentEmployeeIdOrThrow())
                 : teamRepository.findAll();
         return toTeamResponses(teams);
     }
@@ -259,13 +268,15 @@ public class TeamServiceImpl implements TeamService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<TeamResponseDto> listMyTeams() {
-        Long currentEmployeeId = resolveCurrentEmployeeOrThrow().getId();
+        authorizationService.requirePermission(Permission.VIEW_TEAM);
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
         return toTeamResponses(findTeamsForEmployee(currentEmployeeId));
     }
 
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public TeamDetailResponseDto getTeamDetails(Long teamId) {
+        authorizationService.requirePermission(Permission.VIEW_TEAM);
         Team team = getTeamOrThrow(teamId);
         enforceTeamReadAccess(team);
         List<TeamMemberResponseDto> members = listTeamMembers(teamId);
@@ -283,6 +294,7 @@ public class TeamServiceImpl implements TeamService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<TeamMemberResponseDto> listTeamMembers(Long teamId) {
+        authorizationService.requirePermission(Permission.VIEW_TEAM);
         Team team = getTeamOrThrow(teamId);
         enforceTeamReadAccess(team);
 
@@ -301,23 +313,29 @@ public class TeamServiceImpl implements TeamService {
             int size,
             String sortBy,
             String sortDir) {
+        authorizationService.requirePermission(Permission.VIEW_TEAM);
         int resolvedPage = Math.max(page, 0);
         int resolvedSize = Math.max(Math.min(size, 100), 1);
         String resolvedSortBy = isSortable(sortBy) ? sortBy : "createdAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
 
         if (role == PlatformRole.EMPLOYEE) {
-            Long currentEmployeeId = resolveCurrentEmployeeOrThrow().getId();
-            return listTeamsPagedForEmployee(
+            Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
+            Page<Team> resultPage = teamRepository.searchByEmployeeVisibility(
                     currentEmployeeId,
                     managerId,
                     search,
-                    resolvedPage,
-                    resolvedSize,
-                    resolvedSortBy,
-                    direction
+                    PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy))
             );
+
+            return PagedResultDto.<TeamResponseDto>builder()
+                    .items(toTeamResponses(resultPage.getContent()))
+                    .page(resultPage.getNumber())
+                    .size(resultPage.getSize())
+                    .totalElements(resultPage.getTotalElements())
+                    .totalPages(resultPage.getTotalPages())
+                    .build();
         }
 
         Page<Team> resultPage = teamRepository.search(
@@ -411,34 +429,9 @@ public class TeamServiceImpl implements TeamService {
         return counts;
     }
 
-    private Employee resolveCurrentEmployeeOrThrow() {
-        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
-
-        if (principal.getId() != null) {
-            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
-            if (employeeByPlatformId != null) {
-                return employeeByPlatformId;
-            }
-        }
-
-        String currentEmail = principal.getEmail();
-        if (currentEmail == null || currentEmail.isBlank()) {
-            throw new ForbiddenOperationException("Current user is not linked to an employee profile");
-        }
-
-        return employeeRepository.findByEmailIgnoreCase(currentEmail)
-                .orElseThrow(() -> new ForbiddenOperationException("Current user is not linked to an employee profile"));
-    }
-
     private void enforceTeamReadAccess(Team team) {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        if (role != PlatformRole.EMPLOYEE) {
-            return;
-        }
-
-        Long currentEmployeeId = resolveCurrentEmployeeOrThrow().getId();
-        if (!isTeamParticipant(team, currentEmployeeId)) {
-            throw new ForbiddenOperationException("Employees cannot access this team");
+        if (!authorizationService.canAccessTeam(team)) {
+            throw new ForbiddenOperationException("You are not allowed to access this team");
         }
     }
 
@@ -468,63 +461,26 @@ public class TeamServiceImpl implements TeamService {
         return teamRepository.findAllById(teamIds);
     }
 
-    private PagedResultDto<TeamResponseDto> listTeamsPagedForEmployee(
-            Long employeeId,
-            Long managerId,
-            String search,
-            int page,
-            int size,
-            String sortBy,
-            Sort.Direction direction) {
-        String normalizedSearch = trimToNull(search);
-
-        List<Team> filteredTeams = findTeamsForEmployee(employeeId).stream()
-                .filter(team -> managerId == null ||
-                        (team.getManager() != null && managerId.equals(team.getManager().getId())))
-                .filter(team -> matchesTeamSearch(team, normalizedSearch))
-                .toList();
-
-        List<Team> sortedTeams = new ArrayList<>(filteredTeams);
-        sortedTeams.sort(teamComparator(sortBy, direction));
-
-        int fromIndex = Math.min(page * size, sortedTeams.size());
-        int toIndex = Math.min(fromIndex + size, sortedTeams.size());
-        long totalElements = sortedTeams.size();
-        int totalPages = (int) Math.ceil(totalElements / (double) size);
-
-        return PagedResultDto.<TeamResponseDto>builder()
-                .items(toTeamResponses(sortedTeams.subList(fromIndex, toIndex)))
-                .page(page)
-                .size(size)
-                .totalElements(totalElements)
-                .totalPages(totalPages)
-                .build();
-    }
-
-    private boolean matchesTeamSearch(Team team, String search) {
-        if (search == null) {
-            return true;
+    private void ensureManagerMembership(Team team, Employee manager) {
+        if (team == null || team.getId() == null || manager == null) {
+            return;
         }
-        String teamName = team.getName();
-        return teamName != null && teamName.toLowerCase().contains(search.toLowerCase());
-    }
 
-    private Comparator<Team> teamComparator(String sortBy, Sort.Direction direction) {
-        Comparator<Team> comparator = switch (sortBy) {
-            case "updatedAt" -> Comparator.comparing(
-                    Team::getUpdatedAt,
-                    Comparator.nullsLast(Comparator.naturalOrder())
-            );
-            case "name" -> Comparator.comparing(
-                    Team::getName,
-                    Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
-            );
-            default -> Comparator.comparing(
-                    Team::getCreatedAt,
-                    Comparator.nullsLast(Comparator.naturalOrder())
-            );
-        };
-        return direction.isAscending() ? comparator : comparator.reversed();
+        TeamMember teamMember = teamMemberRepository
+                .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), manager.getId())
+                .orElseGet(() -> {
+                    TeamMember created = new TeamMember();
+                    created.setTeam(team);
+                    created.setEmployee(manager);
+                    created.setJoinedAt(LocalDateTime.now());
+                    return created;
+                });
+
+        if (teamMember.getFunctionalRole() == null || teamMember.getFunctionalRole() == TeamFunctionalRole.MEMBER) {
+            teamMember.setFunctionalRole(TeamFunctionalRole.TEAM_LEAD);
+        }
+        teamMember.setLeftAt(null);
+        teamMemberRepository.save(teamMember);
     }
 
     private String normalizeTeamName(String name) {

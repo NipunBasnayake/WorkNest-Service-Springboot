@@ -1,5 +1,6 @@
 package com.worknest.tenant.entity;
 
+import com.worknest.tenant.enums.AnnouncementCreatorRole;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -27,6 +28,10 @@ public class Announcement {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_id", nullable = false)
     private Employee createdBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "created_by_role", nullable = false, length = 30)
+    private AnnouncementCreatorRole createdByRole;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "team_id")

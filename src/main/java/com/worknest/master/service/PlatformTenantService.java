@@ -1,5 +1,6 @@
 package com.worknest.master.service;
 
+import com.worknest.master.dto.PlatformTenantUpdateRequestDto;
 import com.worknest.master.dto.PlatformTenantResponseDto;
 import com.worknest.common.enums.TenantStatus;
 
@@ -13,7 +14,11 @@ public interface PlatformTenantService {
 
     PlatformTenantResponseDto getTenantById(Long id);
 
+    PlatformTenantResponseDto updateTenant(String tenantKey, PlatformTenantUpdateRequestDto requestDto);
+
     PlatformTenantResponseDto updateTenantStatus(String tenantKey, TenantStatus status);
+
+    void deleteTenant(String tenantKey);
 
     boolean tenantExists(String tenantKey);
 }

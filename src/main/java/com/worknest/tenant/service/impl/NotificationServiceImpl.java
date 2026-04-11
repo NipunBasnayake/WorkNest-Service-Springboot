@@ -2,8 +2,9 @@ package com.worknest.tenant.service.impl;
 
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
-import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.notification.NotificationCreateRequestDto;
 import com.worknest.tenant.dto.notification.NotificationResponseDto;
 import com.worknest.tenant.entity.Employee;
@@ -30,7 +31,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final TenantRealtimePublisher tenantRealtimePublisher;
     private final AuditLogService auditLogService;
@@ -38,13 +39,13 @@ public class NotificationServiceImpl implements NotificationService {
     public NotificationServiceImpl(
             NotificationRepository notificationRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             TenantRealtimePublisher tenantRealtimePublisher,
             AuditLogService auditLogService) {
         this.notificationRepository = notificationRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.tenantRealtimePublisher = tenantRealtimePublisher;
         this.auditLogService = auditLogService;
@@ -52,6 +53,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public NotificationResponseDto createNotification(NotificationCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.SEND_NOTIFICATION);
         NotificationResponseDto response = createSystemNotification(
                 requestDto.getRecipientEmployeeId(),
                 requestDto.getType(),
@@ -201,9 +203,7 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     private Employee getCurrentEmployeeOrThrow() {
-        String currentEmail = securityUtils.getCurrentUserEmailOrThrow();
-        return employeeRepository.findByEmailIgnoreCase(currentEmail)
-                .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private Employee getEmployeeOrThrow(Long employeeId) {

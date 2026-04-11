@@ -25,7 +25,7 @@ public class TeamChatController {
     }
 
     @PostMapping("/conversations")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<TeamChatResponseDto>> createOrGetTeamChat(
             @Valid @RequestBody TeamChatCreateRequestDto requestDto) {
         TeamChatResponseDto response = teamChatService.createOrGetTeamChat(requestDto);
@@ -34,30 +34,30 @@ public class TeamChatController {
     }
 
     @GetMapping("/conversations/team/{teamId}")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<TeamChatResponseDto>> getOrCreateByTeam(@PathVariable Long teamId) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<TeamChatResponseDto>> getOrCreateByTeam(@PathVariable("teamId") Long teamId) {
         TeamChatResponseDto response = teamChatService.getOrCreateByTeam(teamId);
         return ResponseEntity.ok(ApiResponse.success("Team chat retrieved successfully", response));
     }
 
     @GetMapping("/conversations/my")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<TeamChatResponseDto>>> listMyTeamChats() {
         List<TeamChatResponseDto> response = teamChatService.listMyTeamChats();
         return ResponseEntity.ok(ApiResponse.success("Team chats retrieved successfully", response));
     }
 
     @GetMapping("/conversations/{id}/messages")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<List<TeamChatMessageResponseDto>>> listMessages(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<TeamChatMessageResponseDto>>> listMessages(@PathVariable("id") Long id) {
         List<TeamChatMessageResponseDto> response = teamChatService.listMessages(id);
         return ResponseEntity.ok(ApiResponse.success("Team chat messages retrieved successfully", response));
     }
 
     @PostMapping("/conversations/{id}/messages")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<TeamChatMessageResponseDto>> sendMessage(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @Valid @RequestBody TeamChatMessageSendRequestDto requestDto) {
         TeamChatMessageResponseDto response = teamChatService.sendMessage(id, requestDto);
         return ResponseEntity.status(HttpStatus.CREATED)

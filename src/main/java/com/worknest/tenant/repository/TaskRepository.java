@@ -4,6 +4,7 @@ import com.worknest.tenant.entity.Task;
 import com.worknest.tenant.enums.TaskStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,10 +14,13 @@ import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
     List<Task> findByProjectIdOrderByCreatedAtDesc(Long projectId);
 
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
     List<Task> findByAssigneeIdOrderByCreatedAtDesc(Long assigneeId);
 
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
     List<Task> findByProjectIdAndStatusOrderByCreatedAtDesc(Long projectId, TaskStatus status);
 
     boolean existsByProjectIdAndAssigneeId(Long projectId, Long assigneeId);
@@ -69,6 +73,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                     OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
     Page<Task> search(
             @Param("projectId") Long projectId,
             @Param("status") TaskStatus status,

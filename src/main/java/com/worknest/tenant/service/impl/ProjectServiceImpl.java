@@ -5,8 +5,8 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
-import com.worknest.security.model.PlatformUserPrincipal;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.project.ProjectCreateRequestDto;
 import com.worknest.tenant.dto.project.ProjectDetailResponseDto;
@@ -25,6 +25,7 @@ import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.ProjectStatus;
 import com.worknest.tenant.enums.TaskStatus;
+import com.worknest.tenant.enums.TeamFunctionalRole;
 import com.worknest.tenant.repository.AttachmentRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.ProjectRepository;
@@ -60,7 +61,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
 
@@ -72,7 +73,7 @@ public class ProjectServiceImpl implements ProjectService {
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             AuditLogService auditLogService) {
         this.projectRepository = projectRepository;
@@ -82,17 +83,17 @@ public class ProjectServiceImpl implements ProjectService {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
     }
 
     @Override
     public ProjectResponseDto createProject(ProjectCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CREATE_PROJECT);
+        enforceProjectCreationAccess();
         validateProjectDates(requestDto.getStartDate(), requestDto.getEndDate());
-        validateActorEmployeeId(requestDto.getCreatedByEmployeeId());
-
-        Employee creator = getActiveEmployeeOrThrow(requestDto.getCreatedByEmployeeId());
+        Employee creator = getActiveEmployeeOrThrow(authorizationService.getCurrentEmployeeIdOrThrow());
 
         Project project = new Project();
         project.setName(requestDto.getName().trim());
@@ -114,7 +115,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public ProjectResponseDto updateProject(Long projectId, ProjectUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
+        enforceProjectManagementAccess(project);
 
         validateProjectDates(requestDto.getStartDate(), requestDto.getEndDate());
         validateProjectStatusTransition(project.getStatus(), requestDto.getStatus());
@@ -137,7 +140,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public ProjectResponseDto changeProjectStatus(Long projectId, ProjectStatusUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
+        enforceProjectManagementAccess(project);
         validateProjectStatusTransition(project.getStatus(), requestDto.getStatus());
 
         project.setStatus(requestDto.getStatus());
@@ -153,7 +158,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public ProjectTeamResponseDto assignTeam(Long projectId, ProjectTeamAssignRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
+        enforceProjectManagementAccess(project);
         ensureProjectAllowsTeamAssignment(project);
         Team team = getTeamOrThrow(requestDto.getTeamId());
 
@@ -177,7 +184,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public void removeTeamAssignment(Long projectId, Long teamId) {
-        getProjectOrThrow(projectId);
+        authorizationService.requirePermission(Permission.MANAGE_PROJECT);
+        Project project = getProjectOrThrow(projectId);
+        enforceProjectManagementAccess(project);
         ProjectTeam projectTeam = projectTeamRepository.findByProjectIdAndTeamId(projectId, teamId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project-team assignment not found"));
         projectTeamRepository.delete(projectTeam);
@@ -191,7 +200,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public void deleteProject(Long projectId) {
+        authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
+        enforceProjectManagementAccess(project);
         long taskCount = taskRepository.countByProjectId(projectId);
         if (taskCount > 0) {
             throw new BadRequestException("Cannot delete project with existing tasks. Delete tasks first.");
@@ -214,9 +225,10 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<ProjectResponseDto> listProjects() {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        authorizationService.requirePermission(Permission.VIEW_PROJECT);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
         if (role == PlatformRole.EMPLOYEE) {
-            Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+            Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
             List<Project> readableProjects = listReadableProjectsForEmployee(currentEmployeeId);
             readableProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
             return readableProjects.stream()
@@ -232,7 +244,8 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<ProjectResponseDto> listMyProjects() {
-        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        authorizationService.requirePermission(Permission.VIEW_PROJECT);
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
         List<Project> myProjects = listReadableProjectsForEmployee(currentEmployeeId);
         myProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
         return myProjects.stream()
@@ -249,7 +262,8 @@ public class ProjectServiceImpl implements ProjectService {
             int size,
             String sortBy,
             String sortDir) {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        authorizationService.requirePermission(Permission.VIEW_PROJECT);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
 
         int resolvedPage = Math.max(page, 0);
         int resolvedSize = Math.max(Math.min(size, 100), 1);
@@ -257,16 +271,20 @@ public class ProjectServiceImpl implements ProjectService {
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
 
         if (role == PlatformRole.EMPLOYEE) {
-            Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-            return listProjectsPagedForEmployee(
+            Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
+            Page<Project> resultPage = projectRepository.searchReadableByEmployee(
                     currentEmployeeId,
                     status,
                     search,
-                    resolvedPage,
-                    resolvedSize,
-                    resolvedSortBy,
-                    direction
-            );
+                    PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy)));
+
+            return PagedResultDto.<ProjectResponseDto>builder()
+                    .items(resultPage.getContent().stream().map(this::toProjectResponse).toList())
+                    .page(resultPage.getNumber())
+                    .size(resultPage.getSize())
+                    .totalElements(resultPage.getTotalElements())
+                    .totalPages(resultPage.getTotalPages())
+                    .build();
         }
 
         Page<Project> resultPage = projectRepository.search(
@@ -287,6 +305,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public ProjectDetailResponseDto getProjectDetails(Long projectId) {
+        authorizationService.requirePermission(Permission.VIEW_PROJECT);
         Project project = getProjectOrThrow(projectId);
         enforceProjectReadAccess(project);
         List<ProjectTeamResponseDto> teams = listProjectTeams(projectId);
@@ -302,6 +321,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<ProjectTeamResponseDto> listProjectTeams(Long projectId) {
+        authorizationService.requirePermission(Permission.VIEW_PROJECT);
         Project project = getProjectOrThrow(projectId);
         enforceProjectReadAccess(project);
         return projectTeamRepository.findByProjectId(projectId).stream()
@@ -403,38 +423,6 @@ public class ProjectServiceImpl implements ProjectService {
                 .build();
     }
 
-    private PagedResultDto<ProjectResponseDto> listProjectsPagedForEmployee(
-            Long employeeId,
-            ProjectStatus status,
-            String search,
-            int page,
-            int size,
-            String sortBy,
-            Sort.Direction direction) {
-        String normalizedSearch = trimToNull(search);
-
-        List<Project> filteredProjects = listReadableProjectsForEmployee(employeeId).stream()
-                .filter(project -> status == null || status == project.getStatus())
-                .filter(project -> matchesProjectSearch(project, normalizedSearch))
-                .toList();
-
-        List<Project> sortedProjects = new ArrayList<>(filteredProjects);
-        sortedProjects.sort(projectComparator(sortBy, direction));
-
-        int fromIndex = Math.min(page * size, sortedProjects.size());
-        int toIndex = Math.min(fromIndex + size, sortedProjects.size());
-        long totalElements = sortedProjects.size();
-        int totalPages = (int) Math.ceil(totalElements / (double) size);
-
-        return PagedResultDto.<ProjectResponseDto>builder()
-                .items(sortedProjects.subList(fromIndex, toIndex).stream().map(this::toProjectResponse).toList())
-                .page(page)
-                .size(size)
-                .totalElements(totalElements)
-                .totalPages(totalPages)
-                .build();
-    }
-
     private List<Project> listReadableProjectsForEmployee(Long employeeId) {
         Map<Long, Project> readableProjects = new LinkedHashMap<>();
 
@@ -472,65 +460,12 @@ public class ProjectServiceImpl implements ProjectService {
         return teamIds;
     }
 
-    private boolean matchesProjectSearch(Project project, String search) {
-        if (search == null) {
-            return true;
-        }
-
-        String loweredSearch = search.toLowerCase();
-        String name = project.getName();
-        String description = project.getDescription();
-
-        return (name != null && name.toLowerCase().contains(loweredSearch))
-                || (description != null && description.toLowerCase().contains(loweredSearch));
-    }
-
     private String trimToNull(String value) {
         if (value == null) {
             return null;
         }
         String trimmed = value.trim();
         return trimmed.isBlank() ? null : trimmed;
-    }
-
-    private void validateActorEmployeeId(Long actorEmployeeId) {
-        Employee currentEmployee = resolveCurrentEmployeeOrNull();
-        if (currentEmployee != null) {
-            if (!currentEmployee.getId().equals(actorEmployeeId)) {
-                throw new ForbiddenOperationException("Authenticated user cannot act on behalf of another employee");
-            }
-            return;
-        }
-
-        if (securityUtils.getCurrentRoleOrThrow() != PlatformRole.TENANT_ADMIN) {
-            throw new ForbiddenOperationException("Current user is not linked to an employee profile");
-        }
-    }
-
-    private Employee resolveCurrentEmployeeOrNull() {
-        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
-
-        if (principal.getId() != null) {
-            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
-            if (employeeByPlatformId != null) {
-                return employeeByPlatformId;
-            }
-        }
-
-        String currentEmail = principal.getEmail();
-        if (currentEmail == null || currentEmail.isBlank()) {
-            return null;
-        }
-
-        return employeeRepository.findByEmailIgnoreCase(currentEmail).orElse(null);
-    }
-
-    private Employee resolveCurrentEmployeeOrThrow() {
-        Employee currentEmployee = resolveCurrentEmployeeOrNull();
-        if (currentEmployee == null) {
-            throw new ForbiddenOperationException("Current user is not linked to an employee profile");
-        }
-        return currentEmployee;
     }
 
     private String escapeJson(String value) {
@@ -547,14 +482,8 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private void enforceProjectReadAccess(Project project) {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        if (role != PlatformRole.EMPLOYEE) {
-            return;
-        }
-
-        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        if (!canReadProject(project, role, currentEmployeeId)) {
-            throw new ForbiddenOperationException("Employees cannot access this project");
+        if (!authorizationService.canAccessProject(project)) {
+            throw new ForbiddenOperationException("You are not allowed to access this project");
         }
     }
 
@@ -584,8 +513,38 @@ public class ProjectServiceImpl implements ProjectService {
                 .anyMatch(employeeTeamIds::contains);
     }
 
-    private Long resolveCurrentEmployeeIdOrThrow() {
-        return resolveCurrentEmployeeOrThrow().getId();
+    private void enforceProjectCreationAccess() {
+        if (authorizationService.isTenantAdminEquivalent()) {
+            return;
+        }
+        if (!hasAnyActiveTeamRole(TeamFunctionalRole.PROJECT_MANAGER)) {
+            throw new ForbiddenOperationException("Only project managers can create projects");
+        }
+    }
+
+    private void enforceProjectManagementAccess(Project project) {
+        if (authorizationService.isTenantAdminEquivalent()) {
+            return;
+        }
+        if (authorizationService.hasAnyTeamRoleForProject(project.getId(), TeamFunctionalRole.PROJECT_MANAGER)) {
+            return;
+        }
+        if (projectTeamRepository.findByProjectId(project.getId()).isEmpty()
+                && hasAnyActiveTeamRole(TeamFunctionalRole.PROJECT_MANAGER)) {
+            return;
+        }
+        throw new ForbiddenOperationException("Only project managers can manage this project");
+    }
+
+    private boolean hasAnyActiveTeamRole(TeamFunctionalRole... roles) {
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrNull();
+        if (currentEmployeeId == null || roles == null || roles.length == 0) {
+            return false;
+        }
+        Set<TeamFunctionalRole> allowedRoles = Set.of(roles);
+        return teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(currentEmployeeId).stream()
+                .map(teamMember -> teamMember.getFunctionalRole())
+                .anyMatch(allowedRoles::contains);
     }
 
     private double calculatePercent(long part, long total) {

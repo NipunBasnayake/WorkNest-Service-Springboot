@@ -12,6 +12,8 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
 
 @Component
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
@@ -34,8 +36,18 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
                 HttpStatus.UNAUTHORIZED,
                 "UNAUTHORIZED",
                 "Authentication is required",
-                request.getRequestURI()
+                request.getRequestURI(),
+                resolveTraceId(request),
+                List.of()
         );
         response.getWriter().write(objectMapper.writeValueAsString(error));
+    }
+
+    private String resolveTraceId(HttpServletRequest request) {
+        String traceId = request.getHeader("X-Trace-Id");
+        if (traceId != null && !traceId.isBlank()) {
+            return traceId.trim();
+        }
+        return UUID.randomUUID().toString();
     }
 }

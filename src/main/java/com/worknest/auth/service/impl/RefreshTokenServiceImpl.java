@@ -31,19 +31,16 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final MasterTenantContextRunner masterTenantContextRunner;
     private final long refreshTokenExpiryMillis;
-    private final long refreshRotationGraceMillis;
 
     public RefreshTokenServiceImpl(
             RefreshTokenRepository refreshTokenRepository,
             MasterTenantContextRunner masterTenantContextRunner,
             @Value("${app.jwt.refresh-expiration:0}") long configuredRefreshTokenExpiryMillis,
-            @Value("${app.jwt.refresh-token-expiration-days:7}") long legacyRefreshTokenExpiryDays,
-            @Value("${app.jwt.refresh-rotation-grace-ms:45000}") long refreshRotationGraceMillis) {
+            @Value("${app.jwt.refresh-token-expiration-days:7}") long legacyRefreshTokenExpiryDays) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.masterTenantContextRunner = masterTenantContextRunner;
         this.refreshTokenExpiryMillis = resolveRefreshTokenExpiryMillis(
                 configuredRefreshTokenExpiryMillis, legacyRefreshTokenExpiryDays);
-        this.refreshRotationGraceMillis = Math.max(0, refreshRotationGraceMillis);
     }
 
     @Override
@@ -169,44 +166,6 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         }
         revokeToken(tokenValue);
         throw new TokenExpiredException("Refresh token has expired");
-    }
-
-    private boolean isWithinRotationGrace(RefreshToken refreshToken) {
-        if (!refreshToken.isRevoked() || refreshToken.getRevokedAt() == null) {
-            return false;
-        }
-        if (refreshToken.getRotatedToToken() == null || refreshToken.getRotatedToToken().isBlank()) {
-            return false;
-        }
-        if (refreshRotationGraceMillis <= 0) {
-            return false;
-        }
-        LocalDateTime graceDeadline = refreshToken.getRevokedAt()
-                .plus(Duration.ofMillis(refreshRotationGraceMillis));
-        return !graceDeadline.isBefore(LocalDateTime.now());
-    }
-
-    private RefreshToken resolveRotatedToken(RefreshToken revokedToken) {
-        String rotatedToTokenHash = revokedToken.getRotatedToToken();
-        if (rotatedToTokenHash == null || rotatedToTokenHash.isBlank()) {
-            throw new TokenRevokedException("Refresh token has already been rotated or revoked");
-        }
-
-        RefreshToken refreshToken = masterTenantContextRunner.runInMasterContext(() ->
-                refreshTokenRepository.findByTokenHashAndRevokedFalse(rotatedToTokenHash)
-                        .orElseThrow(() -> new TokenRevokedException("Rotated refresh token is no longer active")));
-        if (refreshToken.getToken() == null || refreshToken.getToken().isBlank()) {
-            throw new TokenRevokedException("Refresh token has already been rotated or revoked");
-        }
-        refreshToken.setRawToken(refreshToken.getToken());
-        if (refreshToken.getExpiresAt().isBefore(LocalDateTime.now())) {
-            if (refreshToken.getRawToken() != null) {
-                revokeToken(refreshToken.getRawToken());
-            }
-            throw new TokenExpiredException("Refresh token has expired");
-        }
-
-        return refreshToken;
     }
 
     private RefreshToken attachRawToken(RefreshToken refreshToken, String rawToken) {

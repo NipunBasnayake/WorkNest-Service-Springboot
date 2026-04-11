@@ -2,6 +2,7 @@ package com.worknest.tenant.dto.team;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,5 +16,6 @@ public class TeamUpdateRequestDto {
     private String name;
 
     @NotNull(message = "Manager employee ID is required")
+    @Positive(message = "Manager employee ID must be positive")
     private Long managerId;
 }

@@ -4,6 +4,7 @@ import com.worknest.tenant.enums.TaskPriority;
 import com.worknest.tenant.enums.TaskStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,6 +16,7 @@ import java.time.LocalDate;
 public class TaskCreateRequestDto {
 
     @NotNull(message = "Project ID is required")
+    @Positive(message = "Project ID must be positive")
     private Long projectId;
 
     @NotBlank(message = "Task title is required")
@@ -29,8 +31,11 @@ public class TaskCreateRequestDto {
     private TaskPriority priority;
 
     @NotNull(message = "Assignee ID is required")
+    @Positive(message = "Assignee ID must be positive")
     private Long assigneeId;
 
+    @Deprecated
+    @Positive(message = "Creator employee ID must be positive")
     private Long createdByEmployeeId;
 
     private LocalDate dueDate;

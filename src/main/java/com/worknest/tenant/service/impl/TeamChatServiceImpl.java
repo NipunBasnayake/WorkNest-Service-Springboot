@@ -3,7 +3,8 @@ package com.worknest.tenant.service.impl;
 import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.chat.TeamChatCreateRequestDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageResponseDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageSendRequestDto;
@@ -42,7 +43,7 @@ public class TeamChatServiceImpl implements TeamChatService {
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final EmployeeRepository employeeRepository;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
@@ -54,7 +55,7 @@ public class TeamChatServiceImpl implements TeamChatService {
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
             EmployeeRepository employeeRepository,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
@@ -64,7 +65,7 @@ public class TeamChatServiceImpl implements TeamChatService {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.employeeRepository = employeeRepository;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
@@ -73,13 +74,15 @@ public class TeamChatServiceImpl implements TeamChatService {
 
     @Override
     public TeamChatResponseDto createOrGetTeamChat(TeamChatCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         return getOrCreateByTeam(requestDto.getTeamId());
     }
 
     @Override
     public TeamChatResponseDto getOrCreateByTeam(Long teamId) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         Team team = getTeamOrThrow(teamId);
-        Employee currentEmployee = getCurrentEmployeeOrThrow();
+        Employee currentEmployee = authorizationService.getCurrentEmployeeOrNull();
         ensureTeamChatAccess(team, currentEmployee);
 
         TeamChat teamChat = teamChatRepository.findByTeamId(teamId)
@@ -102,6 +105,13 @@ public class TeamChatServiceImpl implements TeamChatService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<TeamChatResponseDto> listMyTeamChats() {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
+        if (isPrivilegedRole()) {
+            return teamChatRepository.findAll().stream()
+                    .sorted(java.util.Comparator.comparing(TeamChat::getUpdatedAt).reversed())
+                    .map(this::toTeamChatResponse)
+                    .toList();
+        }
         Employee currentEmployee = getCurrentEmployeeOrThrow();
 
         Set<Long> teamIds = teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(currentEmployee.getId())
@@ -126,8 +136,9 @@ public class TeamChatServiceImpl implements TeamChatService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<TeamChatMessageResponseDto> listMessages(Long teamChatId) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         TeamChat teamChat = getTeamChatOrThrow(teamChatId);
-        Employee currentEmployee = getCurrentEmployeeOrThrow();
+        Employee currentEmployee = authorizationService.getCurrentEmployeeOrNull();
         ensureTeamChatAccess(teamChat.getTeam(), currentEmployee);
 
         return teamChatMessageRepository.findByTeamChatIdOrderByCreatedAtAsc(teamChatId)
@@ -138,15 +149,12 @@ public class TeamChatServiceImpl implements TeamChatService {
 
     @Override
     public TeamChatMessageResponseDto sendMessage(Long teamChatId, TeamChatMessageSendRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CHAT_ACCESS);
         TeamChat teamChat = getTeamChatOrThrow(teamChatId);
         Team team = teamChat.getTeam();
 
         Employee currentEmployee = getCurrentEmployeeOrThrow();
-        Employee sender = getEmployeeOrThrow(requestDto.getSenderEmployeeId());
-
-        if (!currentEmployee.getId().equals(sender.getId())) {
-            throw new ForbiddenOperationException("Sender must match the authenticated employee");
-        }
+        Employee sender = currentEmployee;
 
         ensureTeamChatAccess(team, currentEmployee);
 
@@ -163,7 +171,7 @@ public class TeamChatServiceImpl implements TeamChatService {
 
         notifyTeamParticipants(team, sender.getId(), saved.getId());
         tenantRealtimePublisher.publishTeamMessage(
-                securityUtils.getCurrentTenantKeyOrThrow(),
+                authorizationService.getCurrentTenantKeyOrThrow(),
                 teamChat.getId(),
                 response
         );
@@ -189,19 +197,15 @@ public class TeamChatServiceImpl implements TeamChatService {
     }
 
     private Employee getCurrentEmployeeOrThrow() {
-        String email = securityUtils.getCurrentUserEmailOrThrow();
-        return employeeRepository.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new ResourceNotFoundException("Current user does not have an employee profile"));
-    }
-
-    private Employee getEmployeeOrThrow(Long employeeId) {
-        return employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + employeeId));
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private void ensureTeamChatAccess(Team team, Employee currentEmployee) {
         if (isPrivilegedRole()) {
             return;
+        }
+        if (currentEmployee == null) {
+            throw new ForbiddenOperationException("Only team participants can access team chat");
         }
         if (!isTeamParticipant(team, currentEmployee.getId())) {
             throw new ForbiddenOperationException("Only team participants can access team chat");
@@ -209,11 +213,14 @@ public class TeamChatServiceImpl implements TeamChatService {
     }
 
     private boolean isPrivilegedRole() {
-        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
-        return role == PlatformRole.TENANT_ADMIN || role == PlatformRole.ADMIN;
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        return role.isTenantAdminEquivalent();
     }
 
     private boolean isTeamParticipant(Team team, Long employeeId) {
+        if (employeeId == null) {
+            return false;
+        }
         if (team.getManager() != null && employeeId.equals(team.getManager().getId())) {
             return true;
         }

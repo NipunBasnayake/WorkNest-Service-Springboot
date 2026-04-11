@@ -3,6 +3,7 @@ package com.worknest.tenant.dto.project;
 import com.worknest.tenant.enums.ProjectStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -27,6 +28,7 @@ public class ProjectCreateRequestDto {
 
     private ProjectStatus status;
 
-    @NotNull(message = "Creator employee ID is required")
+    @Deprecated
+    @Positive(message = "Creator employee ID must be positive")
     private Long createdByEmployeeId;
 }

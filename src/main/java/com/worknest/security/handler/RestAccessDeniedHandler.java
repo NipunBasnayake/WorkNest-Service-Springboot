@@ -12,6 +12,8 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
 
 @Component
 public class RestAccessDeniedHandler implements AccessDeniedHandler {
@@ -34,8 +36,18 @@ public class RestAccessDeniedHandler implements AccessDeniedHandler {
                 HttpStatus.FORBIDDEN,
                 "FORBIDDEN",
                 "Access denied",
-                request.getRequestURI()
+                request.getRequestURI(),
+                resolveTraceId(request),
+                List.of()
         );
         response.getWriter().write(objectMapper.writeValueAsString(error));
+    }
+
+    private String resolveTraceId(HttpServletRequest request) {
+        String traceId = request.getHeader("X-Trace-Id");
+        if (traceId != null && !traceId.isBlank()) {
+            return traceId.trim();
+        }
+        return UUID.randomUUID().toString();
     }
 }

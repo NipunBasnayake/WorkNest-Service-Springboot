@@ -63,6 +63,7 @@ public class SecurityConfig {
                                 "/api/auth/refresh",
                                 "/api/auth/forgot-password",
                                 "/api/auth/reset-password",
+                                "/api/platform/onboarding/tenants",
                                 "/error",
                                 "/ws/**")
                         .permitAll();
@@ -92,4 +93,3 @@ public class SecurityConfig {
         return http.build();
     }
 }
-

@@ -4,6 +4,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.tenant.entity.Team;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +13,14 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TeamRepository extends JpaRepository<Team, Long> {
+
+    @Override
+    @EntityGraph(attributePaths = {"manager"})
+    List<Team> findAll();
+
+    @Override
+    @EntityGraph(attributePaths = {"manager"})
+    List<Team> findAllById(Iterable<Long> ids);
 
     boolean existsByNameIgnoreCase(String name);
 
@@ -42,7 +51,45 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
                     OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
+    @EntityGraph(attributePaths = {"manager"})
     Page<Team> search(
+            @Param("managerId") Long managerId,
+            @Param("search") String search,
+            Pageable pageable);
+
+    @Query(
+            value = """
+                    SELECT DISTINCT t
+                    FROM Team t
+                    LEFT JOIN TeamMember tm ON tm.team.id = t.id AND tm.leftAt IS NULL
+                    WHERE (
+                           (t.manager IS NOT NULL AND t.manager.id = :employeeId)
+                           OR tm.employee.id = :employeeId
+                    )
+                      AND (:managerId IS NULL OR t.manager.id = :managerId)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                    """,
+            countQuery = """
+                    SELECT COUNT(DISTINCT t.id)
+                    FROM Team t
+                    LEFT JOIN TeamMember tm ON tm.team.id = t.id AND tm.leftAt IS NULL
+                    WHERE (
+                           (t.manager IS NOT NULL AND t.manager.id = :employeeId)
+                           OR tm.employee.id = :employeeId
+                    )
+                      AND (:managerId IS NULL OR t.manager.id = :managerId)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.name) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                    """
+    )
+    @EntityGraph(attributePaths = {"manager"})
+    Page<Team> searchByEmployeeVisibility(
+            @Param("employeeId") Long employeeId,
             @Param("managerId") Long managerId,
             @Param("search") String search,
             Pageable pageable);

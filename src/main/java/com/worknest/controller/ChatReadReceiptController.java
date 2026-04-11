@@ -24,7 +24,7 @@ public class ChatReadReceiptController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<ChatReadReceiptResponseDto>> markAsRead(
             @Valid @RequestBody ChatReadReceiptMarkRequestDto requestDto) {
         ChatReadReceiptResponseDto response = chatReadReceiptService
@@ -34,10 +34,10 @@ public class ChatReadReceiptController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<ChatReadReceiptResponseDto>>> listReceipts(
-            @RequestParam ChatType chatType,
-            @RequestParam Long messageId) {
+            @RequestParam("chatType") ChatType chatType,
+            @RequestParam("messageId") Long messageId) {
         List<ChatReadReceiptResponseDto> response = chatReadReceiptService.listReceipts(chatType, messageId);
         return ResponseEntity.ok(ApiResponse.success("Read receipts retrieved successfully", response));
     }

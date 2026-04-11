@@ -2,6 +2,7 @@ package com.worknest.tenant.dto.chat;
 
 import com.worknest.tenant.enums.ChatType;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -13,5 +14,6 @@ public class ChatReadReceiptMarkRequestDto {
     private ChatType chatType;
 
     @NotNull(message = "Message ID is required")
+    @Positive(message = "Message ID must be positive")
     private Long messageId;
 }

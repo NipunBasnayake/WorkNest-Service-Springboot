@@ -64,7 +64,7 @@ public class AuthController {
 
     @PostMapping("/admin/users/{id}/force-reset-password")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','HR')")
-    public ResponseEntity<ApiResponse<ForceResetPasswordResponseDto>> forceResetPassword(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<ForceResetPasswordResponseDto>> forceResetPassword(@PathVariable("id") Long id) {
         ForceResetPasswordResponseDto response = authService.forceResetPassword(id);
         return ResponseEntity.ok(ApiResponse.success("Temporary password sent to user email.", response));
     }

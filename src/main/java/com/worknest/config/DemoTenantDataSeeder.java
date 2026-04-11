@@ -30,7 +30,7 @@ import java.util.List;
 
 @Component
 @Order(30)
-@ConditionalOnProperty(name = "app.bootstrap.seed-demo-data", havingValue = "true")
+@ConditionalOnProperty(name = "bootstrap.seed-demo-data", havingValue = "true")
 public class DemoTenantDataSeeder implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DemoTenantDataSeeder.class);
@@ -70,7 +70,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             HrConversationRepository hrConversationRepository,
             HrMessageRepository hrMessageRepository,
             PasswordEncoder passwordEncoder,
-            @Value("${app.bootstrap.demo-user-password:}") String demoUserPassword) {
+            @Value("${bootstrap.demo-user-password:}") String demoUserPassword) {
         this.platformTenantRepository = platformTenantRepository;
         this.platformUserRepository = platformUserRepository;
         this.masterTenantContextRunner = masterTenantContextRunner;
@@ -114,7 +114,7 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             }
             if (demoUserPassword == null || demoUserPassword.isBlank()) {
                 throw new IllegalStateException(
-                        "Demo tenant seeding is enabled but app.bootstrap.demo-user-password is not configured");
+                        "Demo tenant seeding is enabled but bootstrap.demo-user-password is not configured");
             }
 
             Employee admin = createEmployee(tenant.getTenantKey(), "ADM", "Tenant", "Admin", PlatformRole.ADMIN);

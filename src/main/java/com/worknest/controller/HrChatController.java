@@ -26,7 +26,7 @@ public class HrChatController {
     }
 
     @PostMapping("/conversations")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<HrConversationResponseDto>> createOrGetConversation(
             @Valid @RequestBody HrConversationCreateRequestDto requestDto) {
         HrConversationResponseDto response = hrChatService.createOrGetConversation(requestDto);
@@ -35,30 +35,30 @@ public class HrChatController {
     }
 
     @GetMapping("/targets")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<HrConversationTargetsResponseDto>> listConversationTargets() {
         HrConversationTargetsResponseDto response = hrChatService.listConversationTargets();
         return ResponseEntity.ok(ApiResponse.success("HR conversation targets retrieved successfully", response));
     }
 
     @GetMapping("/conversations/my")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<HrConversationResponseDto>>> listMyConversations() {
         List<HrConversationResponseDto> response = hrChatService.listMyConversations();
         return ResponseEntity.ok(ApiResponse.success("HR conversations retrieved successfully", response));
     }
 
     @GetMapping("/conversations/{id}/messages")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<List<HrMessageResponseDto>>> listMessages(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<HrMessageResponseDto>>> listMessages(@PathVariable("id") Long id) {
         List<HrMessageResponseDto> response = hrChatService.listMessages(id);
         return ResponseEntity.ok(ApiResponse.success("HR messages retrieved successfully", response));
     }
 
     @PostMapping("/conversations/{id}/messages")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<HrMessageResponseDto>> sendMessage(
-            @PathVariable Long id,
+            @PathVariable("id") Long id,
             @Valid @RequestBody HrMessageSendRequestDto requestDto) {
         HrMessageResponseDto response = hrChatService.sendMessage(id, requestDto);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -66,8 +66,8 @@ public class HrChatController {
     }
 
     @PatchMapping("/conversations/{id}/read")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
-    public ResponseEntity<ApiResponse<Long>> markAsRead(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<Long>> markAsRead(@PathVariable("id") Long id) {
         long count = hrChatService.markConversationMessagesAsRead(id);
         return ResponseEntity.ok(ApiResponse.success("HR messages marked as read", count));
     }

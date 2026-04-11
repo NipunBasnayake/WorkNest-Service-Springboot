@@ -7,8 +7,8 @@ import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.util.EmployeeCodeGenerator;
 import com.worknest.master.entity.PlatformUser;
-import com.worknest.security.model.PlatformUserPrincipal;
-import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.employee.*;
 import com.worknest.tenant.entity.Employee;
@@ -40,13 +40,13 @@ public class EmployeeServiceImpl implements EmployeeService {
     private static final String TEMP_PASSWORD_CHARSET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
     private static final EnumSet<PlatformRole> TENANT_ASSIGNABLE_ROLES =
-            EnumSet.of(PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR, PlatformRole.EMPLOYEE);
+            EnumSet.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.HR, PlatformRole.EMPLOYEE);
 
     private final EmployeeRepository employeeRepository;
     private final EmployeeSkillRepository employeeSkillRepository;
     private final PlatformUserSyncBridgeService platformUserSyncBridgeService;
     private final PasswordEncoder passwordEncoder;
-    private final SecurityUtils securityUtils;
+    private final AuthorizationService authorizationService;
     private final AuditLogService auditLogService;
     private final SecureRandom secureRandom;
 
@@ -55,21 +55,23 @@ public class EmployeeServiceImpl implements EmployeeService {
             EmployeeSkillRepository employeeSkillRepository,
             PlatformUserSyncBridgeService platformUserSyncBridgeService,
             PasswordEncoder passwordEncoder,
-            SecurityUtils securityUtils,
+            AuthorizationService authorizationService,
             AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
         this.employeeSkillRepository = employeeSkillRepository;
         this.platformUserSyncBridgeService = platformUserSyncBridgeService;
         this.passwordEncoder = passwordEncoder;
-        this.securityUtils = securityUtils;
+        this.authorizationService = authorizationService;
         this.auditLogService = auditLogService;
         this.secureRandom = new SecureRandom();
     }
 
     @Override
     public EmployeeResponseDto createEmployee(EmployeeCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.CREATE_EMPLOYEE);
         String email = normalizeEmail(requestDto.getEmail());
-        validateTenantAssignableRole(requestDto.getRole());
+        PlatformRole requestedRole = normalizeRequestedRole(requestDto.getRole());
+        validateTenantAssignableRole(requestedRole);
         validateJoinedDate(requestDto.getJoinedDate());
 
         if (employeeRepository.existsByEmailIgnoreCase(email)) {
@@ -84,7 +86,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setLastName(requestDto.getLastName().trim());
         employee.setEmail(email);
         employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
-        employee.setRole(requestDto.getRole());
+        employee.setRole(requestedRole);
         employee.setDesignation(trimToNull(requestDto.getDesignation()));
         employee.setDepartment(trimToNull(requestDto.getDepartment()));
         employee.setPhone(trimToNull(requestDto.getPhone()));
@@ -93,7 +95,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setStatus(requestDto.getStatus() == null ? UserStatus.ACTIVE : requestDto.getStatus());
 
         Employee savedEmployee = employeeRepository.save(employee);
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
         auditLogService.logAction(
                 AuditActionType.CREATE,
@@ -113,6 +115,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public EmployeeResponseDto updateEmployee(Long employeeId, EmployeeUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         Employee employee = getEmployeeOrThrow(employeeId);
         String oldEmail = employee.getEmail();
 
@@ -122,8 +125,9 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         if (requestDto.getRole() != null) {
-            validateTenantAssignableRole(requestDto.getRole());
-            employee.setRole(requestDto.getRole());
+            PlatformRole requestedRole = normalizeRequestedRole(requestDto.getRole());
+            validateTenantAssignableRole(requestedRole);
+            employee.setRole(requestedRole);
         }
 
         validateJoinedDate(requestDto.getJoinedDate());
@@ -147,7 +151,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         Employee updated = employeeRepository.save(employee);
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
         auditLogService.logAction(
                 AuditActionType.UPDATE,
@@ -168,10 +172,11 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public EmployeeResponseDto updateEmployeeStatus(Long employeeId, EmployeeStatusUpdateDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         Employee employee = getEmployeeOrThrow(employeeId);
         employee.setStatus(requestDto.getStatus());
         Employee updated = employeeRepository.save(employee);
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
         auditLogService.logAction(
                 AuditActionType.UPDATE,
@@ -187,6 +192,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public EmployeeResponseDto getEmployeeById(Long employeeId) {
+        authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
         return toEmployeeResponse(getEmployeeOrThrow(employeeId));
     }
 
@@ -200,6 +206,7 @@ public class EmployeeServiceImpl implements EmployeeService {
             int size,
             String sortBy,
             String sortDir) {
+        authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
         validateListFilterRole(role);
 
         int resolvedPage = Math.max(page, 0);
@@ -230,11 +237,13 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public EmployeeResponseDto getMyProfile() {
+        authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         return toEmployeeResponse(resolveCurrentEmployeeOrThrow());
     }
 
     @Override
     public EmployeeResponseDto updateMyProfile(EmployeeSelfUpdateDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_SELF_PROFILE);
         Employee employee = resolveCurrentEmployeeOrThrow();
 
         employee.setFirstName(requestDto.getFirstName().trim());
@@ -247,7 +256,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         Employee updated = employeeRepository.save(employee);
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
         PlatformUser syncedUser = platformUserSyncBridgeService.syncOnUpdate(
                 updated,
                 updated.getEmail(),
@@ -268,13 +277,14 @@ public class EmployeeServiceImpl implements EmployeeService {
     public EmployeeAccountProvisionResponseDto provisionEmployeeAccount(
             Long employeeId,
             EmployeeAccountProvisionRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         Employee employee = getEmployeeOrThrow(employeeId);
         validateTenantAssignableRole(employee.getRole());
         if (employee.getPlatformUserId() != null) {
             throw new BadRequestException("Employee login account is already provisioned");
         }
 
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
         String requestedPassword = requestDto == null ? null : trimToNull(requestDto.getTemporaryPassword());
         boolean generatedPassword = requestedPassword == null;
         String temporaryPassword = generatedPassword ? generateTemporaryPassword() : requestedPassword;
@@ -312,6 +322,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public EmployeeSkillResponseDto addSkill(Long employeeId, EmployeeSkillCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         Employee employee = getEmployeeOrThrow(employeeId);
         String normalizedSkillName = normalizeSkillName(requestDto.getSkillName());
 
@@ -336,6 +347,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public EmployeeSkillResponseDto updateSkill(Long employeeId, Long skillId, EmployeeSkillCreateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         Employee employee = getEmployeeOrThrow(employeeId);
         String normalizedSkillName = normalizeSkillName(requestDto.getSkillName());
 
@@ -362,6 +374,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public void deleteSkill(Long employeeId, Long skillId) {
+        authorizationService.requirePermission(Permission.MANAGE_EMPLOYEE);
         EmployeeSkill skill = employeeSkillRepository.findByIdAndEmployeeId(skillId, employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Skill not found for employee"));
         employeeSkillRepository.delete(skill);
@@ -376,6 +389,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId) {
+        authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
         getEmployeeOrThrow(employeeId);
         return employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(employeeId)
                 .stream()
@@ -386,6 +400,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<EmployeeSkillResponseDto> listMySkills() {
+        authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         Employee currentEmployee = resolveCurrentEmployeeOrThrow();
         return employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(currentEmployee.getId())
                 .stream()
@@ -424,7 +439,7 @@ public class EmployeeServiceImpl implements EmployeeService {
             throw new BadRequestException("Role is required");
         }
         if (!isTenantAssignableRole(role)) {
-            throw new BadRequestException("Only tenant business roles (ADMIN, MANAGER, HR, EMPLOYEE) are allowed");
+            throw new BadRequestException("Only tenant business roles (TENANT_ADMIN/ADMIN, MANAGER, HR, EMPLOYEE) are allowed");
         }
     }
 
@@ -529,22 +544,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     private Employee resolveCurrentEmployeeOrThrow() {
-        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
-
-        if (principal.getId() != null) {
-            Employee employeeByPlatformId = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
-            if (employeeByPlatformId != null) {
-                return employeeByPlatformId;
-            }
-        }
-
-        String currentEmail = principal.getEmail();
-        if (currentEmail == null || currentEmail.isBlank()) {
-            throw new ResourceNotFoundException("No employee profile found for current user");
-        }
-
-        return employeeRepository.findByEmailIgnoreCase(currentEmail)
-                .orElseThrow(() -> new ResourceNotFoundException("No employee profile found for current user"));
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private String buildFullName(Employee employee) {
@@ -573,5 +573,15 @@ public class EmployeeServiceImpl implements EmployeeService {
                 "department".equals(sortBy) ||
                 "phone".equals(sortBy) ||
                 "salary".equals(sortBy);
+    }
+
+    private PlatformRole normalizeRequestedRole(PlatformRole role) {
+        if (role == null) {
+            return null;
+        }
+        if (role == PlatformRole.ADMIN) {
+            return PlatformRole.TENANT_ADMIN;
+        }
+        return role;
     }
 }

@@ -30,21 +30,21 @@ public class DashboardController {
     }
 
     @GetMapping("/manager")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<ManagerDashboardDto>> getManagerSummary() {
         ManagerDashboardDto response = dashboardService.getManagerSummary();
         return ResponseEntity.ok(ApiResponse.success("Manager dashboard retrieved successfully", response));
     }
 
     @GetMapping("/hr")
-    @PreAuthorize("hasAnyRole('ADMIN','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<HrDashboardDto>> getHrSummary() {
         HrDashboardDto response = dashboardService.getHrSummary();
         return ResponseEntity.ok(ApiResponse.success("HR dashboard retrieved successfully", response));
     }
 
     @GetMapping("/me")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<EmployeeDashboardDto>> getMySummary() {
         EmployeeDashboardDto response = dashboardService.getMySummary();
         return ResponseEntity.ok(ApiResponse.success("My dashboard retrieved successfully", response));

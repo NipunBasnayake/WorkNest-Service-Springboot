@@ -49,7 +49,7 @@ public class AnalyticsController {
     @GetMapping("/leaves/trend")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<LeaveTrendPointDto>>> getLeaveTrend(
-            @RequestParam int year) {
+            @RequestParam("year") int year) {
         List<LeaveTrendPointDto> response = analyticsService.getLeaveTrend(year);
         return ResponseEntity.ok(ApiResponse.success("Leave trend retrieved", response));
     }
@@ -57,8 +57,8 @@ public class AnalyticsController {
     @GetMapping("/attendance/trend")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<AttendanceTrendPointDto>>> getAttendanceTrend(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
+            @RequestParam(value = "fromDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(value = "toDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
         List<AttendanceTrendPointDto> response = analyticsService.getAttendanceTrend(fromDate, toDate);
         return ResponseEntity.ok(ApiResponse.success("Attendance trend retrieved", response));
     }

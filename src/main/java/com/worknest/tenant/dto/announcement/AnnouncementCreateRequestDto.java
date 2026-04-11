@@ -18,6 +18,7 @@ public class AnnouncementCreateRequestDto {
     @Size(max = 5000, message = "Message must not exceed 5000 characters")
     private String message;
 
+    @Deprecated
     @Positive(message = "Creator employee ID must be positive")
     private Long createdByEmployeeId;
 

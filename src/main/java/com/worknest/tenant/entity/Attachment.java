@@ -35,13 +35,19 @@ public class Attachment {
     @Column(name = "file_name", nullable = false, length = 255)
     private String fileName;
 
-    @Column(name = "mime_type", nullable = false, length = 120)
+    @Column(name = "file_url", length = 1000)
+    private String fileUrl;
+
+    @Column(name = "file_type", length = 120)
+    private String fileType;
+
+    @Column(name = "mime_type", length = 120)
     private String mimeType;
 
     @Column(name = "file_size", nullable = false)
     private Long fileSize;
 
-    @Column(name = "storage_path", nullable = false, length = 500)
+    @Column(name = "storage_path", length = 500)
     private String storagePath;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

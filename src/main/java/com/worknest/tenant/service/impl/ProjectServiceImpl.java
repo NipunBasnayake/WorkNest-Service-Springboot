@@ -7,7 +7,10 @@ import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
+import com.worknest.security.util.SecurityUtils;
+import com.worknest.tenant.dto.attachment.AttachmentResponseDto;
 import com.worknest.tenant.dto.common.PagedResultDto;
+import com.worknest.tenant.dto.project.ProjectDocumentRequestDto;
 import com.worknest.tenant.dto.project.ProjectCreateRequestDto;
 import com.worknest.tenant.dto.project.ProjectDetailResponseDto;
 import com.worknest.tenant.dto.project.ProjectResponseDto;
@@ -17,6 +20,7 @@ import com.worknest.tenant.dto.project.ProjectTeamAssignRequestDto;
 import com.worknest.tenant.dto.project.ProjectTeamResponseDto;
 import com.worknest.tenant.dto.project.ProjectUpdateRequestDto;
 import com.worknest.tenant.entity.Employee;
+import com.worknest.tenant.entity.Attachment;
 import com.worknest.tenant.entity.Project;
 import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Team;
@@ -44,6 +48,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -62,6 +67,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final TeamMemberRepository teamMemberRepository;
     private final EmployeeRepository employeeRepository;
     private final AuthorizationService authorizationService;
+    private final SecurityUtils securityUtils;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
 
@@ -74,6 +80,7 @@ public class ProjectServiceImpl implements ProjectService {
             TeamMemberRepository teamMemberRepository,
             EmployeeRepository employeeRepository,
             AuthorizationService authorizationService,
+            SecurityUtils securityUtils,
             TenantDtoMapper tenantDtoMapper,
             AuditLogService auditLogService) {
         this.projectRepository = projectRepository;
@@ -84,6 +91,7 @@ public class ProjectServiceImpl implements ProjectService {
         this.teamMemberRepository = teamMemberRepository;
         this.employeeRepository = employeeRepository;
         this.authorizationService = authorizationService;
+        this.securityUtils = securityUtils;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
     }
@@ -93,7 +101,8 @@ public class ProjectServiceImpl implements ProjectService {
         authorizationService.requirePermission(Permission.CREATE_PROJECT);
         enforceProjectCreationAccess();
         validateProjectDates(requestDto.getStartDate(), requestDto.getEndDate());
-        Employee creator = getActiveEmployeeOrThrow(authorizationService.getCurrentEmployeeIdOrThrow());
+        Employee creator = resolveProjectCreatorEmployeeOrNull();
+        Long creatorUserId = resolveCurrentPlatformUserId();
 
         Project project = new Project();
         project.setName(requestDto.getName().trim());
@@ -102,8 +111,12 @@ public class ProjectServiceImpl implements ProjectService {
         project.setEndDate(requestDto.getEndDate());
         project.setStatus(requestDto.getStatus() == null ? ProjectStatus.PLANNED : requestDto.getStatus());
         project.setCreatedBy(creator);
+        project.setCreatedByUserId(
+            creator != null && creator.getPlatformUserId() != null ? creator.getPlatformUserId() : creatorUserId
+        );
 
         Project saved = projectRepository.save(project);
+        syncProjectDocumentAttachments(saved, requestDto.getDocuments(), requestDto.getDocumentUrls());
         auditLogService.logAction(
                 AuditActionType.CREATE,
                 AuditEntityType.PROJECT,
@@ -129,6 +142,7 @@ public class ProjectServiceImpl implements ProjectService {
         project.setStatus(requestDto.getStatus());
 
         Project updated = projectRepository.save(project);
+        syncProjectDocumentAttachments(updated, requestDto.getDocuments(), requestDto.getDocumentUrls());
         auditLogService.logAction(
                 AuditActionType.UPDATE,
                 AuditEntityType.PROJECT,
@@ -401,6 +415,17 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private ProjectResponseDto toProjectResponse(Project project) {
+        List<ProjectTeam> projectTeams = projectTeamRepository.findByProjectId(project.getId());
+        List<Long> teamIds = projectTeams.stream()
+            .map(projectTeam -> projectTeam.getTeam().getId())
+            .distinct()
+            .toList();
+        List<AttachmentResponseDto> attachments = attachmentRepository
+                .findByEntityTypeAndEntityIdOrderByCreatedAtDesc(AttachmentEntityType.PROJECT, project.getId())
+                .stream()
+                .map(this::toAttachmentResponse)
+                .toList();
+
         return ProjectResponseDto.builder()
                 .id(project.getId())
                 .name(project.getName())
@@ -409,9 +434,195 @@ public class ProjectServiceImpl implements ProjectService {
                 .endDate(project.getEndDate())
                 .status(project.getStatus())
                 .createdBy(tenantDtoMapper.toEmployeeSimple(project.getCreatedBy()))
+                .teamCount(teamIds.size())
+                .teamIds(teamIds)
+                .attachments(attachments)
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
                 .build();
+    }
+
+    private AttachmentResponseDto toAttachmentResponse(Attachment attachment) {
+        return AttachmentResponseDto.builder()
+                .id(attachment.getId())
+                .entityType(attachment.getEntityType())
+                .entityId(attachment.getEntityId())
+                .fileName(attachment.getFileName())
+                .fileUrl(attachment.getFileUrl())
+                .fileType(attachment.getFileType())
+                .mimeType(attachment.getMimeType())
+                .fileSize(attachment.getFileSize())
+                .uploadedBy(tenantDtoMapper.toEmployeeSimple(attachment.getUploadedBy()))
+                .uploadedByUserId(attachment.getUploadedByUserId())
+                .createdAt(attachment.getCreatedAt())
+                .build();
+    }
+
+    private void syncProjectDocumentAttachments(
+            Project project,
+            List<ProjectDocumentRequestDto> documents,
+            List<String> documentUrls) {
+        if (project == null || project.getId() == null) {
+            return;
+        }
+
+        List<ProjectDocumentRequestDto> normalizedDocuments = normalizeRequestedDocuments(documents, documentUrls);
+
+        PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
+        Employee uploader = authorizationService.getCurrentEmployeeOrNull();
+        if (uploader == null && currentRole != PlatformRole.TENANT_ADMIN) {
+            if (!normalizedDocuments.isEmpty()) {
+                throw new BadRequestException("Current user does not have an employee profile for project document attachments");
+            }
+            return;
+        }
+        Long uploaderUserId = resolveAttachmentUploaderUserId(uploader);
+
+        List<Attachment> existing = attachmentRepository
+                .findByEntityTypeAndEntityIdOrderByCreatedAtDesc(AttachmentEntityType.PROJECT, project.getId());
+
+        Map<String, Attachment> existingByUrl = new HashMap<>();
+        for (Attachment attachment : existing) {
+            String fileUrl = trimToNull(attachment.getFileUrl());
+            if (fileUrl != null) {
+                existingByUrl.put(fileUrl, attachment);
+            }
+        }
+
+        Set<String> expectedUrls = new LinkedHashSet<>();
+        for (ProjectDocumentRequestDto document : normalizedDocuments) {
+            String url = trimToNull(document.getUrl());
+            if (url != null) {
+                expectedUrls.add(url);
+            }
+        }
+
+        for (Attachment attachment : existing) {
+            String fileUrl = trimToNull(attachment.getFileUrl());
+            if (fileUrl != null && !expectedUrls.contains(fileUrl)) {
+                attachmentRepository.delete(attachment);
+            }
+        }
+
+        for (ProjectDocumentRequestDto document : normalizedDocuments) {
+            String url = trimToNull(document.getUrl());
+            if (url == null || existingByUrl.containsKey(url)) {
+                continue;
+            }
+
+            Attachment attachment = new Attachment();
+            attachment.setEntityType(AttachmentEntityType.PROJECT);
+            attachment.setEntityId(project.getId());
+            attachment.setFileUrl(url);
+            attachment.setFileName(resolveDocumentName(document));
+            String mimeType = resolveDocumentMimeType(document, url);
+            attachment.setFileType(mimeType);
+            attachment.setMimeType(mimeType);
+            attachment.setFileSize(resolveDocumentSize(document));
+            attachment.setUploadedBy(uploader);
+            attachment.setUploadedByUserId(uploaderUserId);
+            attachmentRepository.save(attachment);
+        }
+    }
+
+    private Long resolveAttachmentUploaderUserId(Employee uploader) {
+        if (uploader != null && uploader.getPlatformUserId() != null) {
+            return uploader.getPlatformUserId();
+        }
+        return resolveCurrentPlatformUserId();
+    }
+
+    private List<ProjectDocumentRequestDto> normalizeRequestedDocuments(
+            List<ProjectDocumentRequestDto> documents,
+            List<String> documentUrls) {
+        List<ProjectDocumentRequestDto> normalized = new ArrayList<>();
+
+        if (documents != null) {
+            for (ProjectDocumentRequestDto document : documents) {
+                if (document == null) {
+                    continue;
+                }
+                String url = trimToNull(document.getUrl());
+                if (url == null) {
+                    continue;
+                }
+
+                ProjectDocumentRequestDto dto = new ProjectDocumentRequestDto();
+                dto.setUrl(url);
+                dto.setName(trimToNull(document.getName()));
+                dto.setMimeType(trimToNull(document.getMimeType()));
+                dto.setSize(document.getSize());
+                normalized.add(dto);
+            }
+        }
+
+        if (documentUrls != null) {
+            for (String documentUrl : documentUrls) {
+                String url = trimToNull(documentUrl);
+                if (url == null) {
+                    continue;
+                }
+
+                ProjectDocumentRequestDto dto = new ProjectDocumentRequestDto();
+                dto.setUrl(url);
+                normalized.add(dto);
+            }
+        }
+
+        Map<String, ProjectDocumentRequestDto> deduped = new LinkedHashMap<>();
+        for (ProjectDocumentRequestDto document : normalized) {
+            String url = trimToNull(document.getUrl());
+            if (url != null) {
+                deduped.put(url, document);
+            }
+        }
+
+        return new ArrayList<>(deduped.values());
+    }
+
+    private String resolveDocumentName(ProjectDocumentRequestDto document) {
+        String explicit = trimToNull(document.getName());
+        if (explicit != null) {
+            return explicit;
+        }
+
+        String url = trimToNull(document.getUrl());
+        if (url == null) {
+            return "document";
+        }
+
+        int queryIndex = url.indexOf('?');
+        String withoutQuery = queryIndex >= 0 ? url.substring(0, queryIndex) : url;
+        int slashIndex = Math.max(withoutQuery.lastIndexOf('/'), withoutQuery.lastIndexOf('\\'));
+        String derived = slashIndex >= 0 ? withoutQuery.substring(slashIndex + 1) : withoutQuery;
+        return derived.isBlank() ? "document" : derived;
+    }
+
+    private String resolveDocumentMimeType(ProjectDocumentRequestDto document, String url) {
+        String explicit = trimToNull(document.getMimeType());
+        if (explicit != null) {
+            return explicit;
+        }
+
+        String lower = url.toLowerCase();
+        if (lower.endsWith(".pdf")) {
+            return "application/pdf";
+        }
+        if (lower.endsWith(".png")) {
+            return "image/png";
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        return "application/octet-stream";
+    }
+
+    private long resolveDocumentSize(ProjectDocumentRequestDto document) {
+        Long size = document.getSize();
+        if (size == null || size <= 0L) {
+            return 1L;
+        }
+        return size;
     }
 
     private ProjectTeamResponseDto toProjectTeamResponse(ProjectTeam projectTeam) {
@@ -514,26 +725,29 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private void enforceProjectCreationAccess() {
-        if (authorizationService.isTenantAdminEquivalent()) {
+        if (authorizationService.getCurrentRoleOrThrow() == PlatformRole.TENANT_ADMIN) {
             return;
         }
-        if (!hasAnyActiveTeamRole(TeamFunctionalRole.PROJECT_MANAGER)) {
-            throw new ForbiddenOperationException("Only project managers can create projects");
+        throw new ForbiddenOperationException("Only tenant admins can create projects");
+    }
+
+    private Employee resolveProjectCreatorEmployeeOrNull() {
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrNull();
+        if (currentEmployeeId == null) {
+            return null;
         }
+        return getActiveEmployeeOrThrow(currentEmployeeId);
+    }
+
+    private Long resolveCurrentPlatformUserId() {
+        return securityUtils.getCurrentPrincipalOrThrow().getId();
     }
 
     private void enforceProjectManagementAccess(Project project) {
-        if (authorizationService.isTenantAdminEquivalent()) {
+        if (authorizationService.getCurrentRoleOrThrow() == PlatformRole.TENANT_ADMIN) {
             return;
         }
-        if (authorizationService.hasAnyTeamRoleForProject(project.getId(), TeamFunctionalRole.PROJECT_MANAGER)) {
-            return;
-        }
-        if (projectTeamRepository.findByProjectId(project.getId()).isEmpty()
-                && hasAnyActiveTeamRole(TeamFunctionalRole.PROJECT_MANAGER)) {
-            return;
-        }
-        throw new ForbiddenOperationException("Only project managers can manage this project");
+        throw new ForbiddenOperationException("Only tenant admins can manage this project");
     }
 
     private boolean hasAnyActiveTeamRole(TeamFunctionalRole... roles) {

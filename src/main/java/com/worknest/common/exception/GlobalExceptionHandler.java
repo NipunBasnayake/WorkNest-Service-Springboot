@@ -1,5 +1,6 @@
 package com.worknest.common.exception;
 
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.worknest.common.api.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -17,13 +18,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -205,6 +209,34 @@ public class GlobalExceptionHandler {
         String message = "Invalid value for parameter '" + ex.getName() + "'";
         return build(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message, request, ex, false);
     }
+
+        @ExceptionHandler(HttpMessageNotReadableException.class)
+        public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex, HttpServletRequest request) {
+        Throwable root = getRootCause(ex);
+        if (root instanceof InvalidFormatException invalidFormatException
+            && invalidFormatException.getTargetType() != null
+            && invalidFormatException.getTargetType().isEnum()) {
+            String field = invalidFormatException.getPath().isEmpty()
+                ? "request"
+                : invalidFormatException.getPath().get(invalidFormatException.getPath().size() - 1).getFieldName();
+            String allowedValues = Arrays.stream(invalidFormatException.getTargetType().getEnumConstants())
+                .map(String::valueOf)
+                .collect(Collectors.joining(", "));
+            String message = "Invalid value '" + invalidFormatException.getValue() + "' for '" + field
+                + "'. Allowed values: [" + allowedValues + "]";
+            return build(HttpStatus.BAD_REQUEST, "INVALID_ENUM_VALUE", message, request, ex, false);
+        }
+
+        return build(
+            HttpStatus.BAD_REQUEST,
+            "MALFORMED_REQUEST",
+            "Malformed request payload",
+            request,
+            ex,
+            false
+        );
+        }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(

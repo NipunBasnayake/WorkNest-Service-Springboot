@@ -41,9 +41,12 @@ public class Project {
     @Column(name = "status", nullable = false, length = 30)
     private ProjectStatus status;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "created_by_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "created_by_id", nullable = true)
     private Employee createdBy;
+
+    @Column(name = "created_by_user_id")
+    private Long createdByUserId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

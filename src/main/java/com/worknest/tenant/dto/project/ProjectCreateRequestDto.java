@@ -9,6 +9,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Getter
 @Setter
@@ -27,6 +28,10 @@ public class ProjectCreateRequestDto {
     private LocalDate endDate;
 
     private ProjectStatus status;
+
+    private List<ProjectDocumentRequestDto> documents;
+
+    private List<String> documentUrls;
 
     @Deprecated
     @Positive(message = "Creator employee ID must be positive")

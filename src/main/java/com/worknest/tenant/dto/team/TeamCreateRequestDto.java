@@ -18,4 +18,7 @@ public class TeamCreateRequestDto {
     @NotNull(message = "Manager employee ID is required")
     @Positive(message = "Manager employee ID must be positive")
     private Long managerId;
+
+    @Size(max = 2000, message = "Description must not exceed 2000 characters")
+    private String description;
 }

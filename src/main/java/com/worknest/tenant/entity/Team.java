@@ -26,6 +26,9 @@ public class Team {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Column(name = "description")
+    private String description;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "manager_id")
     private Employee manager;

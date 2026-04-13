@@ -15,7 +15,14 @@ public interface TeamService {
 
     TeamMemberResponseDto addMember(Long teamId, TeamMemberAddRequestDto requestDto);
 
+        TeamMemberResponseDto updateMemberFunctionalRoleByMemberId(
+            Long teamId,
+            Long teamMemberId,
+            TeamMemberRoleUpdateRequestDto requestDto);
+
     TeamMemberResponseDto updateMemberFunctionalRole(Long teamId, Long employeeId, TeamMemberRoleUpdateRequestDto requestDto);
+
+        void removeMemberByMemberId(Long teamId, Long teamMemberId);
 
     void removeMember(Long teamId, Long employeeId);
 

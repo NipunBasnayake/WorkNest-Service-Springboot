@@ -82,12 +82,31 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team member functional role updated successfully", responseDto));
     }
 
+    @PatchMapping("/{id:\\d+}/team-members/{teamMemberId:\\d+}/functional-role")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<TeamMemberResponseDto>> updateMemberFunctionalRoleByMemberId(
+            @PathVariable("id") @Positive Long id,
+            @PathVariable("teamMemberId") @Positive Long teamMemberId,
+            @Valid @RequestBody TeamMemberRoleUpdateRequestDto requestDto) {
+        TeamMemberResponseDto responseDto = teamService.updateMemberFunctionalRoleByMemberId(id, teamMemberId, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Team member functional role updated successfully", responseDto));
+    }
+
     @DeleteMapping("/{id:\\d+}/members/{employeeId:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable("id") @Positive Long id,
             @PathVariable("employeeId") @Positive Long employeeId) {
         teamService.removeMember(id, employeeId);
+        return ResponseEntity.ok(ApiResponse.success("Team member removed successfully"));
+    }
+
+    @DeleteMapping("/{id:\\d+}/team-members/{teamMemberId:\\d+}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<Void>> removeMemberByMemberId(
+            @PathVariable("id") @Positive Long id,
+            @PathVariable("teamMemberId") @Positive Long teamMemberId) {
+        teamService.removeMemberByMemberId(id, teamMemberId);
         return ResponseEntity.ok(ApiResponse.success("Team member removed successfully"));
     }
 

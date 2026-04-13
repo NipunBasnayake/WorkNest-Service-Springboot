@@ -30,7 +30,14 @@ public class TaskCreateRequestDto {
 
     private TaskPriority priority;
 
-    @NotNull(message = "Assignee ID is required")
+    @NotNull(message = "Assigned team ID is required")
+    @Positive(message = "Assigned team ID must be positive")
+    private Long assignedTeamId;
+
+    @Positive(message = "Assigned employee ID must be positive")
+    private Long assignedEmployeeId;
+
+    @Deprecated
     @Positive(message = "Assignee ID must be positive")
     private Long assigneeId;
 

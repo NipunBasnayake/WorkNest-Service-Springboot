@@ -22,9 +22,9 @@ import com.worknest.tenant.dto.task.TaskStatusUpdateRequestDto;
 import com.worknest.tenant.dto.task.TaskUpdateRequestDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Project;
-import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Task;
 import com.worknest.tenant.entity.TaskComment;
+import com.worknest.tenant.entity.Team;
 import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
@@ -39,6 +39,7 @@ import com.worknest.tenant.repository.ProjectTeamRepository;
 import com.worknest.tenant.repository.TaskCommentRepository;
 import com.worknest.tenant.repository.TaskRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
+import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
 import com.worknest.tenant.service.TaskService;
@@ -54,7 +55,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -62,10 +62,10 @@ public class TaskServiceImpl implements TaskService {
 
     private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED_STATUS_TRANSITIONS = Map.of(
             TaskStatus.TODO, EnumSet.of(TaskStatus.IN_PROGRESS),
-            TaskStatus.IN_PROGRESS, EnumSet.of(TaskStatus.TODO, TaskStatus.IN_REVIEW, TaskStatus.BLOCKED),
-            TaskStatus.IN_REVIEW, EnumSet.of(TaskStatus.DONE, TaskStatus.IN_PROGRESS),
-            TaskStatus.BLOCKED, EnumSet.of(TaskStatus.IN_PROGRESS),
-            TaskStatus.DONE, EnumSet.noneOf(TaskStatus.class)
+            TaskStatus.IN_PROGRESS, EnumSet.of(TaskStatus.TODO, TaskStatus.IN_REVIEW),
+            TaskStatus.IN_REVIEW, EnumSet.of(TaskStatus.IN_PROGRESS, TaskStatus.DONE, TaskStatus.BLOCKED),
+            TaskStatus.BLOCKED, EnumSet.of(TaskStatus.IN_REVIEW),
+            TaskStatus.DONE, EnumSet.of(TaskStatus.IN_REVIEW)
     );
 
     private final TaskRepository taskRepository;
@@ -73,6 +73,7 @@ public class TaskServiceImpl implements TaskService {
     private final ProjectRepository projectRepository;
     private final ProjectTeamRepository projectTeamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final TeamRepository teamRepository;
     private final EmployeeRepository employeeRepository;
     private final AttachmentRepository attachmentRepository;
     private final AuthorizationService authorizationService;
@@ -80,6 +81,7 @@ public class TaskServiceImpl implements TaskService {
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final EmailNotificationService emailNotificationService;
+    private final TenantRealtimePublisher tenantRealtimePublisher;
 
     public TaskServiceImpl(
             TaskRepository taskRepository,
@@ -87,18 +89,21 @@ public class TaskServiceImpl implements TaskService {
             ProjectRepository projectRepository,
             ProjectTeamRepository projectTeamRepository,
             TeamMemberRepository teamMemberRepository,
+            TeamRepository teamRepository,
             EmployeeRepository employeeRepository,
             AttachmentRepository attachmentRepository,
             AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
-            EmailNotificationService emailNotificationService) {
+            EmailNotificationService emailNotificationService,
+            TenantRealtimePublisher tenantRealtimePublisher) {
         this.taskRepository = taskRepository;
         this.taskCommentRepository = taskCommentRepository;
         this.projectRepository = projectRepository;
         this.projectTeamRepository = projectTeamRepository;
         this.teamMemberRepository = teamMemberRepository;
+        this.teamRepository = teamRepository;
         this.employeeRepository = employeeRepository;
         this.attachmentRepository = attachmentRepository;
         this.authorizationService = authorizationService;
@@ -106,6 +111,7 @@ public class TaskServiceImpl implements TaskService {
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.emailNotificationService = emailNotificationService;
+        this.tenantRealtimePublisher = tenantRealtimePublisher;
     }
 
     @Override
@@ -113,12 +119,12 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.CREATE_TASK);
         Project project = getProjectOrThrow(requestDto.getProjectId());
         ensureProjectAllowsTaskCreation(project);
-        enforceTaskCreationAccess(project);
-        validateAssigneeRequired(requestDto.getAssigneeId());
+        Team assignedTeam = resolveAssignedTeamOrThrow(project.getId(), requestDto.getAssignedTeamId());
+        enforceTaskCreationAccess(project, assignedTeam.getId());
 
-        Long creatorEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
-        Employee creator = getActiveEmployeeOrThrow(creatorEmployeeId);
-        Employee assignee = resolveAssignee(project.getId(), requestDto.getAssigneeId());
+        Long currentUserId = authorizationService.getCurrentUserIdOrThrow();
+        Employee creator = resolveCurrentEmployeeOrNull();
+        Employee assignee = resolveAssignedEmployee(assignedTeam, resolveRequestedAssignedEmployeeId(requestDto));
 
         validateDueDate(project, requestDto.getDueDate());
 
@@ -129,7 +135,10 @@ public class TaskServiceImpl implements TaskService {
         task.setStatus(requestDto.getStatus());
         task.setPriority(requestDto.getPriority());
         task.setAssignee(assignee);
+        task.setAssignedTeam(assignedTeam);
         task.setCreatedBy(creator);
+        task.setCreatedByUserId(currentUserId);
+        task.setAssignedByUserId(currentUserId);
         task.setDueDate(requestDto.getDueDate());
 
         Task saved = taskRepository.save(task);
@@ -140,6 +149,7 @@ public class TaskServiceImpl implements TaskService {
                 saved.getId(),
                 "{\"title\":\"" + escapeJson(saved.getTitle()) + "\"}"
         );
+        publishTaskRealtime(saved);
         return toTaskResponse(saved);
     }
 
@@ -155,14 +165,22 @@ public class TaskServiceImpl implements TaskService {
         LocalDate previousDueDate = task.getDueDate();
 
         if (requestDto.getStatus() != null) {
-            validateTaskStatusTransition(task.getStatus(), requestDto.getStatus());
+            validateTaskTransition(task, requestDto.getStatus());
             task.setStatus(requestDto.getStatus());
         }
         if (requestDto.getPriority() != null) {
             task.setPriority(requestDto.getPriority());
         }
-        if (requestDto.getAssigneeId() != null) {
-            task.setAssignee(resolveAssignee(task.getProject().getId(), requestDto.getAssigneeId()));
+        if (requestDto.getAssignedTeamId() != null) {
+            Team assignedTeam = resolveAssignedTeamOrThrow(task.getProject().getId(), requestDto.getAssignedTeamId());
+            task.setAssignedTeam(assignedTeam);
+            task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
+        }
+
+        Long requestedAssigneeId = resolveRequestedAssignedEmployeeId(requestDto);
+        if (requestDto.getAssignedEmployeeId() != null || requestDto.getAssigneeId() != null) {
+            task.setAssignee(resolveAssignedEmployee(task.getAssignedTeam(), requestedAssigneeId));
+            task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
         }
 
         task.setTitle(requestDto.getTitle().trim());
@@ -170,10 +188,6 @@ public class TaskServiceImpl implements TaskService {
 
         validateDueDate(task.getProject(), requestDto.getDueDate());
         task.setDueDate(requestDto.getDueDate());
-        if (task.getAssignee() == null) {
-            throw new BadRequestException("Task assignee is required");
-        }
-
         Task updated = taskRepository.save(task);
         if (assigneeChanged(previousAssigneeId, updated)) {
             notifyTaskAssignment(updated);
@@ -191,6 +205,7 @@ public class TaskServiceImpl implements TaskService {
                 updated.getId(),
                 "{\"title\":\"" + escapeJson(updated.getTitle()) + "\"}"
         );
+        publishTaskRealtime(updated);
         return toTaskResponse(updated);
     }
 
@@ -198,11 +213,7 @@ public class TaskServiceImpl implements TaskService {
     public TaskResponseDto changeStatus(Long taskId, TaskStatusUpdateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.UPDATE_TASK_STATUS);
         Task task = getTaskOrThrow(taskId);
-        if (!authorizationService.isTaskAssignee(task)) {
-            enforceTaskManagerAccess(task);
-        }
-
-        validateTaskStatusTransition(task.getStatus(), requestDto.getStatus());
+        validateTaskTransition(task, requestDto.getStatus());
         task.setStatus(requestDto.getStatus());
         Task updated = taskRepository.save(task);
         notifyTaskStatusChange(updated);
@@ -212,6 +223,7 @@ public class TaskServiceImpl implements TaskService {
                 updated.getId(),
                 "{\"status\":\"" + updated.getStatus() + "\"}"
         );
+        publishTaskRealtime(updated);
         return toTaskResponse(updated);
     }
 
@@ -228,6 +240,7 @@ public class TaskServiceImpl implements TaskService {
                 updated.getId(),
                 "{\"priority\":\"" + updated.getPriority() + "\"}"
         );
+        publishTaskRealtime(updated);
         return toTaskResponse(updated);
     }
 
@@ -235,10 +248,14 @@ public class TaskServiceImpl implements TaskService {
     public TaskResponseDto changeAssignee(Long taskId, TaskAssigneeUpdateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.ASSIGN_TASK);
         Task task = getTaskOrThrow(taskId);
-        enforceTaskAssignmentAccess(task.getProject().getId());
-        validateAssigneeRequired(requestDto.getAssigneeId());
-        Employee assignee = resolveAssignee(task.getProject().getId(), requestDto.getAssigneeId());
+        enforceTaskAssignmentAccess(task);
+        Long assignedEmployeeId = resolveRequestedAssignedEmployeeId(requestDto);
+        if (assignedEmployeeId == null) {
+            throw new BadRequestException("Assigned employee is required");
+        }
+        Employee assignee = resolveAssignedEmployee(task.getAssignedTeam(), assignedEmployeeId);
         task.setAssignee(assignee);
+        task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
         Task updated = taskRepository.save(task);
         notifyTaskAssignment(updated);
         auditLogService.logAction(
@@ -247,6 +264,7 @@ public class TaskServiceImpl implements TaskService {
                 updated.getId(),
                 "{\"assigneeId\":" + (assignee == null ? "null" : assignee.getId()) + "}"
         );
+        publishTaskRealtime(updated);
         return toTaskResponse(updated);
     }
 
@@ -264,6 +282,7 @@ public class TaskServiceImpl implements TaskService {
                 updated.getId(),
                 "{\"dueDate\":\"" + updated.getDueDate() + "\"}"
         );
+        publishTaskRealtime(updated);
         return toTaskResponse(updated);
     }
 
@@ -272,7 +291,11 @@ public class TaskServiceImpl implements TaskService {
     public List<TaskResponseDto> listMyTasks() {
         authorizationService.requirePermission(Permission.VIEW_TASK);
         Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        return taskRepository.findByAssigneeIdOrderByCreatedAtDesc(currentEmployeeId).stream()
+        return taskRepository.findDistinctVisibleByEmployeeOrderByCreatedAtDesc(
+                currentEmployeeId,
+                TeamFunctionalRole.TEAM_LEAD,
+                TeamFunctionalRole.PROJECT_MANAGER)
+            .stream()
                 .map(this::toTaskResponse)
                 .toList();
     }
@@ -326,11 +349,18 @@ public class TaskServiceImpl implements TaskService {
                 PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy))
         );
 
+            PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+            Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
+            List<TaskResponseDto> items = resultPage.getContent().stream()
+                .filter(task -> canReadTask(task, role, currentEmployeeId))
+                .map(this::toTaskResponse)
+                .toList();
+
         return PagedResultDto.<TaskResponseDto>builder()
-                .items(resultPage.getContent().stream().map(this::toTaskResponse).toList())
+                .items(items)
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
-                .totalElements(resultPage.getTotalElements())
+                .totalElements(role == PlatformRole.EMPLOYEE ? items.size() : resultPage.getTotalElements())
                 .totalPages(resultPage.getTotalPages())
                 .build();
     }
@@ -488,38 +518,56 @@ public class TaskServiceImpl implements TaskService {
         return employee;
     }
 
-    private Employee resolveAssignee(Long projectId, Long assigneeId) {
-        if (assigneeId == null) {
-            return null;
+    private Team resolveAssignedTeamOrThrow(Long projectId, Long assignedTeamId) {
+        if (assignedTeamId == null) {
+            throw new BadRequestException("Assigned team is required");
         }
 
-        Employee assignee = getActiveEmployeeOrThrow(assigneeId);
-        if (!isEmployeeAssignableToProject(projectId, assigneeId)) {
-            throw new BadRequestException("Employee is not a member of any team assigned to this project");
+        Team assignedTeam = teamRepository.findById(assignedTeamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found with id: " + assignedTeamId));
+
+        if (!projectTeamRepository.existsByProjectIdAndTeamId(projectId, assignedTeamId)) {
+            throw new BadRequestException("Assigned team is not linked to this project");
+        }
+        return assignedTeam;
+    }
+
+    private Employee resolveAssignedEmployee(Team assignedTeam, Long assignedEmployeeId) {
+        if (assignedEmployeeId == null) {
+            return null;
+        }
+        if (assignedTeam == null) {
+            throw new BadRequestException("Assigned team is required before assigning an employee");
+        }
+
+        Employee assignee = getActiveEmployeeOrThrow(assignedEmployeeId);
+        if (!isEmployeeActiveInTeam(assignedTeam.getId(), assignedEmployeeId)) {
+            throw new BadRequestException("Assigned employee must be an active member of the assigned team");
         }
         return assignee;
     }
 
-    private boolean isEmployeeAssignableToProject(Long projectId, Long employeeId) {
-        List<ProjectTeam> assignedTeams = projectTeamRepository.findByProjectId(projectId);
-        if (assignedTeams.isEmpty()) {
+    private boolean isEmployeeActiveInTeam(Long teamId, Long employeeId) {
+        if (teamId == null || employeeId == null) {
+            return false;
+        }
+        Team team = teamRepository.findById(teamId).orElse(null);
+        if (team != null && team.getManager() != null && employeeId.equals(team.getManager().getId())) {
             return true;
         }
+        return teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, employeeId).isPresent();
+    }
 
-        Set<Long> projectTeamIds = assignedTeams.stream()
-                .map(projectTeam -> projectTeam.getTeam().getId())
-                .collect(Collectors.toSet());
+    private Long resolveRequestedAssignedEmployeeId(TaskCreateRequestDto requestDto) {
+        return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
+    }
 
-        boolean isAssignedTeamManager = assignedTeams.stream()
-                .map(ProjectTeam::getTeam)
-                .anyMatch(team -> team.getManager() != null && team.getManager().getId().equals(employeeId));
-        if (isAssignedTeamManager) {
-            return true;
-        }
+    private Long resolveRequestedAssignedEmployeeId(TaskUpdateRequestDto requestDto) {
+        return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
+    }
 
-        return teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(employeeId).stream()
-                .map(teamMember -> teamMember.getTeam().getId())
-                .anyMatch(projectTeamIds::contains);
+    private Long resolveRequestedAssignedEmployeeId(TaskAssigneeUpdateRequestDto requestDto) {
+        return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
     }
 
     private void validateDueDate(Project project, LocalDate dueDate) {
@@ -539,11 +587,12 @@ public class TaskServiceImpl implements TaskService {
         }
     }
 
-    private void validateTaskStatusTransition(TaskStatus currentStatus, TaskStatus newStatus) {
-        if (currentStatus == null || newStatus == null) {
-            return;
+    private void validateTaskTransition(Task task, TaskStatus newStatus) {
+        if (task == null || newStatus == null) {
+            throw new BadRequestException("Task status is required");
         }
 
+        TaskStatus currentStatus = task.getStatus();
         if (currentStatus == newStatus) {
             return;
         }
@@ -555,6 +604,37 @@ public class TaskServiceImpl implements TaskService {
         if (!allowedTransitions.contains(newStatus)) {
             throw new BadRequestException("Invalid task status transition: " + currentStatus + " -> " + newStatus);
         }
+
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent()) {
+            return;
+        }
+
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
+        if (currentEmployeeId == null) {
+            throw new ForbiddenOperationException("You are not allowed to update this task status");
+        }
+
+        if (task.getAssignedTeam() == null || task.getAssignedTeam().getId() == null) {
+            if (!authorizationService.isTaskAssignee(task)) {
+                throw new ForbiddenOperationException("Only the assignee can update this task");
+            }
+            return;
+        }
+
+        Long assignedTeamId = task.getAssignedTeam().getId();
+        if (!isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
+            throw new ForbiddenOperationException("Only team leads or project managers can update team task status");
+        }
+
+        if ((currentStatus == TaskStatus.TODO && newStatus == TaskStatus.IN_PROGRESS)
+                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.TODO)
+                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.IN_REVIEW)
+                || (currentStatus == TaskStatus.IN_REVIEW && newStatus == TaskStatus.IN_PROGRESS)) {
+            return;
+        }
+
+        throw new ForbiddenOperationException("Team leads and project managers can only move team tasks between TODO, IN_PROGRESS, and REVIEW");
     }
 
     private void ensureProjectAllowsTaskCreation(Project project) {
@@ -568,12 +648,20 @@ public class TaskServiceImpl implements TaskService {
                 .id(task.getId())
                 .projectId(task.getProject().getId())
                 .projectName(task.getProject().getName())
+                .assignedTeamId(task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId())
+                .assignedTeamName(task.getAssignedTeam() == null ? null : task.getAssignedTeam().getName())
+                .assignedEmployeeId(task.getAssignee() == null ? null : task.getAssignee().getId())
                 .title(task.getTitle())
                 .description(task.getDescription())
                 .status(task.getStatus())
                 .priority(task.getPriority())
                 .assignee(tenantDtoMapper.toEmployeeSimple(task.getAssignee()))
                 .createdBy(tenantDtoMapper.toEmployeeSimple(task.getCreatedBy()))
+                .createdByEmployeeId(task.getCreatedBy() == null ? null : task.getCreatedBy().getId())
+                .createdByUserId(task.getCreatedByUserId())
+                .assignedBy(null)
+                .assignedByEmployeeId(null)
+                .assignedByUserId(task.getAssignedByUserId())
                 .dueDate(task.getDueDate())
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
@@ -615,7 +703,7 @@ public class TaskServiceImpl implements TaskService {
             return;
         }
 
-        if (task.getCreatedBy().getId().equals(task.getAssignee().getId())) {
+        if (task.getCreatedBy() != null && task.getCreatedBy().getId().equals(task.getAssignee().getId())) {
             return;
         }
 
@@ -745,7 +833,16 @@ public class TaskServiceImpl implements TaskService {
         if (currentEmployeeId == null) {
             return false;
         }
-        return task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId());
+        if (task.getAssignedTeam() == null) {
+            return task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId());
+        }
+
+        Long assignedTeamId = task.getAssignedTeam().getId();
+        if (assignedTeamId == null) {
+            return false;
+        }
+
+        return isTeamManagerOrLead(currentEmployeeId, assignedTeamId);
     }
 
     private Long resolveCurrentEmployeeIdOrNull() {
@@ -757,12 +854,16 @@ public class TaskServiceImpl implements TaskService {
         return authorizationService.getCurrentEmployeeIdOrThrow();
     }
 
-    private void enforceTaskCreationAccess(Project project) {
+    private void enforceTaskCreationAccess(Project project, Long assignedTeamId) {
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
-        if (!authorizationService.hasAnyTeamRoleForProject(project.getId(), TeamFunctionalRole.PROJECT_MANAGER)) {
-            throw new ForbiddenOperationException("Only project managers can create tasks for this project");
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        if (!isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
+            throw new ForbiddenOperationException("Only project managers or team leads can create tasks for this assigned team");
+        }
+        if (!projectTeamRepository.existsByProjectIdAndTeamId(project.getId(), assignedTeamId)) {
+            throw new ForbiddenOperationException("You can only create tasks for teams assigned to this project");
         }
     }
 
@@ -770,24 +871,38 @@ public class TaskServiceImpl implements TaskService {
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
-        if (!authorizationService.hasAnyTeamRoleForProject(
-                task.getProject().getId(),
-                TeamFunctionalRole.PROJECT_MANAGER,
-                TeamFunctionalRole.TEAM_LEAD)) {
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        Long assignedTeamId = task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId();
+        if (assignedTeamId == null || !isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
             throw new ForbiddenOperationException("Only project managers or team leads can manage this task");
         }
     }
 
-    private void enforceTaskAssignmentAccess(Long projectId) {
+    private void enforceTaskAssignmentAccess(Task task) {
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
-        if (!authorizationService.hasAnyTeamRoleForProject(
-                projectId,
-                TeamFunctionalRole.PROJECT_MANAGER,
-                TeamFunctionalRole.TEAM_LEAD)) {
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        Long assignedTeamId = task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId();
+        if (assignedTeamId == null || !isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
             throw new ForbiddenOperationException("Only project managers or team leads can assign tasks");
         }
+    }
+
+    private boolean isTeamManagerOrLead(Long employeeId, Long teamId) {
+        if (employeeId == null || teamId == null) {
+            return false;
+        }
+
+        Team team = teamRepository.findById(teamId).orElse(null);
+        if (team != null && team.getManager() != null && employeeId.equals(team.getManager().getId())) {
+            return true;
+        }
+
+        return teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, employeeId)
+                .map(teamMember -> teamMember.getFunctionalRole() == TeamFunctionalRole.PROJECT_MANAGER
+                        || teamMember.getFunctionalRole() == TeamFunctionalRole.TEAM_LEAD)
+                .orElse(false);
     }
 
     private void validateDueDateRange(LocalDate dueFrom, LocalDate dueTo) {
@@ -807,12 +922,6 @@ public class TaskServiceImpl implements TaskService {
                 "priority".equals(sortBy) ||
                 "status".equals(sortBy) ||
                 "title".equals(sortBy);
-    }
-
-    private void validateAssigneeRequired(Long assigneeId) {
-        if (assigneeId == null) {
-            throw new BadRequestException("Task assignee is required");
-        }
     }
 
     private boolean hasTaskContentChanged(
@@ -862,5 +971,12 @@ public class TaskServiceImpl implements TaskService {
         String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
         String fullName = (firstName + " " + lastName).trim();
         return fullName.isBlank() ? employee.getEmail() : fullName;
+    }
+
+    private void publishTaskRealtime(Task task) {
+        tenantRealtimePublisher.publishTaskUpdate(
+                authorizationService.getCurrentTenantKeyOrThrow(),
+                toTaskResponse(task)
+        );
     }
 }

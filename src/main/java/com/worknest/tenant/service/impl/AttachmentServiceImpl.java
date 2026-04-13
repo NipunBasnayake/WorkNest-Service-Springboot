@@ -26,17 +26,10 @@ import com.worknest.tenant.repository.TaskRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.service.AttachmentService;
 import com.worknest.tenant.service.AuditLogService;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Locale;
 
@@ -53,7 +46,6 @@ public class AttachmentServiceImpl implements AttachmentService {
     private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
-    private final Path storageRoot;
 
     public AttachmentServiceImpl(
             AttachmentRepository attachmentRepository,
@@ -64,8 +56,7 @@ public class AttachmentServiceImpl implements AttachmentService {
             TeamMemberRepository teamMemberRepository,
             AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
-            AuditLogService auditLogService,
-            @Value("${app.storage.attachments-dir:storage/attachments}") String storageDir) {
+            AuditLogService auditLogService) {
         this.attachmentRepository = attachmentRepository;
         this.taskRepository = taskRepository;
         this.projectRepository = projectRepository;
@@ -75,7 +66,6 @@ public class AttachmentServiceImpl implements AttachmentService {
         this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
-        this.storageRoot = Paths.get(storageDir).toAbsolutePath().normalize();
     }
 
     @Override
@@ -93,7 +83,6 @@ public class AttachmentServiceImpl implements AttachmentService {
         attachment.setFileType(normalizeFileType(requestDto.getFileType()));
         attachment.setMimeType(attachment.getFileType());
         attachment.setFileSize(requestDto.getFileSize());
-        attachment.setStoragePath(null);
         attachment.setUploadedBy(uploader);
 
         Attachment saved = attachmentRepository.save(attachment);
@@ -162,19 +151,7 @@ public class AttachmentServiceImpl implements AttachmentService {
         if (fileUrl != null) {
             return new AttachmentDownloadResult(null, attachment.getFileName(), resolveMimeType(attachment), fileUrl);
         }
-
-        String storagePath = trimToNull(attachment.getStoragePath());
-        if (storagePath == null) {
-            throw new ResourceNotFoundException("Attachment file URL not found");
-        }
-
-        Path filePath = Paths.get(storagePath).toAbsolutePath().normalize();
-        if (!filePath.startsWith(storageRoot) || !Files.exists(filePath)) {
-            throw new ResourceNotFoundException("Attachment file not found");
-        }
-
-        Resource resource = new FileSystemResource(filePath);
-        return new AttachmentDownloadResult(resource, attachment.getFileName(), resolveMimeType(attachment), null);
+        throw new ResourceNotFoundException("Attachment file URL not found");
     }
 
     @Override
@@ -189,7 +166,6 @@ public class AttachmentServiceImpl implements AttachmentService {
             throw new ForbiddenOperationException("You are not allowed to delete this attachment");
         }
 
-        deleteLegacyFileIfPresent(attachment.getStoragePath());
         attachmentRepository.delete(attachment);
         auditLogService.logAction(
                 AuditActionType.DELETE,
@@ -317,24 +293,6 @@ public class AttachmentServiceImpl implements AttachmentService {
         return entityType.canonical();
     }
 
-    private void deleteLegacyFileIfPresent(String storagePath) {
-        String normalizedStoragePath = trimToNull(storagePath);
-        if (normalizedStoragePath == null) {
-            return;
-        }
-
-        Path filePath = Paths.get(normalizedStoragePath).toAbsolutePath().normalize();
-        if (!filePath.startsWith(storageRoot)) {
-            return;
-        }
-
-        try {
-            Files.deleteIfExists(filePath);
-        } catch (IOException ignored) {
-            // Keep DB cleanup even if the old local file is already gone.
-        }
-    }
-
     private String normalizeFileUrl(String fileUrl) {
         String normalized = trimToNull(fileUrl);
         if (normalized == null) {
@@ -371,6 +329,7 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .mimeType(resolveMimeType(attachment))
                 .fileSize(attachment.getFileSize())
                 .uploadedBy(tenantDtoMapper.toEmployeeSimple(attachment.getUploadedBy()))
+                .uploadedByUserId(attachment.getUploadedByUserId())
                 .createdAt(attachment.getCreatedAt())
                 .build();
     }

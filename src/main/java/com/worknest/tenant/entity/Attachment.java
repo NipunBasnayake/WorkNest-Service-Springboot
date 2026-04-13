@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
         name = "attachments",
         indexes = {
                 @Index(name = "idx_attachments_entity", columnList = "entity_type,entity_id"),
-                @Index(name = "idx_attachments_uploaded_by", columnList = "uploaded_by_id")
+        @Index(name = "idx_attachments_uploaded_by", columnList = "uploaded_by_id"),
+        @Index(name = "idx_attachments_uploaded_by_user", columnList = "uploaded_by_user_id")
         }
 )
 @Getter
@@ -47,12 +48,12 @@ public class Attachment {
     @Column(name = "file_size", nullable = false)
     private Long fileSize;
 
-    @Column(name = "storage_path", length = 500)
-    private String storagePath;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "uploaded_by_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "uploaded_by_id", nullable = true)
     private Employee uploadedBy;
+
+    @Column(name = "uploaded_by_user_id")
+    private Long uploadedByUserId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -27,6 +27,8 @@ public interface AuthorizationService {
 
     Long getCurrentEmployeeIdOrNull();
 
+    Long getCurrentUserIdOrThrow();
+
     String getCurrentTenantKeyOrThrow();
 
     PlatformRole getCurrentRoleOrThrow();

@@ -45,6 +45,25 @@ public class EmailNotificationService {
         emailDispatchService.sendHtmlEmailAsync(toEmail, content);
     }
 
+        public void sendLeaveRequestSubmittedEmail(
+                        String toEmail,
+                        String recipientName,
+                        String requesterName,
+                        String leaveType,
+                        LocalDate startDate,
+                        LocalDate endDate,
+                        String reason) {
+                EmailContent content = templateFactory.leaveRequested(
+                                recipientName,
+                                requesterName,
+                                leaveType,
+                                startDate,
+                                endDate,
+                                reason
+                );
+                emailDispatchService.sendHtmlEmailAsync(toEmail, content);
+        }
+
     public void sendLeaveRejectedEmail(
             String toEmail,
             String fullName,
@@ -67,6 +86,15 @@ public class EmailNotificationService {
                 templateFactory.leaveCancelledAlert(recipientName, employeeName, startDate, endDate);
         emailDispatchService.sendHtmlEmailAsync(toEmail, content);
     }
+
+        public void sendLeaveCancelledConfirmationEmail(
+                        String toEmail,
+                        String fullName,
+                        LocalDate startDate,
+                        LocalDate endDate) {
+                EmailContent content = templateFactory.leaveCancelledConfirmation(fullName, startDate, endDate);
+                emailDispatchService.sendHtmlEmailAsync(toEmail, content);
+        }
 
     public void sendLeaveReminderEmail(
             String toEmail,

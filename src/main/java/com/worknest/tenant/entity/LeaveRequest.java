@@ -55,6 +55,9 @@ public class LeaveRequest {
     @Column(name = "decision_comment", columnDefinition = "TEXT")
     private String decisionComment;
 
+    @Column(name = "decided_at")
+    private LocalDateTime decidedAt;
+
     @Column(name = "last_reminder_sent_for_date")
     private LocalDate lastReminderSentForDate;
 

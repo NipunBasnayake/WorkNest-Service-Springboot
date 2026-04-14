@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long> {
@@ -85,6 +86,22 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             LeaveStatus status,
             LocalDate endDate,
             LocalDate startDate);
+
+    @Query("""
+            SELECT CASE WHEN COUNT(lr) > 0 THEN true ELSE false END
+            FROM LeaveRequest lr
+            WHERE lr.employee.id = :employeeId
+              AND lr.status IN :statuses
+              AND (:excludedId IS NULL OR lr.id <> :excludedId)
+              AND lr.startDate <= :endDate
+              AND lr.endDate >= :startDate
+            """)
+    boolean existsOverlappingLeave(
+            @Param("employeeId") Long employeeId,
+            @Param("statuses") Collection<LeaveStatus> statuses,
+            @Param("excludedId") Long excludedId,
+            @Param("endDate") LocalDate endDate,
+            @Param("startDate") LocalDate startDate);
 
     @Query("""
             SELECT lr

@@ -183,24 +183,21 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             throw new BadRequestException("Date range is too large. Maximum supported range is 366 days");
         }
 
-        Map<LocalDate, Map<String, Long>> grouped = new LinkedHashMap<>();
-        List<Object[]> rows = attendanceRecordRepository.findTrendCounts(start, end);
-        for (Object[] row : rows) {
-            LocalDate day = (LocalDate) row[0];
-            String status = row[1].toString();
-            long count = ((Number) row[2]).longValue();
-            grouped.computeIfAbsent(day, ignored -> new HashMap<>()).put(status, count);
-        }
+        Map<LocalDate, List<com.worknest.tenant.entity.AttendanceRecord>> grouped = new LinkedHashMap<>();
+        attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateAsc(start, end)
+                .forEach(record -> grouped.computeIfAbsent(record.getWorkDate(), ignored -> new ArrayList<>()).add(record));
 
         List<AttendanceTrendPointDto> result = new ArrayList<>();
         LocalDate cursor = start;
         while (!cursor.isAfter(end)) {
-            Map<String, Long> counts = grouped.getOrDefault(cursor, Map.of());
+            List<com.worknest.tenant.entity.AttendanceRecord> records = grouped.getOrDefault(cursor, List.of());
             result.add(AttendanceTrendPointDto.builder()
                     .workDate(cursor)
-                    .presentCount(counts.getOrDefault(AttendanceStatus.PRESENT.name(), 0L))
-                    .halfDayCount(counts.getOrDefault(AttendanceStatus.HALF_DAY.name(), 0L))
-                    .incompleteCount(counts.getOrDefault(AttendanceStatus.INCOMPLETE.name(), 0L))
+                    .presentCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.PRESENT).count())
+                    .lateCount(records.stream().filter(com.worknest.tenant.entity.AttendanceRecord::isLate).count())
+                    .halfDayCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.HALF_DAY).count())
+                    .incompleteCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.INCOMPLETE).count())
+                    .absentCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.ABSENT).count())
                     .build());
             cursor = cursor.plusDays(1);
         }

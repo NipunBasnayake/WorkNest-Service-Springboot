@@ -18,6 +18,8 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     List<AttendanceRecord> findByWorkDateOrderByEmployeeIdAsc(LocalDate workDate);
 
+        List<AttendanceRecord> findByWorkDateBetweenOrderByWorkDateAsc(LocalDate from, LocalDate to);
+
     List<AttendanceRecord> findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
             Long employeeId,
             LocalDate from,
@@ -28,6 +30,8 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
     long countByWorkDate(LocalDate workDate);
 
     long countByWorkDateAndStatus(LocalDate workDate, AttendanceStatus status);
+
+        long countByWorkDateAndLateTrue(LocalDate workDate);
 
     @Query("""
             SELECT ar.workDate, ar.status, COUNT(ar)

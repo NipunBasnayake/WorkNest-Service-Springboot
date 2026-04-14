@@ -297,20 +297,21 @@ public class DashboardServiceImpl implements DashboardService {
 
     private AttendanceOverviewDto buildTodayAttendanceOverview(LocalDate today, long activeEmployees) {
         long presentCount = attendanceRecordRepository.countByWorkDateAndStatus(today, AttendanceStatus.PRESENT);
+        long lateCount = attendanceRecordRepository.countByWorkDateAndLateTrue(today);
         long halfDayCount = attendanceRecordRepository.countByWorkDateAndStatus(today, AttendanceStatus.HALF_DAY);
         long incompleteCount = attendanceRecordRepository.countByWorkDateAndStatus(today, AttendanceStatus.INCOMPLETE);
         long totalRecords = attendanceRecordRepository.countByWorkDate(today);
-        long attendedCount = presentCount + halfDayCount + incompleteCount;
-        long absentCount = Math.max(activeEmployees - attendedCount, 0L);
+        long absentCount = Math.max(activeEmployees - totalRecords, 0L);
 
         return AttendanceOverviewDto.builder()
                 .date(today)
                 .totalRecords(totalRecords)
                 .presentCount(presentCount)
+                .lateCount(lateCount)
                 .halfDayCount(halfDayCount)
                 .incompleteCount(incompleteCount)
                 .absentCount(absentCount)
-                .attendanceRatePercent(calculatePercent(attendedCount, activeEmployees))
+                .attendanceRatePercent(calculatePercent(totalRecords, activeEmployees))
                 .build();
     }
 

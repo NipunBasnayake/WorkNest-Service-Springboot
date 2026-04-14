@@ -12,6 +12,8 @@ import java.time.LocalDate;
 public class AttendanceTrendPointDto {
     private LocalDate workDate;
     private long presentCount;
+    private long lateCount;
     private long halfDayCount;
     private long incompleteCount;
+    private long absentCount;
 }

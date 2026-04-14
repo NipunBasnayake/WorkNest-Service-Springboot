@@ -57,6 +57,7 @@ public class AttendanceController {
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AttendanceResponseDto>> checkIn(
             @Valid @RequestBody AttendanceCheckInRequestDto requestDto) {
+        requestDto.setManualEntry(true);
         AttendanceResponseDto response = attendanceService.checkIn(requestDto);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Check-in recorded", response));
@@ -66,6 +67,7 @@ public class AttendanceController {
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AttendanceResponseDto>> checkOut(
             @Valid @RequestBody AttendanceCheckOutRequestDto requestDto) {
+        requestDto.setManualEntry(true);
         AttendanceResponseDto response = attendanceService.checkOut(requestDto);
         return ResponseEntity.ok(ApiResponse.success("Check-out recorded", response));
     }

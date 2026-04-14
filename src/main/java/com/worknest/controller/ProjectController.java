@@ -3,8 +3,11 @@ package com.worknest.controller;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.project.*;
+import com.worknest.tenant.dto.task.TaskCreateRequestDto;
+import com.worknest.tenant.dto.task.TaskResponseDto;
 import com.worknest.tenant.enums.ProjectStatus;
 import com.worknest.tenant.service.ProjectService;
+import com.worknest.tenant.service.TaskService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
@@ -23,13 +26,15 @@ import java.util.List;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final TaskService taskService;
 
-    public ProjectController(ProjectService projectService) {
+    public ProjectController(ProjectService projectService, TaskService taskService) {
         this.projectService = projectService;
+        this.taskService = taskService;
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> createProject(
             @Valid @RequestBody ProjectCreateRequestDto requestDto) {
         ProjectResponseDto responseDto = projectService.createProject(requestDto);
@@ -38,7 +43,7 @@ public class ProjectController {
     }
 
     @PutMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> updateProject(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody ProjectUpdateRequestDto requestDto) {
@@ -47,7 +52,7 @@ public class ProjectController {
     }
 
     @PatchMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> patchProject(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody ProjectUpdateRequestDto requestDto) {
@@ -56,7 +61,7 @@ public class ProjectController {
     }
 
     @PatchMapping("/{id:\\d+}/status")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<ProjectResponseDto>> changeStatus(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody ProjectStatusUpdateRequestDto requestDto) {
@@ -65,7 +70,7 @@ public class ProjectController {
     }
 
     @PostMapping("/{id:\\d+}/teams")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<ProjectTeamResponseDto>> assignTeam(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody ProjectTeamAssignRequestDto requestDto) {
@@ -75,7 +80,7 @@ public class ProjectController {
     }
 
     @DeleteMapping("/{id:\\d+}/teams/{teamId:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> removeTeamAssignment(
             @PathVariable("id") @Positive Long id,
             @PathVariable("teamId") @Positive Long teamId) {
@@ -84,7 +89,7 @@ public class ProjectController {
     }
 
     @DeleteMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteProject(@PathVariable("id") @Positive Long id) {
         projectService.deleteProject(id);
         return ResponseEntity.ok(ApiResponse.success("Project deleted successfully"));
@@ -156,5 +161,23 @@ public class ProjectController {
     public ResponseEntity<ApiResponse<List<ProjectTeamResponseDto>>> listProjectTeams(@PathVariable("id") @Positive Long id) {
         List<ProjectTeamResponseDto> response = projectService.listProjectTeams(id);
         return ResponseEntity.ok(ApiResponse.success("Project teams retrieved successfully", response));
+    }
+
+    @PostMapping("/{id:\\d+}/tasks")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<TaskResponseDto>> createProjectTask(
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody TaskCreateRequestDto requestDto) {
+        requestDto.setProjectId(id);
+        TaskResponseDto response = taskService.createTask(requestDto);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Project task created successfully", response));
+    }
+
+    @GetMapping("/{id:\\d+}/tasks")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<TaskResponseDto>>> listProjectTasks(@PathVariable("id") @Positive Long id) {
+        List<TaskResponseDto> response = taskService.listByProject(id);
+        return ResponseEntity.ok(ApiResponse.success("Project tasks retrieved successfully", response));
     }
 }

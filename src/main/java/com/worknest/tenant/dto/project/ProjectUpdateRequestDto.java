@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Getter
 @Setter
@@ -27,4 +28,8 @@ public class ProjectUpdateRequestDto {
 
     @NotNull(message = "Status is required")
     private ProjectStatus status;
+
+    private List<ProjectDocumentRequestDto> documents;
+
+    private List<String> documentUrls;
 }

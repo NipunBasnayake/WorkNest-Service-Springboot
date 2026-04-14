@@ -13,6 +13,8 @@ public class AttendanceDailySummaryDto {
     private LocalDate workDate;
     private long totalRecords;
     private long presentCount;
+    private long lateCount;
     private long halfDayCount;
     private long incompleteCount;
+    private long absentCount;
 }

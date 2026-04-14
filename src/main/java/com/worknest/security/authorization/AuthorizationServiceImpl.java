@@ -13,6 +13,7 @@ import com.worknest.tenant.entity.TeamMember;
 import com.worknest.tenant.enums.TeamFunctionalRole;
 import com.worknest.tenant.repository.ProjectTeamRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
+import com.worknest.tenant.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
@@ -28,18 +29,21 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private final RolePermissionMatrix rolePermissionMatrix;
     private final TeamMemberRepository teamMemberRepository;
     private final ProjectTeamRepository projectTeamRepository;
+    private final TaskRepository taskRepository;
 
     public AuthorizationServiceImpl(
             SecurityUtils securityUtils,
             CurrentUserService currentUserService,
             RolePermissionMatrix rolePermissionMatrix,
             TeamMemberRepository teamMemberRepository,
-            ProjectTeamRepository projectTeamRepository) {
+            ProjectTeamRepository projectTeamRepository,
+            TaskRepository taskRepository) {
         this.securityUtils = securityUtils;
         this.currentUserService = currentUserService;
         this.rolePermissionMatrix = rolePermissionMatrix;
         this.teamMemberRepository = teamMemberRepository;
         this.projectTeamRepository = projectTeamRepository;
+        this.taskRepository = taskRepository;
     }
 
     @Override
@@ -113,6 +117,15 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     }
 
     @Override
+    public Long getCurrentUserIdOrThrow() {
+        Long userId = securityUtils.getCurrentPrincipalOrThrow().getId();
+        if (userId == null) {
+            throw new ForbiddenOperationException("Authenticated user id is required");
+        }
+        return userId;
+    }
+
+    @Override
     public String getCurrentTenantKeyOrThrow() {
         return securityUtils.getCurrentTenantKeyOrThrow();
     }
@@ -171,9 +184,22 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return true;
         }
 
+        if (taskRepository.existsByProjectIdAndParticipantEmployeeId(project.getId(), currentEmployeeId)) {
+            return true;
+        }
+
+        Set<Long> employeeTeamIds = teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(currentEmployeeId).stream()
+                .map(TeamMember::getTeam)
+                .map(Team::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        if (employeeTeamIds.isEmpty()) {
+            return false;
+        }
+
         return projectTeamRepository.findByProjectId(project.getId()).stream()
                 .map(ProjectTeam::getTeam)
-                .anyMatch(team -> canAccessTeam(team));
+                .map(Team::getId)
+                .anyMatch(employeeTeamIds::contains);
     }
 
     @Override

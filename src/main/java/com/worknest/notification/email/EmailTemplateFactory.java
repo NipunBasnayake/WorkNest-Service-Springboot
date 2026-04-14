@@ -64,6 +64,29 @@ public class EmailTemplateFactory {
         );
     }
 
+    public EmailContent leaveRequested(
+            String recipientName,
+            String requesterName,
+            String leaveType,
+            LocalDate startDate,
+            LocalDate endDate,
+            String reason) {
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("Requester", escapeOrDash(requesterName));
+        details.put("Leave type", escapeOrDash(leaveType));
+        details.put("Start date", formatDate(startDate));
+        details.put("End date", formatDate(endDate));
+        details.put("Reason", escapeOrDash(reason));
+        return build(
+                "New leave request awaiting review",
+                "A leave request is ready for your review.",
+                "Leave request submitted",
+                recipientName,
+                details,
+                "Open WorkNest to approve or reject the request."
+        );
+    }
+
     public EmailContent leaveRejected(
             String fullName,
             LocalDate startDate,
@@ -84,6 +107,23 @@ public class EmailTemplateFactory {
                 "You can submit a new request with revised dates or details."
         );
     }
+
+        public EmailContent leaveCancelledConfirmation(
+                        String fullName,
+                        LocalDate startDate,
+                        LocalDate endDate) {
+                Map<String, String> details = new LinkedHashMap<>();
+                details.put("Start date", formatDate(startDate));
+                details.put("End date", formatDate(endDate));
+                return build(
+                                "Leave request cancelled",
+                                "You cancelled a leave request.",
+                                "Leave cancellation confirmation",
+                                fullName,
+                                details,
+                                "If you still need time off, you can submit a new request."
+                );
+        }
 
     public EmailContent leaveCancelledAlert(
             String recipientName,

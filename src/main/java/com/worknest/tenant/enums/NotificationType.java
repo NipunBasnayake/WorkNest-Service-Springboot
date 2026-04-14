@@ -7,6 +7,7 @@ public enum NotificationType {
     TASK_UPDATED,
     LEAVE_APPROVED,
     LEAVE_REJECTED,
+    LEAVE_UPDATE,
     LEAVE_CANCELLED,
     ANNOUNCEMENT,
     HR_MESSAGE,

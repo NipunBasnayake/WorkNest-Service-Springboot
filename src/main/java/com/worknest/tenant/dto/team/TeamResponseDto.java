@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class TeamResponseDto {
     private Long id;
     private String name;
+    private String description;
     private EmployeeSimpleDto manager;
     private long activeMemberCount;
     private LocalDateTime createdAt;

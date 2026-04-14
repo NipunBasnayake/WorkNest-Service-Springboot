@@ -13,6 +13,7 @@ public class AttendanceMonthlySummaryDto {
     private int month;
     private long totalDays;
     private long presentDays;
+    private long lateDays;
     private long halfDays;
     private long incompleteDays;
 }

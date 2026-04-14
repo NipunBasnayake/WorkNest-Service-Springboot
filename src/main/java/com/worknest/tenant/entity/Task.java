@@ -15,7 +15,8 @@ import java.time.LocalDateTime;
         name = "tasks",
         indexes = {
                 @Index(name = "idx_tasks_project_status", columnList = "project_id,status"),
-                @Index(name = "idx_tasks_assignee", columnList = "assignee_id")
+            @Index(name = "idx_tasks_assignee", columnList = "assignee_id"),
+            @Index(name = "idx_tasks_assigned_team", columnList = "assigned_team_id")
         }
 )
 @Getter
@@ -49,9 +50,19 @@ public class Task {
     @JoinColumn(name = "assignee_id")
     private Employee assignee;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "created_by_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_team_id")
+    private Team assignedTeam;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_id")
     private Employee createdBy;
+
+    @Column(name = "created_by_user_id")
+    private Long createdByUserId;
+
+    @Column(name = "assigned_by_user_id")
+    private Long assignedByUserId;
 
     @Column(name = "due_date")
     private LocalDate dueDate;

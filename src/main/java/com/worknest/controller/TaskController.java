@@ -84,6 +84,15 @@ public class TaskController {
         return ResponseEntity.ok(ApiResponse.success("Task assignee updated successfully", response));
     }
 
+    @PatchMapping("/{id:\\d+}/assign")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<TaskResponseDto>> assignTask(
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody TaskAssigneeUpdateRequestDto requestDto) {
+        TaskResponseDto response = taskService.changeAssignee(id, requestDto);
+        return ResponseEntity.ok(ApiResponse.success("Task assignment updated successfully", response));
+    }
+
     @PatchMapping("/{id:\\d+}/due-date")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> changeDueDate(

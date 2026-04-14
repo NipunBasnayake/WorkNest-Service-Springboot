@@ -1,6 +1,7 @@
 package com.worknest.tenant.repository;
 
 import com.worknest.tenant.entity.Task;
+import com.worknest.tenant.enums.TeamFunctionalRole;
 import com.worknest.tenant.enums.TaskStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -14,13 +15,39 @@ import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
-    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
     List<Task> findByProjectIdOrderByCreatedAtDesc(Long projectId);
 
-    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
     List<Task> findByAssigneeIdOrderByCreatedAtDesc(Long assigneeId);
 
-    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
+        @Query("""
+                        SELECT DISTINCT t
+                        FROM Task t
+                        LEFT JOIN TeamMember tm ON tm.team.id = t.assignedTeam.id AND tm.leftAt IS NULL
+                                                WHERE (
+                                                           t.assignedTeam IS NULL
+                                                           AND t.assignee.id = :employeeId
+                                                          )
+                                                   OR (
+                                                           t.assignedTeam IS NOT NULL
+                                                           AND (
+                                                                   (t.assignedTeam.manager IS NOT NULL AND t.assignedTeam.manager.id = :employeeId)
+                                                                   OR (
+                                                                           tm.employee.id = :employeeId
+                                                                           AND (tm.functionalRole = :teamLeadRole OR tm.functionalRole = :projectManagerRole)
+                                                                   )
+                                                           )
+                                                          )
+                        ORDER BY t.createdAt DESC
+                        """)
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                List<Task> findDistinctVisibleByEmployeeOrderByCreatedAtDesc(
+                                @Param("employeeId") Long employeeId,
+                                @Param("teamLeadRole") TeamFunctionalRole teamLeadRole,
+                                @Param("projectManagerRole") TeamFunctionalRole projectManagerRole);
+
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
     List<Task> findByProjectIdAndStatusOrderByCreatedAtDesc(Long projectId, TaskStatus status);
 
     boolean existsByProjectIdAndAssigneeId(Long projectId, Long assigneeId);
@@ -73,7 +100,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                     OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
-    @EntityGraph(attributePaths = {"project", "assignee", "createdBy"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
     Page<Task> search(
             @Param("projectId") Long projectId,
             @Param("status") TaskStatus status,

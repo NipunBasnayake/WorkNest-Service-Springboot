@@ -41,6 +41,19 @@ public class AttendanceRecord {
     @Column(name = "check_out")
     private LocalDateTime checkOut;
 
+    @Column(name = "late", nullable = false)
+    private boolean late;
+
+    @Column(name = "manual_entry", nullable = false)
+    private boolean manualEntry;
+
+    @Column(name = "note", length = 500)
+    private String note;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "marked_by_employee_id")
+    private Employee markedByEmployee;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private AttendanceStatus status;

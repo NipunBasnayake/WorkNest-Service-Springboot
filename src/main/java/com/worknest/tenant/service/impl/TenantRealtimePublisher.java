@@ -4,6 +4,7 @@ import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
 import com.worknest.tenant.dto.chat.HrMessageResponseDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageResponseDto;
 import com.worknest.tenant.dto.notification.NotificationResponseDto;
+import com.worknest.tenant.dto.task.TaskResponseDto;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
@@ -36,5 +37,10 @@ public class TenantRealtimePublisher {
                 "/topic/tenant/" + tenantKey + "/team-chat/" + teamChatId,
                 payload
         );
+    }
+
+    public void publishTaskUpdate(String tenantKey, TaskResponseDto payload) {
+        messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/tasks", payload);
+        messagingTemplate.convertAndSend("/topic/tenant/tasks", payload);
     }
 }

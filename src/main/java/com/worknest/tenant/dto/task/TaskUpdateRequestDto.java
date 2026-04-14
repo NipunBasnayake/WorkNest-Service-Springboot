@@ -24,6 +24,11 @@ public class TaskUpdateRequestDto {
 
     private TaskPriority priority;
 
+    private Long assignedTeamId;
+
+    private Long assignedEmployeeId;
+
+    @Deprecated
     private Long assigneeId;
 
     private LocalDate dueDate;

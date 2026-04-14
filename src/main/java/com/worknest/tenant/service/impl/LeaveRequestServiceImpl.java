@@ -8,16 +8,20 @@ import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
+import com.worknest.tenant.dto.attachment.AttachmentCreateRequestDto;
+import com.worknest.tenant.dto.attachment.AttachmentResponseDto;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.leave.*;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.LeaveRequest;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
+import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.enums.LeaveStatus;
 import com.worknest.tenant.enums.NotificationType;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.LeaveRequestRepository;
+import com.worknest.tenant.service.AttachmentService;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.LeaveRequestService;
 import com.worknest.tenant.service.NotificationService;
@@ -28,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -37,6 +42,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final LeaveRequestRepository leaveRequestRepository;
     private final EmployeeRepository employeeRepository;
     private final AuthorizationService authorizationService;
+    private final AttachmentService attachmentService;
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
@@ -46,6 +52,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             LeaveRequestRepository leaveRequestRepository,
             EmployeeRepository employeeRepository,
             AuthorizationService authorizationService,
+            AttachmentService attachmentService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
@@ -53,6 +60,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         this.leaveRequestRepository = leaveRequestRepository;
         this.employeeRepository = employeeRepository;
         this.authorizationService = authorizationService;
+        this.attachmentService = attachmentService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
@@ -64,7 +72,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         authorizationService.requirePermission(Permission.APPLY_LEAVE);
         Employee employee = getCurrentEmployeeOrThrow();
         validateLeaveDates(requestDto.getStartDate(), requestDto.getEndDate());
-        validateNoApprovedOverlap(employee.getId(), requestDto.getStartDate(), requestDto.getEndDate());
+        validateNoLeaveOverlap(employee.getId(), null, requestDto.getStartDate(), requestDto.getEndDate());
 
         LeaveRequest leaveRequest = new LeaveRequest();
         leaveRequest.setEmployee(employee);
@@ -75,13 +83,15 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setReason(trimToNull(requestDto.getReason()));
 
         LeaveRequest saved = leaveRequestRepository.save(leaveRequest);
+        syncAttachments(saved.getId(), requestDto.getAttachments());
+        notifyApproversAboutRequest(saved);
         auditLogService.logAction(
                 AuditActionType.CREATE,
                 AuditEntityType.LEAVE_REQUEST,
                 saved.getId(),
                 "{\"employeeId\":" + employee.getId() + "}"
         );
-        return toLeaveResponse(saved);
+        return toLeaveResponse(saved, true);
     }
 
     @Override
@@ -99,7 +109,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
 
         validateLeaveDates(requestDto.getStartDate(), requestDto.getEndDate());
-        validateNoApprovedOverlap(currentEmployee.getId(), requestDto.getStartDate(), requestDto.getEndDate());
+        validateNoLeaveOverlap(currentEmployee.getId(), leaveRequest.getId(), requestDto.getStartDate(), requestDto.getEndDate());
 
         leaveRequest.setLeaveType(requestDto.getLeaveType());
         leaveRequest.setStartDate(requestDto.getStartDate());
@@ -107,13 +117,14 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setReason(trimToNull(requestDto.getReason()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+        syncAttachments(updated.getId(), requestDto.getAttachments());
         auditLogService.logAction(
                 AuditActionType.UPDATE,
                 AuditEntityType.LEAVE_REQUEST,
                 updated.getId(),
                 null
         );
-        return toLeaveResponse(updated);
+        return toLeaveResponse(updated, true);
     }
 
     @Override
@@ -122,7 +133,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         authorizationService.requirePermission(Permission.VIEW_LEAVE);
         Employee currentEmployee = getCurrentEmployeeOrThrow();
         return leaveRequestRepository.findByEmployeeIdOrderByCreatedAtDesc(currentEmployee.getId()).stream()
-                .map(this::toLeaveResponse)
+            .map(leaveRequest -> toLeaveResponse(leaveRequest, false))
                 .toList();
     }
 
@@ -131,7 +142,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     public List<LeaveResponseDto> listPendingLeaveRequests() {
         authorizationService.requirePermission(Permission.APPROVE_LEAVE);
         return leaveRequestRepository.findByStatusOrderByCreatedAtAsc(LeaveStatus.PENDING).stream()
-                .map(this::toLeaveResponse)
+            .map(leaveRequest -> toLeaveResponse(leaveRequest, false))
                 .toList();
     }
 
@@ -163,7 +174,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         );
 
         return PagedResultDto.<LeaveResponseDto>builder()
-                .items(resultPage.getContent().stream().map(this::toLeaveResponse).toList())
+            .items(resultPage.getContent().stream().map(leaveRequest -> toLeaveResponse(leaveRequest, false)).toList())
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
                 .totalElements(resultPage.getTotalElements())
@@ -197,7 +208,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         );
 
         return PagedResultDto.<LeaveResponseDto>builder()
-                .items(resultPage.getContent().stream().map(this::toLeaveResponse).toList())
+            .items(resultPage.getContent().stream().map(leaveRequest -> toLeaveResponse(leaveRequest, false)).toList())
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
                 .totalElements(resultPage.getTotalElements())
@@ -213,7 +224,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         if (approver.getStatus() != UserStatus.ACTIVE) {
             throw new BadRequestException("Approver account is not active");
         }
-        validateApproverRole(approver);
+        validateApproverForLeave(leaveRequest, approver);
 
         if (leaveRequest.getStatus() != LeaveStatus.PENDING) {
             throw new BadRequestException("Only pending leave requests can be approved");
@@ -221,6 +232,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest.setStatus(LeaveStatus.APPROVED);
         leaveRequest.setApprover(approver);
+        leaveRequest.setDecidedAt(LocalDateTime.now());
         leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
@@ -244,7 +256,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 updated.getId(),
                 "{\"approverId\":" + approver.getId() + "}"
         );
-        return toLeaveResponse(updated);
+        return toLeaveResponse(updated, true);
     }
 
     @Override
@@ -255,7 +267,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         if (approver.getStatus() != UserStatus.ACTIVE) {
             throw new BadRequestException("Approver account is not active");
         }
-        validateApproverRole(approver);
+        validateApproverForLeave(leaveRequest, approver);
 
         if (leaveRequest.getStatus() != LeaveStatus.PENDING) {
             throw new BadRequestException("Only pending leave requests can be rejected");
@@ -263,6 +275,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
 
         leaveRequest.setStatus(LeaveStatus.REJECTED);
         leaveRequest.setApprover(approver);
+        leaveRequest.setDecidedAt(LocalDateTime.now());
         leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
@@ -287,7 +300,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 updated.getId(),
                 "{\"approverId\":" + approver.getId() + "}"
         );
-        return toLeaveResponse(updated);
+        return toLeaveResponse(updated, true);
     }
 
     @Override
@@ -303,8 +316,22 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
 
         leaveRequest.setStatus(LeaveStatus.CANCELLED);
+        leaveRequest.setDecidedAt(LocalDateTime.now());
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
 
+        notificationService.createSystemNotification(
+            currentEmployee.getId(),
+            NotificationType.LEAVE_UPDATE,
+            "You cancelled your leave request",
+            AuditEntityType.LEAVE_REQUEST.name(),
+            updated.getId()
+        );
+        emailNotificationService.sendLeaveCancelledConfirmationEmail(
+            currentEmployee.getEmail(),
+            buildFullName(currentEmployee),
+            leaveRequest.getStartDate(),
+            leaveRequest.getEndDate()
+        );
         notifyApproversAboutCancellation(currentEmployee, updated);
         auditLogService.logAction(
                 AuditActionType.CANCEL,
@@ -313,7 +340,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 "{\"employeeId\":" + currentEmployee.getId() + "}"
         );
 
-        return toLeaveResponse(updated);
+        return toLeaveResponse(updated, true);
     }
 
     @Override
@@ -328,7 +355,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 throw new ForbiddenOperationException("Employees can only view their own leave requests");
             }
         }
-        return toLeaveResponse(leaveRequest);
+        return toLeaveResponse(leaveRequest, true);
     }
 
     private LeaveRequest getLeaveRequestOrThrow(Long leaveRequestId) {
@@ -344,11 +371,11 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         if (startDate == null || endDate == null) {
             throw new BadRequestException("Leave start and end dates are required");
         }
-        if (startDate.isBefore(LocalDate.now())) {
-            throw new BadRequestException("Leave start date cannot be in the past");
-        }
         if (endDate.isBefore(startDate)) {
             throw new BadRequestException("Leave end date cannot be before start date");
+        }
+        if (endDate.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Leave request cannot be fully in the past");
         }
     }
 
@@ -358,23 +385,27 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
     }
 
-    private void validateNoApprovedOverlap(Long employeeId, java.time.LocalDate startDate, java.time.LocalDate endDate) {
-        boolean hasOverlap = leaveRequestRepository
-                .existsByEmployeeIdAndStatusAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-                        employeeId,
-                        LeaveStatus.APPROVED,
-                        endDate,
-                        startDate
-                );
+    private void validateNoLeaveOverlap(Long employeeId, Long excludedLeaveRequestId, java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        boolean hasOverlap = leaveRequestRepository.existsOverlappingLeave(
+                employeeId,
+                List.of(LeaveStatus.APPROVED, LeaveStatus.PENDING),
+                excludedLeaveRequestId,
+                endDate,
+                startDate
+        );
         if (hasOverlap) {
-            throw new BadRequestException("Approved leave already exists for the given date range");
+            throw new BadRequestException("Leave request overlaps with an existing pending or approved leave");
         }
     }
 
-    private LeaveResponseDto toLeaveResponse(LeaveRequest leaveRequest) {
+    private LeaveResponseDto toLeaveResponse(LeaveRequest leaveRequest, boolean includeAttachments) {
+        List<AttachmentResponseDto> attachments = includeAttachments
+                ? attachmentService.listAttachments(AttachmentEntityType.LEAVE_REQUEST, leaveRequest.getId())
+                : List.of();
         return LeaveResponseDto.builder()
                 .id(leaveRequest.getId())
                 .employee(tenantDtoMapper.toEmployeeSimple(leaveRequest.getEmployee()))
+                .decidedBy(tenantDtoMapper.toEmployeeSimple(leaveRequest.getApprover()))
                 .leaveType(leaveRequest.getLeaveType())
                 .startDate(leaveRequest.getStartDate())
                 .endDate(leaveRequest.getEndDate())
@@ -382,6 +413,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
                 .approver(tenantDtoMapper.toEmployeeSimple(leaveRequest.getApprover()))
                 .reason(leaveRequest.getReason())
                 .decisionComment(leaveRequest.getDecisionComment())
+                .decidedAt(leaveRequest.getDecidedAt())
+                .attachments(attachments)
                 .createdAt(leaveRequest.getCreatedAt())
                 .updatedAt(leaveRequest.getUpdatedAt())
                 .build();
@@ -396,11 +429,111 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-
-    private void validateApproverRole(Employee approver) {
-        if (!(approver.getRole().isTenantAdminEquivalent() || approver.getRole().isHrEquivalent())) {
-            throw new BadRequestException("Leave approver must be a TENANT_ADMIN/ADMIN or HR employee");
+    private void validateApproverForLeave(LeaveRequest leaveRequest, Employee approver) {
+        if (leaveRequest.getEmployee().getId().equals(approver.getId())) {
+            throw new BadRequestException("You cannot approve your own leave request");
         }
+
+        PlatformRole requesterRole = leaveRequest.getEmployee().getRole();
+        PlatformRole approverRole = approver.getRole();
+
+        if (requesterRole == null || approverRole == null) {
+            throw new BadRequestException("Leave request roles are not configured correctly");
+        }
+
+        if (requesterRole.isHrEquivalent()) {
+            if (!approverRole.isTenantAdminEquivalent()) {
+                throw new BadRequestException("HR leave requests can only be approved by TENANT_ADMIN or ADMIN");
+            }
+            return;
+        }
+
+        if (requesterRole.isTenantAdminEquivalent() || requesterRole.isEmployeeOnly() || requesterRole.isLegacyManager()) {
+            if (!(approverRole.isTenantAdminEquivalent() || approverRole.isHrEquivalent())) {
+                throw new BadRequestException("Leave requests can only be approved by HR or TENANT_ADMIN/ADMIN");
+            }
+
+            if ((requesterRole.isTenantAdminEquivalent() || requesterRole.isLegacyManager()) && !approverRole.isTenantAdminEquivalent()) {
+                throw new BadRequestException("TENANT_ADMIN leave requests can only be approved by TENANT_ADMIN or ADMIN");
+            }
+            return;
+        }
+
+        throw new BadRequestException("Leave request cannot be approved for this role");
+    }
+
+    private void syncAttachments(Long leaveRequestId, List<LeaveAttachmentRequestDto> attachments) {
+        if (attachments == null) {
+            return;
+        }
+
+        List<AttachmentResponseDto> existingAttachments = attachmentService.listAttachments(AttachmentEntityType.LEAVE_REQUEST, leaveRequestId);
+        for (AttachmentResponseDto attachment : existingAttachments) {
+            attachmentService.deleteAttachment(attachment.getId());
+        }
+
+        for (LeaveAttachmentRequestDto attachment : attachments) {
+            if (attachment == null) {
+                continue;
+            }
+
+            AttachmentCreateRequestDto createRequest = new AttachmentCreateRequestDto();
+            createRequest.setEntityType(AttachmentEntityType.LEAVE_REQUEST);
+            createRequest.setEntityId(leaveRequestId);
+            createRequest.setFileUrl(attachment.getFileUrl());
+            createRequest.setFileName(attachment.getFileName());
+            createRequest.setFileType(attachment.getFileType());
+            createRequest.setFileSize(attachment.getFileSize());
+            attachmentService.createAttachment(createRequest);
+        }
+    }
+
+    private void notifyApproversAboutRequest(LeaveRequest leaveRequest) {
+        List<PlatformRole> roles = resolveApproverRecipientRoles(leaveRequest.getEmployee().getRole());
+        if (roles.isEmpty()) {
+            return;
+        }
+
+        List<Employee> recipients = employeeRepository.findByRoleInAndStatus(roles, UserStatus.ACTIVE).stream()
+                .filter(candidate -> !candidate.getId().equals(leaveRequest.getEmployee().getId()))
+                .toList();
+
+        String requesterName = buildFullName(leaveRequest.getEmployee());
+        String message = requesterName + " submitted a leave request for " + leaveRequest.getStartDate() + " to " + leaveRequest.getEndDate();
+        for (Employee recipient : recipients) {
+            notificationService.createSystemNotification(
+                    recipient.getId(),
+                    NotificationType.LEAVE_UPDATE,
+                    message,
+                    AuditEntityType.LEAVE_REQUEST.name(),
+                    leaveRequest.getId()
+            );
+            emailNotificationService.sendLeaveRequestSubmittedEmail(
+                    recipient.getEmail(),
+                    buildFullName(recipient),
+                    requesterName,
+                    leaveRequest.getLeaveType() == null ? "leave" : leaveRequest.getLeaveType().name(),
+                    leaveRequest.getStartDate(),
+                    leaveRequest.getEndDate(),
+                    leaveRequest.getReason()
+            );
+        }
+    }
+
+    private List<PlatformRole> resolveApproverRecipientRoles(PlatformRole requesterRole) {
+        if (requesterRole == null) {
+            return List.of();
+        }
+
+        if (requesterRole.isHrEquivalent()) {
+            return List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN);
+        }
+
+        if (requesterRole.isTenantAdminEquivalent() || requesterRole.isLegacyManager()) {
+            return List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN);
+        }
+
+        return List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN, PlatformRole.HR);
     }
 
     private void notifyApproversAboutCancellation(Employee employee, LeaveRequest leaveRequest) {

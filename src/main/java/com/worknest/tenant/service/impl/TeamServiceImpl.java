@@ -80,6 +80,7 @@ public class TeamServiceImpl implements TeamService {
     public TeamResponseDto createTeam(TeamCreateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.CREATE_TEAM);
         String teamName = normalizeTeamName(requestDto.getName());
+        String teamDescription = normalizeTeamDescription(requestDto.getDescription());
         if (teamRepository.existsByNameIgnoreCase(teamName)) {
             throw new BadRequestException("Team name already exists: " + teamName);
         }
@@ -88,6 +89,7 @@ public class TeamServiceImpl implements TeamService {
 
         Team team = new Team();
         team.setName(teamName);
+        team.setDescription(teamDescription);
         team.setManager(manager);
 
         Team saved = teamRepository.save(team);
@@ -106,6 +108,7 @@ public class TeamServiceImpl implements TeamService {
         authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
         String teamName = normalizeTeamName(requestDto.getName());
+        String teamDescription = normalizeTeamDescription(requestDto.getDescription());
 
         if (!team.getName().equalsIgnoreCase(teamName) && teamRepository.existsByNameIgnoreCase(teamName)) {
             throw new BadRequestException("Team name already exists: " + teamName);
@@ -114,6 +117,7 @@ public class TeamServiceImpl implements TeamService {
         Employee manager = getActiveEmployeeOrThrow(requestDto.getManagerId());
 
         team.setName(teamName);
+        team.setDescription(teamDescription);
         team.setManager(manager);
 
         Team updated = teamRepository.save(team);
@@ -204,6 +208,31 @@ public class TeamServiceImpl implements TeamService {
     }
 
     @Override
+    public TeamMemberResponseDto updateMemberFunctionalRoleByMemberId(
+            Long teamId,
+            Long teamMemberId,
+            TeamMemberRoleUpdateRequestDto requestDto) {
+        authorizationService.requirePermission(Permission.ASSIGN_TEAM_ROLE);
+        getTeamOrThrow(teamId);
+
+        TeamMember teamMember = teamMemberRepository
+                .findFirstByIdAndTeamIdAndLeftAtIsNull(teamMemberId, teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Active team membership not found"));
+
+        teamMember.setFunctionalRole(requestDto.getFunctionalRole());
+        TeamMember updated = teamMemberRepository.save(teamMember);
+
+        auditLogService.logAction(
+                AuditActionType.UPDATE,
+                AuditEntityType.TEAM,
+                teamId,
+                "{\"teamMemberId\":" + teamMemberId + ",\"employeeId\":" + updated.getEmployee().getId() +
+                        ",\"functionalRole\":\"" + updated.getFunctionalRole() + "\"}"
+        );
+        return toTeamMemberResponse(updated);
+    }
+
+    @Override
     public void removeMember(Long teamId, Long employeeId) {
         authorizationService.requirePermission(Permission.MANAGE_TEAM);
         Team team = getTeamOrThrow(teamId);
@@ -211,22 +240,30 @@ public class TeamServiceImpl implements TeamService {
                 .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Active team membership not found"));
 
-        if (team.getManager() != null && employeeId.equals(team.getManager().getId())) {
-            throw new BadRequestException("Cannot remove the current team manager from members. Reassign manager first.");
-        }
-
-        teamMember.setLeftAt(LocalDateTime.now());
-        teamMemberRepository.save(teamMember);
-        emailNotificationService.sendTeamRemovedEmail(
-                teamMember.getEmployee().getEmail(),
-                buildFullName(teamMember.getEmployee()),
-                team.getName()
-        );
+        removeTeamMember(team, teamMember);
         auditLogService.logAction(
                 AuditActionType.DELETE,
                 AuditEntityType.TEAM,
                 teamId,
                 "{\"employeeId\":" + employeeId + "}"
+        );
+    }
+
+    @Override
+    public void removeMemberByMemberId(Long teamId, Long teamMemberId) {
+        authorizationService.requirePermission(Permission.MANAGE_TEAM);
+        Team team = getTeamOrThrow(teamId);
+        TeamMember teamMember = teamMemberRepository
+                .findFirstByIdAndTeamIdAndLeftAtIsNull(teamMemberId, teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Active team membership not found"));
+
+        removeTeamMember(team, teamMember);
+
+        auditLogService.logAction(
+                AuditActionType.DELETE,
+                AuditEntityType.TEAM,
+                teamId,
+                "{\"teamMemberId\":" + teamMemberId + ",\"employeeId\":" + teamMember.getEmployee().getId() + "}"
         );
     }
 
@@ -298,8 +335,9 @@ public class TeamServiceImpl implements TeamService {
         Team team = getTeamOrThrow(teamId);
         enforceTeamReadAccess(team);
 
-        return teamMemberRepository.findByTeamIdOrderByJoinedAtDesc(teamId)
+        return teamMemberRepository.findByTeamIdAndLeftAtIsNull(teamId)
                 .stream()
+            .sorted((left, right) -> right.getJoinedAt().compareTo(left.getJoinedAt()))
                 .map(this::toTeamMemberResponse)
                 .toList();
     }
@@ -377,6 +415,7 @@ public class TeamServiceImpl implements TeamService {
         return TeamResponseDto.builder()
                 .id(team.getId())
                 .name(team.getName())
+                .description(team.getDescription())
                 .manager(tenantDtoMapper.toEmployeeSimple(team.getManager()))
                 .activeMemberCount(activeMembers)
                 .createdAt(team.getCreatedAt())
@@ -499,6 +538,10 @@ public class TeamServiceImpl implements TeamService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
+    private String normalizeTeamDescription(String description) {
+        return trimToNull(description);
+    }
+
     private boolean isSortable(String sortBy) {
         return "createdAt".equals(sortBy) || "updatedAt".equals(sortBy) || "name".equals(sortBy);
     }
@@ -538,5 +581,20 @@ public class TeamServiceImpl implements TeamService {
         String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
         String fullName = (firstName + " " + lastName).trim();
         return fullName.isBlank() ? employee.getEmail() : fullName;
+    }
+
+    private void removeTeamMember(Team team, TeamMember teamMember) {
+        if (team.getManager() != null && teamMember.getEmployee() != null
+                && teamMember.getEmployee().getId().equals(team.getManager().getId())) {
+            throw new BadRequestException("Cannot remove the current team manager from members. Reassign manager first.");
+        }
+
+        teamMember.setLeftAt(LocalDateTime.now());
+        teamMemberRepository.save(teamMember);
+        emailNotificationService.sendTeamRemovedEmail(
+                teamMember.getEmployee().getEmail(),
+                buildFullName(teamMember.getEmployee()),
+                team.getName()
+        );
     }
 }

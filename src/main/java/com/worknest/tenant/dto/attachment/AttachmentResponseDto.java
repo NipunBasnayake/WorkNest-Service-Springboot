@@ -21,5 +21,6 @@ public class AttachmentResponseDto {
     private String mimeType;
     private Long fileSize;
     private EmployeeSimpleDto uploadedBy;
+    private Long uploadedByUserId;
     private LocalDateTime createdAt;
 }

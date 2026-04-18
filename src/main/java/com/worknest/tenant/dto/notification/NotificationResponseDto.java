@@ -18,6 +18,9 @@ public class NotificationResponseDto {
     private String message;
     private String referenceType;
     private Long referenceId;
+    private String relatedEntityType;
+    private Long relatedEntityId;
+    private Long announcementId;
     private boolean read;
     private LocalDateTime createdAt;
     private LocalDateTime readAt;

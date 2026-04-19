@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -96,7 +97,7 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setRecipient(recipient);
         notification.setType(type);
         notification.setMessage(cleanMessage);
-        notification.setReferenceType(trimToNull(referenceType));
+        notification.setReferenceType(normalizeReferenceType(referenceType));
         notification.setReferenceId(referenceId);
         notification.setRead(false);
 
@@ -234,7 +235,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private String resolveReferenceType(NotificationCreateRequestDto requestDto) {
         String fromAnnouncement = requestDto.getAnnouncementId() == null ? null : AuditEntityType.ANNOUNCEMENT.name();
-        return trimToNull(firstNonBlank(
+        return normalizeReferenceType(firstNonBlank(
                 requestDto.getReferenceType(),
                 requestDto.getRelatedEntityType(),
                 fromAnnouncement
@@ -295,6 +296,11 @@ public class NotificationServiceImpl implements NotificationService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeReferenceType(String value) {
+        String trimmed = trimToNull(value);
+        return trimmed == null ? null : trimmed.toUpperCase(Locale.ROOT);
     }
 
     private boolean isSortable(String sortBy) {

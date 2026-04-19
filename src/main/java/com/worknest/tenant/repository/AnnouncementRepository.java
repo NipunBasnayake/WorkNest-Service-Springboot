@@ -31,20 +31,21 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
             FROM Announcement a
             WHERE (
                    :isPrivileged = true
+                   OR (:viewerEmployeeId IS NOT NULL AND a.createdBy.id = :viewerEmployeeId)
                    OR a.team IS NULL
-                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR (:viewerEmployeeId IS NOT NULL AND a.team.manager IS NOT NULL AND a.team.manager.id = :viewerEmployeeId)
                    OR EXISTS (
                         SELECT tm.id
                         FROM TeamMember tm
                         WHERE tm.team.id = a.team.id
-                          AND tm.employee.id = :employeeId
+                          AND tm.employee.id = :viewerEmployeeId
                           AND tm.leftAt IS NULL
                    )
                   )
             ORDER BY a.createdAt DESC
             """)
     List<Announcement> findVisibleAnnouncements(
-            @Param("employeeId") Long employeeId,
+            @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged);
 
     @Query("""
@@ -52,13 +53,14 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
             FROM Announcement a
             WHERE (
                    :isPrivileged = true
+                   OR (:viewerEmployeeId IS NOT NULL AND a.createdBy.id = :viewerEmployeeId)
                    OR a.team IS NULL
-                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR (:viewerEmployeeId IS NOT NULL AND a.team.manager IS NOT NULL AND a.team.manager.id = :viewerEmployeeId)
                    OR EXISTS (
                         SELECT tm.id
                         FROM TeamMember tm
                         WHERE tm.team.id = a.team.id
-                          AND tm.employee.id = :employeeId
+                          AND tm.employee.id = :viewerEmployeeId
                           AND tm.leftAt IS NULL
                    )
                   )
@@ -69,7 +71,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
                   )
             """)
     Page<Announcement> searchVisible(
-            @Param("employeeId") Long employeeId,
+            @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged,
             @Param("search") String search,
             Pageable pageable);

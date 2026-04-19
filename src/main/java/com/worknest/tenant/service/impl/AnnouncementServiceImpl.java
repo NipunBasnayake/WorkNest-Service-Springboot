@@ -80,6 +80,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         Employee creator = resolveCreatorForAnnouncement();
         Team targetTeam = resolveTeamOrNull(requestDto.getTeamId());
+        AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
 
         Announcement announcement = new Announcement();
         announcement.setTitle(requestDto.getTitle().trim());
@@ -89,7 +90,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         announcement.setTeam(targetTeam);
 
         Announcement saved = announcementRepository.save(announcement);
-        AnnouncementResponseDto response = toResponse(saved);
+        AnnouncementResponseDto response = toResponse(saved, accessContext);
 
         notifyRecipients(saved);
         tenantRealtimePublisher.publishAnnouncement(authorizationService.getCurrentTenantKeyOrThrow(), response);
@@ -108,7 +109,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     public AnnouncementResponseDto updateAnnouncement(Long announcementId, AnnouncementUpdateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
-        if (!canManageAnnouncement(announcement)) {
+        AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
+        if (!canManageAnnouncement(announcement, accessContext)) {
             throw new ForbiddenOperationException("You are not allowed to update this announcement");
         }
 
@@ -124,14 +126,14 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                 "{\"title\":\"" + escapeJson(updated.getTitle()) + "\"}"
         );
 
-        return toResponse(updated);
+        return toResponse(updated, accessContext);
     }
 
     @Override
     public void deleteAnnouncement(Long announcementId) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
-        if (!canManageAnnouncement(announcement)) {
+        if (!canManageAnnouncement(announcement, resolveAnnouncementAccessContext())) {
             throw new ForbiddenOperationException("You are not allowed to delete this announcement");
         }
 
@@ -148,12 +150,12 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<AnnouncementResponseDto> listAnnouncements() {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
-        VisibilityContext visibilityContext = resolveVisibilityContext();
+        AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
         return announcementRepository.findVisibleAnnouncements(
-                        visibilityContext.employeeId(),
-                        visibilityContext.privileged()
+                        accessContext.employeeId(),
+                        accessContext.privileged()
                 ).stream()
-                .map(this::toResponse)
+                .map(announcement -> toResponse(announcement, accessContext))
                 .toList();
     }
 
@@ -167,21 +169,21 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             String sortDir) {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
 
-        VisibilityContext visibilityContext = resolveVisibilityContext();
+        AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
         int resolvedPage = Math.max(page, 0);
         int resolvedSize = Math.max(Math.min(size, 100), 1);
         String resolvedSortBy = isSortable(sortBy) ? sortBy : "createdAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
 
         Page<Announcement> resultPage = announcementRepository.searchVisible(
-                visibilityContext.employeeId(),
-                visibilityContext.privileged(),
+                accessContext.employeeId(),
+                accessContext.privileged(),
                 trimToNull(search),
                 PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy))
         );
 
         return PagedResultDto.<AnnouncementResponseDto>builder()
-                .items(resultPage.getContent().stream().map(this::toResponse).toList())
+                .items(resultPage.getContent().stream().map(announcement -> toResponse(announcement, accessContext)).toList())
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
                 .totalElements(resultPage.getTotalElements())
@@ -194,8 +196,9 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     public AnnouncementResponseDto getAnnouncement(Long announcementId) {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         Announcement announcement = getAnnouncementOrThrow(announcementId);
-        enforceAnnouncementReadAccess(announcement);
-        return toResponse(announcement);
+        AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
+        enforceAnnouncementReadAccess(announcement, accessContext);
+        return toResponse(announcement, accessContext);
     }
 
     private void notifyRecipients(Announcement announcement) {
@@ -203,6 +206,11 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         boolean teamAnnouncement = announcement.getTeam() != null;
 
         for (Employee recipient : recipients) {
+            if (announcement.getCreatedBy() != null
+                    && announcement.getCreatedBy().getId() != null
+                    && announcement.getCreatedBy().getId().equals(recipient.getId())) {
+                continue;
+            }
             notificationService.createSystemNotification(
                     recipient.getId(),
                     NotificationType.ANNOUNCEMENT,
@@ -272,51 +280,59 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                 .orElseThrow(() -> new ResourceNotFoundException("Team not found with id: " + teamId));
     }
 
-    private boolean canManageAnnouncement(Announcement announcement) {
-        PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
-        if (currentRole.isTenantAdminEquivalent() || currentRole.isHrEquivalent()) {
+    private boolean canManageAnnouncement(Announcement announcement, AnnouncementAccessContext accessContext) {
+        if (accessContext.tenantAdminEquivalent()) {
             return true;
         }
-
-        String currentEmail = authorizationService.getCurrentEmployeeOrThrow().getEmail();
-        return announcement.getCreatedBy().getEmail().equalsIgnoreCase(currentEmail);
+        if (!accessContext.hrEquivalent()) {
+            return false;
+        }
+        return isOwnedByCurrentUser(announcement, accessContext.employeeId());
     }
 
-    private void enforceAnnouncementReadAccess(Announcement announcement) {
-        VisibilityContext visibilityContext = resolveVisibilityContext();
-        if (visibilityContext.privileged() || announcement.getTeam() == null) {
-            return;
-        }
-        Long employeeId = visibilityContext.employeeId();
-        if (employeeId == null) {
+    private void enforceAnnouncementReadAccess(Announcement announcement, AnnouncementAccessContext accessContext) {
+        if (!canReadAnnouncement(announcement, accessContext)) {
             throw new ForbiddenOperationException("You are not allowed to view this announcement");
+        }
+    }
+
+    private boolean canReadAnnouncement(Announcement announcement, AnnouncementAccessContext accessContext) {
+        if (accessContext.privileged() || isOwnedByCurrentUser(announcement, accessContext.employeeId())) {
+            return true;
+        }
+        if (announcement.getTeam() == null) {
+            return true;
+        }
+        Long employeeId = accessContext.employeeId();
+        if (employeeId == null) {
+            return false;
         }
 
         Team team = announcement.getTeam();
         if (team.getManager() != null && employeeId.equals(team.getManager().getId())) {
-            return;
+            return true;
         }
-        boolean activeMember = teamMemberRepository
+        return teamMemberRepository
                 .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employeeId)
                 .isPresent();
-        if (!activeMember) {
-            throw new ForbiddenOperationException("You are not allowed to view this announcement");
-        }
     }
 
-    private VisibilityContext resolveVisibilityContext() {
+    private AnnouncementAccessContext resolveAnnouncementAccessContext() {
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
         boolean privileged = role.isTenantAdminEquivalent() || role.isHrEquivalent();
-        if (privileged) {
-            return new VisibilityContext(null, true);
-        }
-
         Employee employee = authorizationService.getCurrentEmployeeOrNull();
         Long employeeId = employee == null ? null : employee.getId();
-        return new VisibilityContext(employeeId, false);
+        return new AnnouncementAccessContext(
+                employeeId,
+                privileged,
+                role.isTenantAdminEquivalent(),
+                role.isHrEquivalent()
+        );
     }
 
-    private AnnouncementResponseDto toResponse(Announcement announcement) {
+    private AnnouncementResponseDto toResponse(Announcement announcement, AnnouncementAccessContext accessContext) {
+        boolean ownedByCurrentUser = isOwnedByCurrentUser(announcement, accessContext.employeeId());
+        boolean canManage = canManageAnnouncement(announcement, accessContext);
         return AnnouncementResponseDto.builder()
                 .id(announcement.getId())
                 .title(announcement.getTitle())
@@ -325,9 +341,18 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                 .createdByRole(announcement.getCreatedByRole())
                 .teamId(announcement.getTeam() == null ? null : announcement.getTeam().getId())
                 .teamName(announcement.getTeam() == null ? null : announcement.getTeam().getName())
+                .ownedByCurrentUser(ownedByCurrentUser)
+                .canEdit(canManage)
+                .canDelete(canManage)
                 .createdAt(announcement.getCreatedAt())
                 .updatedAt(announcement.getUpdatedAt())
                 .build();
+    }
+
+    private boolean isOwnedByCurrentUser(Announcement announcement, Long currentEmployeeId) {
+        return currentEmployeeId != null
+                && announcement.getCreatedBy() != null
+                && currentEmployeeId.equals(announcement.getCreatedBy().getId());
     }
 
     private AnnouncementCreatorRole resolveCreatedByRole() {
@@ -367,6 +392,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         return "createdAt".equals(sortBy) || "updatedAt".equals(sortBy) || "title".equals(sortBy);
     }
 
-    private record VisibilityContext(Long employeeId, boolean privileged) {
+    private record AnnouncementAccessContext(
+            Long employeeId,
+            boolean privileged,
+            boolean tenantAdminEquivalent,
+            boolean hrEquivalent) {
     }
 }

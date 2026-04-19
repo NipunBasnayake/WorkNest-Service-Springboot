@@ -19,6 +19,9 @@ public class AnnouncementResponseDto {
     private AnnouncementCreatorRole createdByRole;
     private Long teamId;
     private String teamName;
+    private boolean ownedByCurrentUser;
+    private boolean canEdit;
+    private boolean canDelete;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

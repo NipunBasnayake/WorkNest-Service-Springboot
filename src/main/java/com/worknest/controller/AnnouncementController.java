@@ -7,6 +7,8 @@ import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.service.AnnouncementService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,6 +20,7 @@ import java.util.List;
 @RequestMapping("/api/tenant/announcements")
 public class AnnouncementController {
 
+    private static final Logger logger = LoggerFactory.getLogger(AnnouncementController.class);
     private final AnnouncementService announcementService;
 
     public AnnouncementController(AnnouncementService announcementService) {
@@ -53,6 +56,7 @@ public class AnnouncementController {
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<AnnouncementResponseDto>>> listAnnouncements() {
         List<AnnouncementResponseDto> response = announcementService.listAnnouncements();
+        logger.info("Returning {} announcements for tenant", response.size());
         return ResponseEntity.ok(ApiResponse.success("Announcements retrieved successfully", response));
     }
 

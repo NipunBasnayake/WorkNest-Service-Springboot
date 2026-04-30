@@ -13,6 +13,8 @@ spring:
     username: root
     password: 1234
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      register-mbeans: false
 
   mail:
     host: smtp.gmail.com

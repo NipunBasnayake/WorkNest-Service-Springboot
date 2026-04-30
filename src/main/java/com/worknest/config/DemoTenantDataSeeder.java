@@ -11,6 +11,7 @@ import com.worknest.tenant.context.MasterTenantContextRunner;
 import com.worknest.tenant.context.TenantContext;
 import com.worknest.tenant.entity.*;
 import com.worknest.tenant.enums.ProjectStatus;
+import com.worknest.tenant.enums.AnnouncementCreatorRole;
 import com.worknest.tenant.enums.NotificationType;
 import com.worknest.tenant.enums.TaskPriority;
 import com.worknest.tenant.enums.TaskStatus;
@@ -157,8 +158,11 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
 
             Announcement announcement = new Announcement();
             announcement.setTitle("Welcome to " + tenant.getCompanyName());
-            announcement.setMessage("Demo announcement generated for API validation.");
+            announcement.setContent("Demo announcement generated for API validation.");
             announcement.setCreatedBy(admin);
+            announcement.setCreatedByName(admin.getFirstName() + " " + admin.getLastName());
+            announcement.setCreatedByRole(AnnouncementCreatorRole.TENANT_ADMIN);
+            announcement.setPinned(false);
             Announcement savedAnnouncement = announcementRepository.save(announcement);
 
             Notification notification = new Notification();

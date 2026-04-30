@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class TenantDataSourceServiceImpl implements TenantDataSourceService {
@@ -137,8 +136,8 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         if (poolLeakDetectionThresholdMs > 0) {
             config.setLeakDetectionThreshold(poolLeakDetectionThresholdMs);
         }
-        config.setPoolName("TenantPool-" + tenant.getTenantKey() + "-" + ThreadLocalRandom.current().nextInt(1000, 9999));
-        config.setRegisterMbeans(true);
+        config.setPoolName("WorkNestTenantPool-" + tenant.getTenantKey());
+        config.setRegisterMbeans(false);
 
         return new HikariDataSource(config);
     }

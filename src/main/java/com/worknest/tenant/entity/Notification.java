@@ -36,11 +36,11 @@ public class Notification {
     @Column(name = "message", nullable = false, length = 500)
     private String message;
 
-    @Column(name = "reference_type", length = 80)
-    private String referenceType;
+    @Column(name = "related_entity_type", length = 80)
+    private String relatedEntityType;
 
-    @Column(name = "reference_id")
-    private Long referenceId;
+    @Column(name = "related_entity_id")
+    private Long relatedEntityId;
 
     @Column(name = "is_read", nullable = false)
     private boolean read;
@@ -57,5 +57,21 @@ public class Notification {
         if (!read) {
             readAt = null;
         }
+    }
+
+    public String getReferenceType() {
+        return relatedEntityType;
+    }
+
+    public void setReferenceType(String referenceType) {
+        this.relatedEntityType = referenceType;
+    }
+
+    public Long getReferenceId() {
+        return relatedEntityId;
+    }
+
+    public void setReferenceId(Long referenceId) {
+        this.relatedEntityId = referenceId;
     }
 }

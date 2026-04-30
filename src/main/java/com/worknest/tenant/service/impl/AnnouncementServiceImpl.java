@@ -8,6 +8,8 @@ import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
+import com.worknest.security.util.SecurityUtils;
+import com.worknest.tenant.context.TenantContext;
 import com.worknest.tenant.dto.announcement.AnnouncementCreateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
 import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
@@ -32,14 +34,19 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class AnnouncementServiceImpl implements AnnouncementService {
+
+    private static final Logger log = LoggerFactory.getLogger(AnnouncementServiceImpl.class);
 
     private final AnnouncementRepository announcementRepository;
     private final EmployeeRepository employeeRepository;
@@ -51,6 +58,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private final AuditLogService auditLogService;
     private final TenantRealtimePublisher tenantRealtimePublisher;
     private final EmailNotificationService emailNotificationService;
+    private final SecurityUtils securityUtils;
 
     public AnnouncementServiceImpl(
             AnnouncementRepository announcementRepository,
@@ -62,7 +70,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             NotificationService notificationService,
             AuditLogService auditLogService,
             TenantRealtimePublisher tenantRealtimePublisher,
-            EmailNotificationService emailNotificationService) {
+            EmailNotificationService emailNotificationService,
+            SecurityUtils securityUtils) {
         this.announcementRepository = announcementRepository;
         this.employeeRepository = employeeRepository;
         this.teamRepository = teamRepository;
@@ -73,20 +82,25 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         this.auditLogService = auditLogService;
         this.tenantRealtimePublisher = tenantRealtimePublisher;
         this.emailNotificationService = emailNotificationService;
+        this.securityUtils = securityUtils;
     }
 
     @Override
     public AnnouncementResponseDto createAnnouncement(AnnouncementCreateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
+        ensureTenantAnnouncementPublisher();
         Employee creator = resolveCreatorForAnnouncement();
         Team targetTeam = resolveTeamOrNull(requestDto.getTeamId());
         AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
+        String content = resolveContentOrThrow(requestDto.resolveContent());
 
         Announcement announcement = new Announcement();
         announcement.setTitle(requestDto.getTitle().trim());
-        announcement.setMessage(requestDto.getMessage().trim());
+        announcement.setContent(content);
         announcement.setCreatedBy(creator);
+        announcement.setCreatedByName(buildFullName(creator));
         announcement.setCreatedByRole(resolveCreatedByRole());
+        announcement.setPinned(requestDto.isPinned());
         announcement.setTeam(targetTeam);
 
         Announcement saved = announcementRepository.save(announcement);
@@ -108,6 +122,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Override
     public AnnouncementResponseDto updateAnnouncement(Long announcementId, AnnouncementUpdateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
+        ensureTenantAnnouncementPublisher();
         Announcement announcement = getAnnouncementOrThrow(announcementId);
         AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
         if (!canManageAnnouncement(announcement, accessContext)) {
@@ -115,7 +130,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         }
 
         announcement.setTitle(requestDto.getTitle().trim());
-        announcement.setMessage(requestDto.getMessage().trim());
+        announcement.setContent(resolveContentOrThrow(requestDto.resolveContent()));
+        announcement.setPinned(requestDto.isPinned());
 
         Announcement updated = announcementRepository.save(announcement);
 
@@ -132,6 +148,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Override
     public void deleteAnnouncement(Long announcementId) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
+        ensureTenantAnnouncementPublisher();
         Announcement announcement = getAnnouncementOrThrow(announcementId);
         if (!canManageAnnouncement(announcement, resolveAnnouncementAccessContext())) {
             throw new ForbiddenOperationException("You are not allowed to delete this announcement");
@@ -151,10 +168,17 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     public List<AnnouncementResponseDto> listAnnouncements() {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
-        return announcementRepository.findVisibleAnnouncements(
-                        accessContext.employeeId(),
-                        accessContext.privileged()
-                ).stream()
+        List<Announcement> announcements = accessContext.privileged()
+                ? announcementRepository.findAllByOrderByPinnedDescCreatedAtDesc()
+                : announcementRepository.findByTeamIsNullOrderByPinnedDescCreatedAtDesc();
+        log.info("Announcement list requested by user={}, role={}, tenant={}, count={}",
+                currentUserForLog(),
+                authorizationService.getCurrentRoleOrThrow(),
+                TenantContext.getTenantId(),
+                announcements.size());
+        return announcements.stream()
+                .sorted(Comparator.comparing(Announcement::isPinned).reversed()
+                        .thenComparing(Announcement::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
                 .map(announcement -> toResponse(announcement, accessContext))
                 .toList();
     }
@@ -225,7 +249,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                         buildFullName(recipient),
                         announcement.getTeam().getName(),
                         announcement.getTitle(),
-                        announcement.getMessage(),
+                        announcement.getContent(),
                         buildFullName(announcement.getCreatedBy())
                 );
             } else {
@@ -233,7 +257,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
                         recipient.getEmail(),
                         buildFullName(recipient),
                         announcement.getTitle(),
-                        announcement.getMessage(),
+                        announcement.getContent(),
                         buildFullName(announcement.getCreatedBy())
                 );
             }
@@ -270,6 +294,13 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             throw new BadRequestException("Current employee must be active");
         }
         return creator;
+    }
+
+    private void ensureTenantAnnouncementPublisher() {
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (!(role.isTenantAdminEquivalent() || role.isHrEquivalent())) {
+            throw new ForbiddenOperationException("Only tenant admins and HR can manage announcements");
+        }
     }
 
     private Team resolveTeamOrNull(Long teamId) {
@@ -333,12 +364,19 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private AnnouncementResponseDto toResponse(Announcement announcement, AnnouncementAccessContext accessContext) {
         boolean ownedByCurrentUser = isOwnedByCurrentUser(announcement, accessContext.employeeId());
         boolean canManage = canManageAnnouncement(announcement, accessContext);
+        String createdByName = trimToNull(announcement.getCreatedByName()) == null
+                ? buildFullName(announcement.getCreatedBy())
+                : announcement.getCreatedByName();
         return AnnouncementResponseDto.builder()
                 .id(announcement.getId())
                 .title(announcement.getTitle())
-                .message(announcement.getMessage())
+                .content(announcement.getContent())
+                .message(announcement.getContent())
+                .createdByEmployeeId(announcement.getCreatedBy() == null ? null : announcement.getCreatedBy().getId())
+                .createdByName(createdByName)
                 .createdBy(tenantDtoMapper.toEmployeeSimple(announcement.getCreatedBy()))
                 .createdByRole(announcement.getCreatedByRole())
+                .pinned(announcement.isPinned())
                 .teamId(announcement.getTeam() == null ? null : announcement.getTeam().getId())
                 .teamName(announcement.getTeam() == null ? null : announcement.getTeam().getName())
                 .ownedByCurrentUser(ownedByCurrentUser)
@@ -357,13 +395,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     private AnnouncementCreatorRole resolveCreatedByRole() {
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        if (role.isPlatformAdmin()) {
-            return AnnouncementCreatorRole.PLATFORM_ADMIN;
-        }
         if (role.isHrEquivalent()) {
             return AnnouncementCreatorRole.HR;
         }
-        return AnnouncementCreatorRole.ADMIN;
+        return AnnouncementCreatorRole.TENANT_ADMIN;
     }
 
     private String buildFullName(Employee employee) {
@@ -388,8 +423,27 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
+    private String resolveContentOrThrow(String value) {
+        String content = trimToNull(value);
+        if (content == null) {
+            throw new BadRequestException("Announcement content is required");
+        }
+        if (content.length() > 5000) {
+            throw new BadRequestException("Announcement content must not exceed 5000 characters");
+        }
+        return content;
+    }
+
     private boolean isSortable(String sortBy) {
         return "createdAt".equals(sortBy) || "updatedAt".equals(sortBy) || "title".equals(sortBy);
+    }
+
+    private String currentUserForLog() {
+        try {
+            return securityUtils.getCurrentUserEmailOrThrow();
+        } catch (RuntimeException ignored) {
+            return "unknown";
+        }
     }
 
     private record AnnouncementAccessContext(

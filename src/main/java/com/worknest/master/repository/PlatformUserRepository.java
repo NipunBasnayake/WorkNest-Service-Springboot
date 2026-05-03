@@ -4,6 +4,7 @@ import com.worknest.common.enums.PlatformRole;
 import com.worknest.master.entity.PlatformUser;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface PlatformUserRepository extends JpaRepository<PlatformUser, Long> {
@@ -11,6 +12,8 @@ public interface PlatformUserRepository extends JpaRepository<PlatformUser, Long
     Optional<PlatformUser> findByEmailIgnoreCase(String email);
 
     Optional<PlatformUser> findByEmailIgnoreCaseAndTenantKey(String email, String tenantKey);
+
+    Optional<PlatformUser> findFirstByTenantKeyIgnoreCaseAndRoleIn(String tenantKey, List<PlatformRole> roles);
 
     Optional<PlatformUser> findByPasswordResetTokenHash(String tokenHash);
 

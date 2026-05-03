@@ -5,6 +5,7 @@ import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.event.TenantProvisioningRequestedEvent;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.tenant.context.MasterTenantContextRunner;
+import com.worknest.tenant.service.impl.TenantAdminEmployeeMirrorService;
 import com.worknest.tenant.service.TenantSchemaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,16 +26,19 @@ public class TenantProvisioningListener {
 
     private final PlatformTenantRepository platformTenantRepository;
     private final TenantSchemaService tenantSchemaService;
+    private final TenantAdminEmployeeMirrorService tenantAdminEmployeeMirrorService;
     private final JdbcTemplate masterJdbcTemplate;
     private final MasterTenantContextRunner masterTenantContextRunner;
 
     public TenantProvisioningListener(
             PlatformTenantRepository platformTenantRepository,
             TenantSchemaService tenantSchemaService,
+            TenantAdminEmployeeMirrorService tenantAdminEmployeeMirrorService,
             @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
             MasterTenantContextRunner masterTenantContextRunner) {
         this.platformTenantRepository = platformTenantRepository;
         this.tenantSchemaService = tenantSchemaService;
+        this.tenantAdminEmployeeMirrorService = tenantAdminEmployeeMirrorService;
         this.masterJdbcTemplate = masterJdbcTemplate;
         this.masterTenantContextRunner = masterTenantContextRunner;
     }
@@ -58,6 +62,7 @@ public class TenantProvisioningListener {
                 validateDatabaseName(tenant.getDatabaseName());
                 createTenantDatabaseIfMissing(tenant.getDatabaseName());
                 tenantSchemaService.ensureTenantSchema(tenant);
+                tenantAdminEmployeeMirrorService.ensureTenantAdminEmployeeMirror(tenant.getTenantKey());
 
                 tenant.setStatus(TenantStatus.ACTIVE);
                 platformTenantRepository.save(tenant);

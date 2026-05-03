@@ -89,6 +89,11 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     public AnnouncementResponseDto createAnnouncement(AnnouncementCreateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.SEND_ANNOUNCEMENT);
         ensureTenantAnnouncementPublisher();
+        log.debug("Creating announcement platformUserId={}, email={}, role={}, tenantKey={}",
+            securityUtils.getCurrentPrincipalOrThrow().getId(),
+            securityUtils.getCurrentUserEmailOrThrow(),
+            securityUtils.getCurrentRoleOrThrow(),
+            authorizationService.getCurrentTenantKeyOrThrow());
         Employee creator = resolveCreatorForAnnouncement();
         Team targetTeam = resolveTeamOrNull(requestDto.getTeamId());
         AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
@@ -290,6 +295,9 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     private Employee resolveCreatorForAnnouncement() {
         Employee creator = authorizationService.getCurrentEmployeeOrThrow();
+        if (creator == null) {
+            throw new ResourceNotFoundException("Current user does not have an employee profile");
+        }
         if (creator.getStatus() != UserStatus.ACTIVE) {
             throw new BadRequestException("Current employee must be active");
         }

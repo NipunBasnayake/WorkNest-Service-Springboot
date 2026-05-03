@@ -26,6 +26,15 @@ public class NotificationCreateRequestDto {
     @Size(max = 80, message = "Reference type must not exceed 80 characters")
     private String referenceType;
 
+    @Size(max = 80, message = "Related entity type must not exceed 80 characters")
+    private String relatedEntityType;
+
     @Positive(message = "Reference ID must be positive")
     private Long referenceId;
+
+    @Positive(message = "Related entity ID must be positive")
+    private Long relatedEntityId;
+
+    @Positive(message = "Announcement ID must be positive")
+    private Long announcementId;
 }

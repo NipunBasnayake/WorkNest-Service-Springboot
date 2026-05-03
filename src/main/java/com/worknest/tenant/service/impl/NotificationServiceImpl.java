@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -54,12 +55,15 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public NotificationResponseDto createNotification(NotificationCreateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.SEND_NOTIFICATION);
+        String referenceType = resolveReferenceType(requestDto);
+        Long referenceId = resolveReferenceId(requestDto);
+
         NotificationResponseDto response = createSystemNotification(
                 requestDto.getRecipientEmployeeId(),
                 requestDto.getType(),
                 requestDto.getMessage(),
-                requestDto.getReferenceType(),
-                requestDto.getReferenceId()
+            referenceType,
+            referenceId
         );
 
         auditLogService.logAction(
@@ -93,7 +97,7 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setRecipient(recipient);
         notification.setType(type);
         notification.setMessage(cleanMessage);
-        notification.setReferenceType(trimToNull(referenceType));
+        notification.setReferenceType(normalizeReferenceType(referenceType));
         notification.setReferenceId(referenceId);
         notification.setRead(false);
 
@@ -212,6 +216,7 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     private NotificationResponseDto toResponse(Notification notification) {
+        Long announcementId = resolveAnnouncementId(notification);
         return NotificationResponseDto.builder()
                 .id(notification.getId())
                 .recipient(tenantDtoMapper.toEmployeeSimple(notification.getRecipient()))
@@ -219,10 +224,70 @@ public class NotificationServiceImpl implements NotificationService {
                 .message(notification.getMessage())
                 .referenceType(notification.getReferenceType())
                 .referenceId(notification.getReferenceId())
+                .relatedEntityType(notification.getReferenceType())
+                .relatedEntityId(notification.getReferenceId())
+                .announcementId(announcementId)
                 .read(notification.isRead())
                 .createdAt(notification.getCreatedAt())
                 .readAt(notification.getReadAt())
                 .build();
+    }
+
+    private String resolveReferenceType(NotificationCreateRequestDto requestDto) {
+        String fromAnnouncement = requestDto.getAnnouncementId() == null ? null : AuditEntityType.ANNOUNCEMENT.name();
+        return normalizeReferenceType(firstNonBlank(
+                requestDto.getReferenceType(),
+                requestDto.getRelatedEntityType(),
+                fromAnnouncement
+        ));
+    }
+
+    private Long resolveReferenceId(NotificationCreateRequestDto requestDto) {
+        return firstNonNull(
+                requestDto.getReferenceId(),
+                requestDto.getRelatedEntityId(),
+                requestDto.getAnnouncementId()
+        );
+    }
+
+    private Long resolveAnnouncementId(Notification notification) {
+        Long referenceId = notification.getReferenceId();
+        if (referenceId == null) {
+            return null;
+        }
+
+        String referenceType = trimToNull(notification.getReferenceType());
+        if (AuditEntityType.ANNOUNCEMENT.name().equalsIgnoreCase(referenceType)
+                || notification.getType() == NotificationType.ANNOUNCEMENT) {
+            return referenceId;
+        }
+        return null;
+    }
+
+    private String firstNonBlank(String... candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        for (String candidate : candidates) {
+            String trimmed = trimToNull(candidate);
+            if (trimmed != null) {
+                return trimmed;
+            }
+        }
+        return null;
+    }
+
+    @SafeVarargs
+    private final <T> T firstNonNull(T... candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        for (T candidate : candidates) {
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private String trimToNull(String value) {
@@ -231,6 +296,11 @@ public class NotificationServiceImpl implements NotificationService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeReferenceType(String value) {
+        String trimmed = trimToNull(value);
+        return trimmed == null ? null : trimmed.toUpperCase(Locale.ROOT);
     }
 
     private boolean isSortable(String sortBy) {

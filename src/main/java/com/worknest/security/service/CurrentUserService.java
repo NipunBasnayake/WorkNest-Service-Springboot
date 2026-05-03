@@ -6,10 +6,14 @@ import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.repository.EmployeeRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CurrentUserService {
+
+    private static final Logger log = LoggerFactory.getLogger(CurrentUserService.class);
 
     private final SecurityUtils securityUtils;
     private final EmployeeRepository employeeRepository;
@@ -29,6 +33,8 @@ public class CurrentUserService {
 
     public Employee getCurrentEmployeeOrNull() {
         PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
+        log.debug("Resolving current employee profile platformUserId={}, email={}, role={}, tenantKey={}",
+                principal.getId(), principal.getEmail(), principal.getRole(), principal.getTenantKey());
         if (principal.getId() != null) {
             Employee byPlatformUser = employeeRepository.findByPlatformUserId(principal.getId()).orElse(null);
             if (byPlatformUser != null) {
@@ -40,7 +46,12 @@ public class CurrentUserService {
         if (email == null || email.isBlank()) {
             return null;
         }
-        return employeeRepository.findByEmailIgnoreCase(email).orElse(null);
+        Employee byEmail = employeeRepository.findByEmailIgnoreCase(email).orElse(null);
+        if (byEmail != null) {
+            return byEmail;
+        }
+
+        return null;
     }
 
     public Long getCurrentEmployeeIdOrThrow() {

@@ -69,8 +69,8 @@ public class MasterDataSourceConfig {
         if (leakDetectionThresholdMs > 0) {
             config.setLeakDetectionThreshold(leakDetectionThresholdMs);
         }
-        config.setPoolName("MasterPool");
-        config.setRegisterMbeans(true);
+        config.setPoolName("WorkNestMasterPool");
+        config.setRegisterMbeans(false);
 
         return new HikariDataSource(config);
     }

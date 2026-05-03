@@ -14,11 +14,18 @@ import java.time.LocalDateTime;
 public class AnnouncementResponseDto {
     private Long id;
     private String title;
+    private String content;
     private String message;
+    private Long createdByEmployeeId;
+    private String createdByName;
     private EmployeeSimpleDto createdBy;
     private AnnouncementCreatorRole createdByRole;
+    private boolean pinned;
     private Long teamId;
     private String teamName;
+    private boolean ownedByCurrentUser;
+    private boolean canEdit;
+    private boolean canDelete;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

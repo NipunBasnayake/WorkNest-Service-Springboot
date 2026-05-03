@@ -15,13 +15,17 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
 
     List<Announcement> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
+    List<Announcement> findAllByOrderByPinnedDescCreatedAtDesc();
+
+    List<Announcement> findByTeamIsNullOrderByPinnedDescCreatedAtDesc();
+
     @Query("""
             SELECT a
             FROM Announcement a
             WHERE (
                     :search IS NULL OR :search = ''
                     OR LOWER(a.title) LIKE LOWER(CONCAT('%', :search, '%'))
-                    OR LOWER(a.message) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(a.content) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
     Page<Announcement> search(@Param("search") String search, Pageable pageable);
@@ -31,45 +35,66 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
             FROM Announcement a
             WHERE (
                    :isPrivileged = true
+                   OR (:viewerEmployeeId IS NOT NULL AND a.createdBy.id = :viewerEmployeeId)
                    OR a.team IS NULL
-                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR (:viewerEmployeeId IS NOT NULL AND a.team.manager IS NOT NULL AND a.team.manager.id = :viewerEmployeeId)
                    OR EXISTS (
                         SELECT tm.id
                         FROM TeamMember tm
                         WHERE tm.team.id = a.team.id
-                          AND tm.employee.id = :employeeId
+                          AND tm.employee.id = :viewerEmployeeId
                           AND tm.leftAt IS NULL
                    )
                   )
-            ORDER BY a.createdAt DESC
+            ORDER BY a.pinned DESC, a.createdAt DESC
             """)
     List<Announcement> findVisibleAnnouncements(
-            @Param("employeeId") Long employeeId,
+            @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged);
 
     @Query("""
             SELECT a
             FROM Announcement a
             WHERE (
-                   :isPrivileged = true
+                   (:viewerEmployeeId IS NOT NULL AND a.createdBy.id = :viewerEmployeeId)
                    OR a.team IS NULL
-                   OR (a.team.manager IS NOT NULL AND a.team.manager.id = :employeeId)
+                   OR (:viewerEmployeeId IS NOT NULL AND a.team.manager IS NOT NULL AND a.team.manager.id = :viewerEmployeeId)
                    OR EXISTS (
                         SELECT tm.id
                         FROM TeamMember tm
                         WHERE tm.team.id = a.team.id
-                          AND tm.employee.id = :employeeId
+                          AND tm.employee.id = :viewerEmployeeId
+                          AND tm.leftAt IS NULL
+                   )
+                  )
+            ORDER BY a.pinned DESC, a.createdAt DESC
+            """)
+    List<Announcement> findVisibleForEmployee(@Param("viewerEmployeeId") Long viewerEmployeeId);
+
+    @Query("""
+            SELECT a
+            FROM Announcement a
+            WHERE (
+                   :isPrivileged = true
+                   OR (:viewerEmployeeId IS NOT NULL AND a.createdBy.id = :viewerEmployeeId)
+                   OR a.team IS NULL
+                   OR (:viewerEmployeeId IS NOT NULL AND a.team.manager IS NOT NULL AND a.team.manager.id = :viewerEmployeeId)
+                   OR EXISTS (
+                        SELECT tm.id
+                        FROM TeamMember tm
+                        WHERE tm.team.id = a.team.id
+                          AND tm.employee.id = :viewerEmployeeId
                           AND tm.leftAt IS NULL
                    )
                   )
               AND (
                     :search IS NULL OR :search = ''
                     OR LOWER(a.title) LIKE LOWER(CONCAT('%', :search, '%'))
-                    OR LOWER(a.message) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(a.content) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
     Page<Announcement> searchVisible(
-            @Param("employeeId") Long employeeId,
+            @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged,
             @Param("search") String search,
             Pageable pageable);

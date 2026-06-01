@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/chats/hr")
+@RequestMapping("/api/{tenantSlug}/chats/hr")
 public class HrChatController {
 
     private final HrChatService hrChatService;

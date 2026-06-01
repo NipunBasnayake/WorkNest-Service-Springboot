@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/leaves")
+@RequestMapping("/api/{tenantSlug}/leaves")
 public class LeaveRequestController {
 
     private final LeaveRequestService leaveRequestService;

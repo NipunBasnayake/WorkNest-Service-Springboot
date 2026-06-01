@@ -33,20 +33,25 @@ import java.util.UUID;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
     private final ObjectMapper objectMapper;
     private final String tenantHeaderName;
+    private final com.worknest.security.service.TenantSecurityValidator tenantSecurityValidator;
 
     public JwtAuthenticationFilter(
             JwtService jwtService,
             UserDetailsService userDetailsService,
             ObjectMapper objectMapper,
-            @Value("${app.tenant.header:X-Tenant-ID}") String tenantHeaderName) {
+            @Value("${app.tenant.header:X-Tenant-Slug}") String tenantHeaderName,
+            com.worknest.security.service.TenantSecurityValidator tenantSecurityValidator) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
         this.objectMapper = objectMapper;
         this.tenantHeaderName = tenantHeaderName;
+        this.tenantSecurityValidator = tenantSecurityValidator;
     }
 
     @Override
@@ -86,6 +91,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         );
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
+
+                log.trace("[AUTH] User={} authorities={}", email, principal.getAuthorities());
             }
 
             filterChain.doFilter(request, response);
@@ -118,25 +125,63 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
+        String tokenTenantSlug = jwtService.extractTenantSlug(jwt);
         String tokenTenantKey = jwtService.extractTenantKey(jwt);
         String userTenantKey = principal.getTenantKey();
+        String requestTenantSlug = extractRequestTenantSlug(request.getRequestURI());
+        String headerTenantSlug = normalize(request.getHeader(tenantHeaderName));
 
-        if (tokenTenantKey == null || userTenantKey == null ||
-                !tokenTenantKey.equalsIgnoreCase(userTenantKey)) {
+        if (userTenantKey == null || (tokenTenantKey == null && tokenTenantSlug == null)) {
             throw new InvalidTokenException("Token tenant does not match the user tenant");
         }
 
-        if (isTenantEndpoint(request.getRequestURI())) {
-            String requestTenantHeader = request.getHeader(tenantHeaderName);
-            if (requestTenantHeader == null ||
-                    !requestTenantHeader.equalsIgnoreCase(tokenTenantKey)) {
-                throw new ForbiddenOperationException("Token tenant does not match request tenant header");
+        if (tokenTenantKey != null && !tokenTenantKey.equalsIgnoreCase(userTenantKey)) {
+            throw new InvalidTokenException("Token tenant does not match the user tenant");
+        }
+
+        if (requestTenantSlug != null) {
+            tenantSecurityValidator.validateTenantSecurity(tokenTenantSlug, requestTenantSlug);
+
+            if (tokenTenantSlug != null && !tokenTenantSlug.equalsIgnoreCase(requestTenantSlug)) {
+                throw new ForbiddenOperationException("Token tenant does not match request tenant path");
+            }
+
+            if (headerTenantSlug != null && !headerTenantSlug.equalsIgnoreCase(requestTenantSlug)) {
+                throw new ForbiddenOperationException("Request tenant header does not match request tenant path");
             }
         }
     }
 
-    private boolean isTenantEndpoint(String uri) {
-        return uri.startsWith("/api/tenant/");
+    private String extractRequestTenantSlug(String uri) {
+        if (uri == null) {
+            return null;
+        }
+        if (uri.startsWith("/api/public/")) {
+            return extractSegment(uri, "/api/public/");
+        }
+        if (!uri.startsWith("/api/")) {
+            return null;
+        }
+        String remainder = uri.substring("/api/".length());
+        if (remainder.startsWith("auth/") || remainder.startsWith("platform/") || remainder.startsWith("public/")) {
+            return null;
+        }
+        return extractSegment(uri, "/api/");
+    }
+
+    private String extractSegment(String uri, String prefix) {
+        String remainder = uri.substring(prefix.length());
+        int slashIndex = remainder.indexOf('/');
+        String candidate = slashIndex >= 0 ? remainder.substring(0, slashIndex) : remainder;
+        return normalize(candidate);
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim().toLowerCase();
+        return normalized.isBlank() ? null : normalized;
     }
 
     private void writeErrorResponse(

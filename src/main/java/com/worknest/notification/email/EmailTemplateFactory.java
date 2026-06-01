@@ -370,6 +370,50 @@ public class EmailTemplateFactory {
         );
     }
 
+    public EmailContent candidateApplicationUpdate(
+            String recipientName,
+            String candidateName,
+            String jobTitle,
+            String status,
+            String updatedBy) {
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("Candidate", escapeOrDash(candidateName));
+        details.put("Job", escapeOrDash(jobTitle));
+        details.put("Status", escapeOrDash(status));
+        details.put("Updated by", escapeOrDash(updatedBy));
+        return build(
+                "Recruitment update: " + safeSubjectSuffix(candidateName),
+                "A candidate application status has changed.",
+                "Candidate status update",
+                recipientName,
+                details,
+                "Open WorkNest to review the full hiring pipeline."
+        );
+    }
+
+    public EmailContent interviewScheduled(
+            String recipientName,
+            String candidateName,
+            String jobTitle,
+            LocalDateTime scheduledAt,
+            String mode,
+            String interviewerName) {
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("Candidate", escapeOrDash(candidateName));
+        details.put("Job", escapeOrDash(jobTitle));
+        details.put("Scheduled at", formatDateTime(scheduledAt));
+        details.put("Mode", escapeOrDash(mode));
+        details.put("Interviewer", escapeOrDash(interviewerName));
+        return build(
+                "Interview scheduled: " + safeSubjectSuffix(candidateName),
+                "Your interview has been scheduled.",
+                "Interview scheduled",
+                recipientName,
+                details,
+                "Please prepare any required documents or portfolio materials."
+        );
+    }
+
     private EmailContent build(
             String subject,
             String preheader,

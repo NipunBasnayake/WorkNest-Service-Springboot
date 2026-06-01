@@ -26,7 +26,7 @@ public class CorsConfig {
         config.setAllowedOriginPatterns(parseAllowedOrigins(allowedOrigins));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        config.setExposedHeaders(Arrays.asList("X-Tenant-ID", "Authorization"));
+        config.setExposedHeaders(Arrays.asList("X-Tenant-Slug", "Authorization"));
 
         source.registerCorsConfiguration("/**", config);
         return new CorsFilter(source);

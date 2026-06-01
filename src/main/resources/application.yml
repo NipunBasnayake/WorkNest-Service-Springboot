@@ -82,7 +82,7 @@ app:
         validation-timeout-ms: 5000
         leak-detection-threshold-ms: 0
   tenant:
-    header: X-Tenant-ID
+    header: X-Tenant-Slug
     default: master
     jpa:
       hibernate:

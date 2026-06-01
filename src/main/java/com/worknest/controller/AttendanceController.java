@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/attendance")
+@RequestMapping("/api/{tenantSlug}/attendance")
 public class AttendanceController {
 
     private final AttendanceService attendanceService;

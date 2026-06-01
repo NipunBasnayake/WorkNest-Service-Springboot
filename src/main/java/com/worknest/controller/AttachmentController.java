@@ -22,7 +22,7 @@ import java.net.URI;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/attachments")
+@RequestMapping("/api/{tenantSlug}/attachments")
 public class AttachmentController {
 
     private final AttachmentService attachmentService;

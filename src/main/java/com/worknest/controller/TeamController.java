@@ -18,7 +18,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/teams")
+@RequestMapping("/api/{tenantSlug}/teams")
 public class TeamController {
 
     private final TeamService teamService;

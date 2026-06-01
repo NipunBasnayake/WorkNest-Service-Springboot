@@ -3,7 +3,6 @@ package com.worknest.tenant.service.impl;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.tenant.datasource.TenantDataSourceService;
 import com.worknest.tenant.service.TenantSchemaService;
-import com.zaxxer.hikari.HikariDataSource;
 import org.hibernate.cfg.JdbcSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,7 +38,14 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
 
     @Override
     public void ensureTenantSchema(PlatformTenant tenant) {
-        DataSource tenantDataSource = tenantDataSourceService.createDataSource(tenant);
+        /*
+         * Use the CACHED datasource from TenantDataSourceService so we do NOT
+         * create a throw-away Hikari pool that logs "Starting... Shutdown..."
+         * on every provisioning event. The cached pool is reused for all
+         * subsequent tenant queries.
+         */
+        DataSource tenantDataSource = tenantDataSourceService.getDataSource(tenant.getTenantKey());
+
         LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
         try {
             em.setDataSource(tenantDataSource);
@@ -65,9 +71,7 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
             } catch (Exception ignored) {
                 // no-op
             }
-            if (tenantDataSource instanceof HikariDataSource hikariDataSource) {
-                hikariDataSource.close();
-            }
+            /* Do NOT close the DataSource here — it is cached and reused. */
         }
     }
 }

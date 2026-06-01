@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/tasks")
+@RequestMapping("/api/{tenantSlug}/tasks")
 public class TaskController {
 
     private final TaskService taskService;

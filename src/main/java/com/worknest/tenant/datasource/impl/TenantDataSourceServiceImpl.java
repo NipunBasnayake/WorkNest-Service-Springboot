@@ -96,7 +96,9 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
             return new TenantPoolHolder(dataSource, now);
         });
 
-        holder.touch(now);
+        /* touch() is already called inside compute() when the pool existed.
+         * For a new pool, the creation timestamp serves as the initial access time.
+         * Calling it again here would be redundant. */
         evictPoolsIfAboveLimit();
         return holder.dataSource();
     }

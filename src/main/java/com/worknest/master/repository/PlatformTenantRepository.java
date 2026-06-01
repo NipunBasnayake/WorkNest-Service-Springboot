@@ -10,7 +10,9 @@ import java.util.Optional;
 public interface PlatformTenantRepository extends JpaRepository<PlatformTenant, Long> {
 
     Optional<PlatformTenant> findByTenantKey(String tenantKey);
+    Optional<PlatformTenant> findBySlug(String slug);
     boolean existsByTenantKey(String tenantKey);
+    boolean existsBySlug(String slug);
     boolean existsByCompanyNameIgnoreCase(String companyName);
 }
 

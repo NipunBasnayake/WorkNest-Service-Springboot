@@ -7,5 +7,7 @@ import java.util.Optional;
 public interface MasterTenantLookupService {
 
     Optional<PlatformTenant> findByTenantKey(String tenantKey);
+
+    Optional<PlatformTenant> findBySlug(String slug);
 }
 

@@ -21,6 +21,8 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     Optional<RefreshToken> findByTokenHashAndRevokedFalse(String tokenHash);
 
+        List<RefreshToken> findByPlatformUserOrderByCreatedAtDesc(PlatformUser platformUser);
+
     @Modifying
     @Query("""
             UPDATE RefreshToken rt
@@ -50,4 +52,22 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     List<RefreshToken> findByPlatformUserAndRevokedFalseAndExpiresAtAfter(
             PlatformUser platformUser, LocalDateTime currentTime);
+
+    @Modifying
+    @Query("""
+            UPDATE RefreshToken rt
+            SET rt.lastUsedAt = :lastUsedAt,
+                rt.ipAddress = COALESCE(:ipAddress, rt.ipAddress),
+                rt.userAgent = COALESCE(:userAgent, rt.userAgent),
+                rt.deviceId = COALESCE(:deviceId, rt.deviceId),
+                rt.deviceName = COALESCE(:deviceName, rt.deviceName)
+            WHERE rt.id = :id
+            """)
+    int updateSessionContext(
+            @Param("id") Long id,
+            @Param("lastUsedAt") LocalDateTime lastUsedAt,
+            @Param("ipAddress") String ipAddress,
+            @Param("userAgent") String userAgent,
+            @Param("deviceId") String deviceId,
+            @Param("deviceName") String deviceName);
 }

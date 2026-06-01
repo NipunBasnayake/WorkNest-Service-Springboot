@@ -22,7 +22,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/projects")
+@RequestMapping("/api/{tenantSlug}/projects")
 public class ProjectController {
 
     private final ProjectService projectService;

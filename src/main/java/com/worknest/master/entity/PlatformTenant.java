@@ -24,6 +24,12 @@ public class PlatformTenant {
     @Column(name = "tenant_key", nullable = false, unique = true, length = 50)
     private String tenantKey;
 
+    @Column(name = "slug", nullable = false, unique = true, length = 80)
+    private String slug;
+
+    @Column(name = "active", nullable = false)
+    private Boolean active = true;
+
     @Column(name = "company_name", nullable = false, length = 255)
     private String companyName;
 
@@ -53,14 +59,24 @@ public class PlatformTenant {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        tenantKey = com.worknest.common.util.SlugUtils.slugify(tenantKey);
+        slug = slug == null || slug.isBlank() ? tenantKey : com.worknest.common.util.SlugUtils.slugify(slug);
+        if (slug == null || slug.isBlank()) {
+            throw new IllegalStateException("Tenant slug must be provided");
+        }
         if (status == null) {
             status = TenantStatus.ACTIVE;
+        }
+        if (active == null) {
+            active = true;
         }
     }
 
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
+        tenantKey = com.worknest.common.util.SlugUtils.slugify(tenantKey);
+        slug = com.worknest.common.util.SlugUtils.slugify(slug);
     }
 }
 

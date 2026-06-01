@@ -48,6 +48,27 @@ public class RefreshToken {
     @Column(name = "rotated_to_token", length = 255)
     private String rotatedToToken;
 
+    @Column(name = "device_id", length = 100)
+    private String deviceId;
+
+    @Column(name = "device_name", length = 150)
+    private String deviceName;
+
+    @Column(name = "user_agent", length = 500)
+    private String userAgent;
+
+    @Column(name = "ip_address", length = 100)
+    private String ipAddress;
+
+    @Column(name = "last_used_at")
+    private LocalDateTime lastUsedAt;
+
+    @Column(name = "is_suspicious", nullable = false)
+    private boolean suspicious;
+
+    @Column(name = "suspicious_reason", length = 500)
+    private String suspiciousReason;
+
     @Transient
     private String rawToken;
 

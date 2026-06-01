@@ -17,6 +17,6 @@ public class RefreshTokenResponseDto {
     private String tokenType;
     private String accessToken;
     private LocalDateTime accessTokenExpiresAt;
-    private String refreshToken;
-    private LocalDateTime refreshTokenExpiresAt;
+    private String csrfToken;
+    private Long sessionId;
 }

@@ -1,5 +1,6 @@
 package com.worknest.auth.service.impl;
 
+import com.worknest.auth.model.AuthSessionContext;
 import com.worknest.auth.service.RefreshTokenService;
 import com.worknest.common.exception.InvalidTokenException;
 import com.worknest.common.exception.TokenExpiredException;
@@ -44,10 +45,10 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     }
 
     @Override
-    public RefreshToken createToken(PlatformUser platformUser) {
+    public RefreshToken createToken(PlatformUser platformUser, AuthSessionContext sessionContext) {
         LocalDateTime now = LocalDateTime.now();
         String rawToken = generateTokenValue();
-        RefreshToken refreshToken = buildToken(platformUser, rawToken, now);
+        RefreshToken refreshToken = buildToken(platformUser, rawToken, now, sessionContext);
         refreshToken.setRawToken(rawToken);
         return masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.save(refreshToken));
     }
@@ -69,6 +70,9 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         RefreshToken refreshToken = findTokenOrThrow(tokenValue);
         validateNotExpired(refreshToken, tokenValue);
 
+        refreshToken.setLastUsedAt(LocalDateTime.now());
+        masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.save(refreshToken));
+
         if (!refreshToken.isRevoked()) {
             return refreshToken;
         }
@@ -78,7 +82,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager", propagation = Propagation.REQUIRES_NEW)
-    public RefreshToken rotateToken(RefreshToken currentToken) {
+    public RefreshToken rotateToken(RefreshToken currentToken, AuthSessionContext sessionContext) {
         validateNotExpired(currentToken, currentToken.getRawToken());
 
         LocalDateTime now = LocalDateTime.now();
@@ -92,7 +96,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
                         rotatedToTokenHash));
 
         if (updatedRows == 1) {
-            RefreshToken newToken = buildToken(currentToken.getPlatformUser(), rotatedToToken, now);
+            RefreshToken newToken = buildToken(currentToken.getPlatformUser(), rotatedToToken, now, sessionContext);
             newToken.setRawToken(rotatedToToken);
             return masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.save(newToken));
         }
@@ -121,6 +125,18 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     }
 
     @Override
+    public void revokeToken(Long tokenId) {
+        masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository.findById(tokenId).ifPresent(token -> {
+            if (!token.isRevoked()) {
+                token.setRevoked(true);
+                token.setRevokedAt(LocalDateTime.now());
+                token.setRotatedToToken(null);
+                refreshTokenRepository.save(token);
+            }
+        }));
+    }
+
+    @Override
     public void revokeAllActiveTokens(PlatformUser platformUser) {
         masterTenantContextRunner.runInMasterContext(() -> {
             List<RefreshToken> activeTokens = refreshTokenRepository
@@ -135,7 +151,17 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         });
     }
 
-    private RefreshToken buildToken(PlatformUser platformUser, String tokenValue, LocalDateTime issuedAt) {
+    @Override
+    public List<RefreshToken> getActiveTokens(PlatformUser platformUser) {
+        return masterTenantContextRunner.runInMasterContext(() -> refreshTokenRepository
+                .findByPlatformUserAndRevokedFalseAndExpiresAtAfter(platformUser, LocalDateTime.now()));
+    }
+
+    private RefreshToken buildToken(
+            PlatformUser platformUser,
+            String tokenValue,
+            LocalDateTime issuedAt,
+            AuthSessionContext sessionContext) {
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setToken(UUID.randomUUID().toString());
         refreshToken.setTokenHash(hashToken(tokenValue));
@@ -144,6 +170,13 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         refreshToken.setRevokedAt(null);
         refreshToken.setRotatedToToken(null);
         refreshToken.setExpiresAt(issuedAt.plus(Duration.ofMillis(refreshTokenExpiryMillis)));
+        refreshToken.setDeviceId(sessionContext == null ? null : sessionContext.deviceId());
+        refreshToken.setDeviceName(sessionContext == null ? null : sessionContext.deviceName());
+        refreshToken.setUserAgent(sessionContext == null ? null : sessionContext.userAgent());
+        refreshToken.setIpAddress(sessionContext == null ? null : sessionContext.ipAddress());
+        refreshToken.setLastUsedAt(issuedAt);
+        refreshToken.setSuspicious(sessionContext != null && sessionContext.suspicious());
+        refreshToken.setSuspiciousReason(sessionContext == null ? null : sessionContext.suspiciousReason());
         return refreshToken;
     }
 

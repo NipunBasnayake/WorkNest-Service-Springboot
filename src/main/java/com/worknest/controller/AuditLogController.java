@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/audit-logs")
+@RequestMapping("/api/{tenantSlug}/audit-logs")
 public class AuditLogController {
 
     private final AuditLogService auditLogService;

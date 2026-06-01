@@ -13,5 +13,8 @@ public enum AuditActionType {
     MARK_READ,
     UPLOAD,
     DOWNLOAD,
+    SHORTLIST,
+    SCHEDULE,
+    SUBMIT_FEEDBACK,
     LOGIN
 }

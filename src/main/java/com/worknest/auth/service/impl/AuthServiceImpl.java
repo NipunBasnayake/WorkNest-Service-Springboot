@@ -1,7 +1,10 @@
 package com.worknest.auth.service.impl;
 
 import com.worknest.auth.dto.*;
+import com.worknest.auth.model.AuthSessionContext;
 import com.worknest.auth.service.AuthService;
+import com.worknest.auth.service.AuthCookieService;
+import com.worknest.auth.service.AuthLoginThrottleService;
 import com.worknest.auth.service.PlatformUserService;
 import com.worknest.auth.service.RefreshTokenService;
 import com.worknest.common.enums.PlatformRole;
@@ -12,11 +15,13 @@ import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.entity.PlatformUser;
 import com.worknest.master.entity.RefreshToken;
 import com.worknest.master.repository.PlatformUserRepository;
+import com.worknest.master.repository.RefreshTokenRepository;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.jwt.JwtService;
 import com.worknest.security.model.PlatformUserPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +41,8 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @Transactional(transactionManager = "masterTransactionManager")
@@ -49,10 +56,13 @@ public class AuthServiceImpl implements AuthService {
 
     private final PlatformUserService platformUserService;
     private final RefreshTokenService refreshTokenService;
+    private final AuthCookieService authCookieService;
+    private final AuthLoginThrottleService authLoginThrottleService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final MasterTenantLookupService masterTenantLookupService;
     private final PlatformUserRepository platformUserRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final EmailNotificationService emailNotificationService;
     private final String tenantHeaderName;
     private final int passwordResetTokenExpiryMinutes;
@@ -62,21 +72,27 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(
             PlatformUserService platformUserService,
             RefreshTokenService refreshTokenService,
+            AuthCookieService authCookieService,
+            AuthLoginThrottleService authLoginThrottleService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             MasterTenantLookupService masterTenantLookupService,
             PlatformUserRepository platformUserRepository,
+            RefreshTokenRepository refreshTokenRepository,
             EmailNotificationService emailNotificationService,
-            @Value("${app.tenant.header:X-Tenant-ID}") String tenantHeaderName,
+            @Value("${app.tenant.header:X-Tenant-Slug}") String tenantHeaderName,
             @Value("${app.auth.password-reset.token-expiry-minutes:20}") int passwordResetTokenExpiryMinutes,
             @Value("${app.auth.password-reset.link-base-url:http://localhost:3000/reset-password}")
             String passwordResetLinkBaseUrl) {
         this.platformUserService = platformUserService;
         this.refreshTokenService = refreshTokenService;
+        this.authCookieService = authCookieService;
+        this.authLoginThrottleService = authLoginThrottleService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.masterTenantLookupService = masterTenantLookupService;
         this.platformUserRepository = platformUserRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
         this.emailNotificationService = emailNotificationService;
         this.tenantHeaderName = tenantHeaderName;
         this.passwordResetTokenExpiryMinutes = Math.max(15, Math.min(passwordResetTokenExpiryMinutes, 30));
@@ -84,41 +100,63 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResponseDto login(LoginRequestDto requestDto) {
+    public LoginResponseDto login(LoginRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
         PlatformUser user = platformUserService.findByEmailOrThrow(requestDto.getEmail());
+        String clientIp = extractClientIpAddress(request);
+        String userAgent = extractUserAgent(request);
+        String deviceId = resolveDeviceId(request);
+        String deviceName = resolveDeviceName(request);
+
+        authLoginThrottleService.assertLoginAllowed(requestDto.getEmail(), clientIp);
 
         if (user.getStatus() != UserStatus.ACTIVE) {
+            authLoginThrottleService.recordFailedLogin(requestDto.getEmail(), clientIp, userAgent);
             throw new InactiveUserException("User account is inactive");
         }
 
         validateUserTenantScope(user, requestDto.getTenantKey(), false);
 
         if (!passwordEncoder.matches(requestDto.getPassword(), user.getPasswordHash())) {
+            authLoginThrottleService.recordFailedLogin(requestDto.getEmail(), clientIp, userAgent);
             throw new InvalidCredentialsException("Invalid email or password");
         }
 
+        authLoginThrottleService.recordSuccessfulLogin(requestDto.getEmail(), clientIp);
+
         refreshTokenService.revokeAllActiveTokens(user);
-        RefreshToken refreshToken = refreshTokenService.createToken(user);
-        String accessToken = jwtService.generateAccessToken(user);
+        boolean suspicious = detectSuspiciousLogin(user, clientIp, userAgent, deviceId);
+        String suspiciousReason = suspicious ? "New device, IP, or user agent detected for this account." : null;
+        AuthSessionContext sessionContext = new AuthSessionContext(deviceId, deviceName, userAgent, clientIp, suspicious, suspiciousReason);
+        RefreshToken refreshToken = refreshTokenService.createToken(user, sessionContext);
+        PlatformTenant tenant = resolveTenantForUser(user);
+        String accessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
+        String csrfToken = generateSecureToken();
 
         platformUserService.updateLastLogin(user.getId());
+        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(refreshToken), csrfToken, computeCookieMaxAgeSeconds(refreshToken));
 
         return LoginResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(accessToken)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
-                .refreshToken(resolveRefreshTokenValue(refreshToken))
-                .refreshTokenExpiresAt(refreshToken.getExpiresAt())
+                .csrfToken(csrfToken)
+                .sessionId(refreshToken.getId())
                 .passwordChangeRequired(user.isPasswordChangeRequired())
                 .user(mapUser(user))
                 .build();
     }
 
     @Override
-    public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto) {
+    public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        RefreshToken currentToken = refreshTokenService.validateTokenForRefresh(requestDto.getRefreshToken());
+        authCookieService.validateCsrfToken(request);
+        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        RefreshToken currentToken = refreshTokenService.validateTokenForRefresh(refreshTokenValue);
         PlatformUser user = currentToken.getPlatformUser();
+        String clientIp = extractClientIpAddress(request);
+        String userAgent = extractUserAgent(request);
+        String deviceId = resolveDeviceId(request);
+        String deviceName = resolveDeviceName(request);
 
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new InactiveUserException("User account is inactive");
@@ -126,22 +164,35 @@ public class AuthServiceImpl implements AuthService {
 
         validateRefreshTenantScope(currentToken, requestedTenantKey);
 
-        RefreshToken rotatedToken = refreshTokenService.rotateToken(currentToken);
-        String newAccessToken = jwtService.generateAccessToken(user);
+        AuthSessionContext sessionContext = new AuthSessionContext(
+                deviceId,
+                deviceName,
+                userAgent,
+                clientIp,
+                currentToken.isSuspicious(),
+                currentToken.getSuspiciousReason());
+        RefreshToken rotatedToken = refreshTokenService.rotateToken(currentToken, sessionContext);
+        PlatformTenant tenant = resolveTenantForUser(user);
+        String newAccessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
+        String csrfToken = generateSecureToken();
+
+        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(rotatedToken), csrfToken, computeCookieMaxAgeSeconds(rotatedToken));
 
         return RefreshTokenResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(newAccessToken)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
-                .refreshToken(resolveRefreshTokenValue(rotatedToken))
-                .refreshTokenExpiresAt(rotatedToken.getExpiresAt())
+                .csrfToken(csrfToken)
+                .sessionId(rotatedToken.getId())
                 .build();
     }
 
     @Override
-    public LogoutResponseDto logout(LogoutRequestDto requestDto) {
+    public LogoutResponseDto logout(LogoutRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        RefreshToken token = refreshTokenService.validateToken(requestDto.getRefreshToken());
+        authCookieService.validateCsrfToken(request);
+        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        RefreshToken token = refreshTokenService.validateToken(refreshTokenValue);
         PlatformUser tokenUser = token.getPlatformUser();
 
         validateUserTenantScope(tokenUser, requestedTenantKey, true);
@@ -151,10 +202,74 @@ public class AuthServiceImpl implements AuthService {
             throw new ForbiddenOperationException("Cannot revoke a token for a different user");
         }
 
-        refreshTokenService.revokeToken(requestDto.getRefreshToken());
+        refreshTokenService.revokeToken(token.getId());
+        authCookieService.clearAuthCookies(response);
         return LogoutResponseDto.builder()
                 .revoked(true)
                 .message("Logout successful. Refresh token revoked.")
+                .build();
+    }
+
+    @Override
+    @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
+    public AuthSessionsResponseDto getActiveSessions(HttpServletRequest request) {
+        PlatformUserPrincipal principal = extractCurrentPrincipal();
+        if (principal == null) {
+            throw new ForbiddenOperationException("No authenticated user found");
+        }
+
+        PlatformUser user = platformUserRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        String currentDeviceId = resolveDeviceId(request);
+
+        List<AuthSessionDto> sessions = refreshTokenService.getActiveTokens(user).stream()
+                .map(token -> mapSession(token, currentDeviceId))
+                .toList();
+
+        return AuthSessionsResponseDto.builder()
+                .sessions(sessions)
+                .build();
+    }
+
+    @Override
+    public AuthSessionRevocationResponseDto revokeSession(Long sessionId, HttpServletRequest request) {
+        PlatformUserPrincipal principal = extractCurrentPrincipal();
+        if (principal == null) {
+            throw new ForbiddenOperationException("No authenticated user found");
+        }
+
+        RefreshToken token = refreshTokenRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Session not found"));
+
+        if (!token.getPlatformUser().getId().equals(principal.getId())) {
+            throw new ForbiddenOperationException("Cannot revoke another user's session");
+        }
+
+        refreshTokenService.revokeToken(sessionId);
+        return AuthSessionRevocationResponseDto.builder()
+                .revoked(true)
+                .message("Session revoked successfully.")
+                .build();
+    }
+
+    @Override
+    public AuthSessionRevocationResponseDto revokeOtherSessions(HttpServletRequest request) {
+        PlatformUserPrincipal principal = extractCurrentPrincipal();
+        if (principal == null) {
+            throw new ForbiddenOperationException("No authenticated user found");
+        }
+
+        PlatformUser user = platformUserRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        String currentDeviceId = resolveDeviceId(request);
+
+        refreshTokenService.getActiveTokens(user).stream()
+                .filter(token -> currentDeviceId == null || token.getDeviceId() == null || !currentDeviceId.equals(token.getDeviceId()))
+                .forEach(token -> refreshTokenService.revokeToken(token.getId()));
+
+        return AuthSessionRevocationResponseDto.builder()
+                .revoked(true)
+                .message("Other sessions revoked successfully.")
                 .build();
     }
 
@@ -166,6 +281,8 @@ public class AuthServiceImpl implements AuthService {
             throw new ForbiddenOperationException("No authenticated user found");
         }
 
+        PlatformTenant tenant = resolveTenantForUser(principal);
+
         return AuthUserDto.builder()
                 .id(principal.getId())
                 .fullName(principal.getFullName())
@@ -173,6 +290,7 @@ public class AuthServiceImpl implements AuthService {
                 .role(principal.getRole())
                 .status(principal.getStatus())
                 .tenantKey(principal.getTenantKey())
+                .tenantSlug(tenant == null ? null : tenant.getSlug())
                 .passwordChangeRequired(principal.isPasswordChangeRequired())
                 .build();
     }
@@ -393,6 +511,25 @@ public class AuthServiceImpl implements AuthService {
         return payloadTenantKey != null ? payloadTenantKey : headerTenantKey;
     }
 
+    private PlatformTenant resolveTenantForUser(PlatformUser user) {
+        String tenantKey = normalizeTenantKey(user.getTenantKey());
+        if (tenantKey == null) {
+            return null;
+        }
+        return masterTenantLookupService.findByTenantKey(tenantKey).orElse(null);
+    }
+
+    private PlatformTenant resolveTenantForUser(PlatformUserPrincipal principal) {
+        if (principal == null) {
+            return null;
+        }
+        String tenantKey = normalizeTenantKey(principal.getTenantKey());
+        if (tenantKey == null) {
+            return null;
+        }
+        return masterTenantLookupService.findByTenantKey(tenantKey).orElse(null);
+    }
+
     private String extractTenantKeyFromHeader() {
         ServletRequestAttributes attributes =
                 (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
@@ -409,6 +546,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private AuthUserDto mapUser(PlatformUser user) {
+        PlatformTenant tenant = resolveTenantForUser(user);
         return AuthUserDto.builder()
                 .id(user.getId())
                 .fullName(user.getFullName())
@@ -416,6 +554,7 @@ public class AuthServiceImpl implements AuthService {
                 .role(user.getRole())
                 .status(user.getStatus())
                 .tenantKey(user.getTenantKey())
+            .tenantSlug(tenant == null ? null : tenant.getSlug())
                 .passwordChangeRequired(user.isPasswordChangeRequired())
                 .build();
     }
@@ -495,5 +634,84 @@ public class AuthServiceImpl implements AuthService {
             return legacy;
         }
         throw new InvalidTokenException("Refresh token is invalid");
+    }
+
+    private boolean detectSuspiciousLogin(PlatformUser user, String currentIp, String currentUserAgent, String currentDeviceId) {
+        return refreshTokenService.getActiveTokens(user).stream().anyMatch(token -> {
+            if (currentDeviceId != null && currentDeviceId.equals(token.getDeviceId())) {
+                return false;
+            }
+            if (currentIp != null && currentIp.equals(token.getIpAddress()) && currentUserAgent != null && currentUserAgent.equals(token.getUserAgent())) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    private AuthSessionDto mapSession(RefreshToken token, String currentDeviceId) {
+        return AuthSessionDto.builder()
+                .id(token.getId())
+                .deviceId(token.getDeviceId())
+                .deviceName(token.getDeviceName())
+                .userAgent(token.getUserAgent())
+                .ipAddress(token.getIpAddress())
+                .suspicious(token.isSuspicious())
+                .suspiciousReason(token.getSuspiciousReason())
+                .createdAt(token.getCreatedAt())
+                .lastUsedAt(token.getLastUsedAt())
+                .expiresAt(token.getExpiresAt())
+                .revoked(token.isRevoked())
+                .currentSession(currentDeviceId != null && currentDeviceId.equals(token.getDeviceId()))
+                .build();
+    }
+
+    private String resolveDeviceId(HttpServletRequest request) {
+        String deviceId = request == null ? null : request.getHeader("X-Device-Id");
+        if (deviceId != null && !deviceId.isBlank()) {
+            return deviceId.trim();
+        }
+        return null;
+    }
+
+    private String resolveDeviceName(HttpServletRequest request) {
+        String deviceName = request == null ? null : request.getHeader("X-Device-Name");
+        if (deviceName != null && !deviceName.isBlank()) {
+            return deviceName.trim();
+        }
+        return null;
+    }
+
+    private String extractUserAgent(HttpServletRequest request) {
+        if (request == null) {
+            return null;
+        }
+        String userAgent = request.getHeader("User-Agent");
+        if (userAgent == null || userAgent.isBlank()) {
+            return null;
+        }
+        return userAgent.trim();
+    }
+
+    private String extractClientIpAddress(HttpServletRequest request) {
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) {
+            return realIp.trim();
+        }
+        return request.getRemoteAddr();
+    }
+
+    private long computeCookieMaxAgeSeconds(RefreshToken token) {
+        if (token == null || token.getExpiresAt() == null) {
+            return 0L;
+        }
+        long seconds = java.time.Duration.between(LocalDateTime.now(), token.getExpiresAt()).getSeconds();
+        return Math.max(seconds, 0L);
     }
 }

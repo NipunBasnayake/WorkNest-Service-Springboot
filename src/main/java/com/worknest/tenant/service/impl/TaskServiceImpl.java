@@ -158,6 +158,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureTaskOpenForMutation(task, "editing task details");
         Long previousAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
         TaskStatus previousStatus = task.getStatus();
         String previousTitle = task.getTitle();
@@ -232,6 +233,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureTaskOpenForMutation(task, "changing priority");
         task.setPriority(requestDto.getPriority());
         Task updated = taskRepository.save(task);
         auditLogService.logAction(
@@ -249,6 +251,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.ASSIGN_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskAssignmentAccess(task);
+        ensureTaskOpenForMutation(task, "reassigning the task");
         Long assignedEmployeeId = resolveRequestedAssignedEmployeeId(requestDto);
         if (assignedEmployeeId == null) {
             throw new BadRequestException("Assigned employee is required");
@@ -273,6 +276,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureTaskOpenForMutation(task, "changing the due date");
         validateDueDate(task.getProject(), requestDto.getDueDate());
         task.setDueDate(requestDto.getDueDate());
         Task updated = taskRepository.save(task);
@@ -360,7 +364,7 @@ public class TaskServiceImpl implements TaskService {
                 .items(items)
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
-                .totalElements(role == PlatformRole.EMPLOYEE ? items.size() : resultPage.getTotalElements())
+                .totalElements(isPrivilegedTaskReadRole(role) ? resultPage.getTotalElements() : items.size())
                 .totalPages(resultPage.getTotalPages())
                 .build();
     }
@@ -410,6 +414,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureTaskOpenForMutation(task, "deleting the task");
 
         if (attachmentRepository.existsByEntityTypeAndEntityId(AttachmentEntityType.TASK, taskId)) {
             throw new BadRequestException("Cannot delete task with attachments. Remove attachments first.");
@@ -430,6 +435,7 @@ public class TaskServiceImpl implements TaskService {
         authorizationService.requirePermission(Permission.VIEW_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskReadAccess(task);
+        ensureTaskOpenForMutation(task, "adding comments");
 
         Long commenterEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
         Employee commenter = getActiveEmployeeOrThrow(commenterEmployeeId);
@@ -469,7 +475,7 @@ public class TaskServiceImpl implements TaskService {
         enforceProjectReadAccess(project);
 
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        Long currentEmployeeId = role == PlatformRole.EMPLOYEE ? resolveCurrentEmployeeIdOrThrow() : null;
+        Long currentEmployeeId = isPrivilegedTaskReadRole(role) ? null : resolveCurrentEmployeeIdOrThrow();
 
         Map<TaskStatus, List<TaskResponseDto>> grouped = new EnumMap<>(TaskStatus.class);
         Map<String, Long> summary = new java.util.LinkedHashMap<>();
@@ -597,6 +603,14 @@ public class TaskServiceImpl implements TaskService {
             return;
         }
 
+        if (currentStatus == TaskStatus.DONE) {
+            if (newStatus != TaskStatus.IN_REVIEW) {
+                throw new BadRequestException("DONE tasks can only be reopened to IN_REVIEW before further changes");
+            }
+            validateTaskReopenAccess(task);
+            return;
+        }
+
         Set<TaskStatus> allowedTransitions = ALLOWED_STATUS_TRANSITIONS.getOrDefault(
                 currentStatus,
                 EnumSet.noneOf(TaskStatus.class)
@@ -635,6 +649,28 @@ public class TaskServiceImpl implements TaskService {
         }
 
         throw new ForbiddenOperationException("Team leads and project managers can only move team tasks between TODO, IN_PROGRESS, and REVIEW");
+    }
+
+    private void ensureTaskOpenForMutation(Task task, String action) {
+        if (task != null && task.getStatus() == TaskStatus.DONE) {
+            throw new BadRequestException("Task is DONE and locked. Reopen it before " + action + ".");
+        }
+    }
+
+    private void validateTaskReopenAccess(Task task) {
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent()) {
+            return;
+        }
+
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
+        if (currentEmployeeId == null || task.getAssignedTeam() == null || task.getAssignedTeam().getId() == null) {
+            throw new ForbiddenOperationException("Only tenant admins, project managers, or team leads can reopen completed tasks");
+        }
+
+        if (!isTeamManagerOrLead(currentEmployeeId, task.getAssignedTeam().getId())) {
+            throw new ForbiddenOperationException("Only tenant admins, project managers, or team leads can reopen completed tasks");
+        }
     }
 
     private void ensureProjectAllowsTaskCreation(Project project) {
@@ -805,7 +841,7 @@ public class TaskServiceImpl implements TaskService {
 
     private Long resolveRequestedAssigneeForRead(Long requestedAssigneeId) {
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        if (role != PlatformRole.EMPLOYEE) {
+        if (isPrivilegedTaskReadRole(role)) {
             return requestedAssigneeId;
         }
 
@@ -827,14 +863,20 @@ public class TaskServiceImpl implements TaskService {
     }
 
     private boolean canReadTask(Task task, PlatformRole role, Long currentEmployeeId) {
-        if (role != PlatformRole.EMPLOYEE) {
+        if (isPrivilegedTaskReadRole(role)) {
             return true;
         }
         if (currentEmployeeId == null) {
             return false;
         }
+        if (task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId())) {
+            return true;
+        }
+        if (task.getCreatedBy() != null && currentEmployeeId.equals(task.getCreatedBy().getId())) {
+            return true;
+        }
         if (task.getAssignedTeam() == null) {
-            return task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId());
+            return false;
         }
 
         Long assignedTeamId = task.getAssignedTeam().getId();
@@ -843,6 +885,10 @@ public class TaskServiceImpl implements TaskService {
         }
 
         return isTeamManagerOrLead(currentEmployeeId, assignedTeamId);
+    }
+
+    private boolean isPrivilegedTaskReadRole(PlatformRole role) {
+        return role != null && (role.isTenantAdminEquivalent() || role == PlatformRole.HR);
     }
 
     private Long resolveCurrentEmployeeIdOrNull() {

@@ -11,4 +11,6 @@ public interface InterviewRepository extends JpaRepository<Interview, Long> {
     List<Interview> findByScheduledAtBetweenOrderByScheduledAtAsc(LocalDateTime from, LocalDateTime to);
 
     List<Interview> findByApplicationCandidateIdOrderByScheduledAtDesc(Long candidateId);
+
+    boolean existsByApplicationId(Long applicationId);
 }

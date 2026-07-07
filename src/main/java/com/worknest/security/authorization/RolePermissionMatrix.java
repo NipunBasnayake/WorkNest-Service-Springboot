@@ -92,26 +92,20 @@ public class RolePermissionMatrix {
         );
 
         Set<Permission> legacyManagerPermissions = EnumSet.of(
-                Permission.VIEW_EMPLOYEE,
                 Permission.VIEW_TEAM,
-                Permission.CREATE_PROJECT,
-                Permission.MANAGE_PROJECT,
                 Permission.VIEW_PROJECT,
-                Permission.VIEW_RECRUITMENT,
                 Permission.CREATE_TASK,
                 Permission.MANAGE_TASK,
                 Permission.ASSIGN_TASK,
                 Permission.UPDATE_TASK_STATUS,
                 Permission.VIEW_TASK,
                 Permission.VIEW_ATTENDANCE,
-                Permission.VIEW_ALL_ATTENDANCE,
                 Permission.CHECK_IN_OUT,
                 Permission.APPLY_LEAVE,
                 Permission.VIEW_LEAVE,
                 Permission.VIEW_SELF_DATA,
                 Permission.MANAGE_SELF_PROFILE,
-                Permission.CHAT_ACCESS,
-                Permission.SEND_NOTIFICATION
+                Permission.CHAT_ACCESS
         );
 
         matrix.put(PlatformRole.PLATFORM_ADMIN, EnumSet.of(

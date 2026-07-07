@@ -27,6 +27,7 @@ public interface RecruitmentService {
     CandidateApplicationResponseDto createApplication(CandidateApplicationCreateRequestDto requestDto);
     CandidateApplicationResponseDto updateApplication(Long applicationId, CandidateApplicationUpdateRequestDto requestDto);
     CandidateApplicationResponseDto updateApplicationStatus(Long applicationId, CandidateApplicationUpdateRequestDto requestDto);
+    RecruitmentHireResponseDto hireApplication(Long applicationId, RecruitmentHireRequestDto requestDto);
     CandidateApplicationResponseDto getApplicationById(Long applicationId);
     PagedResultDto<CandidateApplicationResponseDto> listApplications(String search, CandidatePipelineStatus status, Long jobPositionId, int page, int size, String sortBy, String sortDir);
     RecruitmentPipelineResponseDto getPipeline(Long jobPositionId);

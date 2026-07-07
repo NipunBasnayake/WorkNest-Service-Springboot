@@ -23,4 +23,8 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
     long countByStatus(CandidatePipelineStatus status);
 
     long countByJobPositionId(Long jobPositionId);
+
+    boolean existsByCandidateIdAndJobPositionId(Long candidateId, Long jobPositionId);
+
+    boolean existsByCandidateIdAndStatusAndIdNot(Long candidateId, CandidatePipelineStatus status, Long id);
 }

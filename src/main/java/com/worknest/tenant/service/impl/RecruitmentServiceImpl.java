@@ -1,5 +1,8 @@
 package com.worknest.tenant.service.impl;
 
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
+import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
@@ -7,11 +10,15 @@ import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
+import com.worknest.tenant.dto.employee.EmployeeCreateRequestDto;
+import com.worknest.tenant.dto.employee.EmployeeResponseDto;
 import com.worknest.tenant.dto.recruitment.*;
 import com.worknest.tenant.entity.*;
 import com.worknest.tenant.enums.*;
 import com.worknest.tenant.repository.*;
 import com.worknest.tenant.service.AuditLogService;
+import com.worknest.tenant.service.EmployeeService;
+import com.worknest.tenant.service.NotificationService;
 import com.worknest.tenant.service.RecruitmentService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -20,14 +27,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class RecruitmentServiceImpl implements RecruitmentService {
+
+    private static final int TEMP_PASSWORD_LENGTH = 12;
+    private static final String TEMP_PASSWORD_CHARSET =
+            "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
 
     private final JobPositionRepository jobPositionRepository;
     private final CandidateRepository candidateRepository;
@@ -36,11 +50,16 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final InterviewRepository interviewRepository;
     private final InterviewFeedbackRepository interviewFeedbackRepository;
     private final EmployeeRepository employeeRepository;
+    private final TeamRepository teamRepository;
+    private final TeamMemberRepository teamMemberRepository;
     private final AuthorizationService authorizationService;
     private final AuditLogService auditLogService;
+    private final EmployeeService employeeService;
+    private final NotificationService notificationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final FileStorageService fileStorageService;
     private final EmailNotificationService emailNotificationService;
+    private final SecureRandom secureRandom;
 
     public RecruitmentServiceImpl(
             JobPositionRepository jobPositionRepository,
@@ -50,8 +69,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             InterviewRepository interviewRepository,
             InterviewFeedbackRepository interviewFeedbackRepository,
             EmployeeRepository employeeRepository,
+            TeamRepository teamRepository,
+            TeamMemberRepository teamMemberRepository,
             AuthorizationService authorizationService,
             AuditLogService auditLogService,
+            EmployeeService employeeService,
+            NotificationService notificationService,
             TenantDtoMapper tenantDtoMapper,
             FileStorageService fileStorageService,
             EmailNotificationService emailNotificationService) {
@@ -62,11 +85,16 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         this.interviewRepository = interviewRepository;
         this.interviewFeedbackRepository = interviewFeedbackRepository;
         this.employeeRepository = employeeRepository;
+        this.teamRepository = teamRepository;
+        this.teamMemberRepository = teamMemberRepository;
         this.authorizationService = authorizationService;
         this.auditLogService = auditLogService;
+        this.employeeService = employeeService;
+        this.notificationService = notificationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.fileStorageService = fileStorageService;
         this.emailNotificationService = emailNotificationService;
+        this.secureRandom = new SecureRandom();
     }
 
     @Override
@@ -205,12 +233,21 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         requireManagePermission();
         Candidate candidate = getCandidateOrThrow(requestDto.getCandidateId());
         JobPosition position = getJobPositionOrThrow(requestDto.getJobPositionId());
+        if (candidateApplicationRepository.existsByCandidateIdAndJobPositionId(candidate.getId(), position.getId())) {
+            throw new BadRequestException("Candidate already has an application for this job position");
+        }
+        CandidatePipelineStatus requestedStatus = requestDto.getStatus() == null
+                ? CandidatePipelineStatus.APPLIED
+                : requestDto.getStatus();
+        if (requestedStatus == CandidatePipelineStatus.HIRED) {
+            throw new BadRequestException("Use the hire workflow to mark an application as hired");
+        }
         CandidateApplication application = new CandidateApplication();
         application.setCandidate(candidate);
         application.setJobPosition(position);
         application.setCoverLetter(trimToNull(requestDto.getCoverLetter()));
         application.setExpectedSalary(requestDto.getExpectedSalary());
-        application.setStatus(requestDto.getStatus() == null ? CandidatePipelineStatus.APPLIED : requestDto.getStatus());
+        application.setStatus(requestedStatus);
         application.setCreatedBy(authorizationService.getCurrentEmployeeOrNull());
         CandidateApplication saved = candidateApplicationRepository.save(application);
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.CANDIDATE_APPLICATION, saved.getId(), jsonField("candidateId", String.valueOf(candidate.getId())));
@@ -232,6 +269,61 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Override
     public CandidateApplicationResponseDto updateApplicationStatus(Long applicationId, CandidateApplicationUpdateRequestDto requestDto) {
         return updateApplication(applicationId, requestDto);
+    }
+
+    @Override
+    public RecruitmentHireResponseDto hireApplication(Long applicationId, RecruitmentHireRequestDto requestDto) {
+        requireManagePermission();
+        CandidateApplication application = getApplicationOrThrow(applicationId);
+        validateApplicationCanBeHired(application);
+
+        Candidate candidate = application.getCandidate();
+        String candidateEmail = normalizeEmail(candidate.getEmail());
+        if (employeeRepository.existsByEmailIgnoreCase(candidateEmail)) {
+            throw new DuplicateEmailException("Employee email already exists in this tenant: " + candidateEmail);
+        }
+
+        String requestedPassword = trimToNull(requestDto.getTemporaryPassword());
+        boolean generatedPassword = requestedPassword == null;
+        String temporaryPassword = generatedPassword ? generateTemporaryPassword() : requestedPassword;
+
+        EmployeeCreateRequestDto employeeRequest = buildEmployeeCreateRequest(application, requestDto, temporaryPassword);
+        EmployeeResponseDto employeeResponse = employeeService.createEmployee(employeeRequest);
+        Employee createdEmployee = employeeRepository.findById(employeeResponse.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found after hire conversion"));
+
+        Team assignedTeam = assignHiredEmployeeToTeam(createdEmployee, requestDto);
+
+        application.setStatus(CandidatePipelineStatus.HIRED);
+        application.setHiredAt(LocalDateTime.now());
+        if (trimToNull(requestDto.getRecruiterNotes()) != null) {
+            application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
+        }
+        CandidateApplication updatedApplication = candidateApplicationRepository.save(application);
+
+        notificationService.createSystemNotification(
+                createdEmployee.getId(),
+                NotificationType.SYSTEM,
+                "Your employee account has been created from recruitment. You can now log in to WorkNest.",
+                AuditEntityType.EMPLOYEE.name(),
+                createdEmployee.getId()
+        );
+        notifyCandidateStatus(updatedApplication);
+        auditLogService.logAction(
+                AuditActionType.UPDATE,
+                AuditEntityType.CANDIDATE_APPLICATION,
+                updatedApplication.getId(),
+                "{\"hiredEmployeeId\":" + createdEmployee.getId() + ",\"teamId\":" + (assignedTeam == null ? "null" : assignedTeam.getId()) + "}"
+        );
+
+        return RecruitmentHireResponseDto.builder()
+                .application(toApplicationResponse(updatedApplication))
+                .employee(employeeResponse)
+                .teamId(assignedTeam == null ? null : assignedTeam.getId())
+                .teamName(assignedTeam == null ? null : assignedTeam.getName())
+                .accountProvisioned(employeeResponse.isAccountProvisioned())
+                .temporaryPassword(generatedPassword ? temporaryPassword : null)
+                .build();
     }
 
     @Override
@@ -459,6 +551,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private void applyApplicationUpdates(CandidateApplication application, CandidateApplicationUpdateRequestDto requestDto) {
+        if (application.getStatus() == CandidatePipelineStatus.HIRED) {
+            throw new BadRequestException("Hired applications are locked after employee creation");
+        }
+        if (requestDto.getStatus() == CandidatePipelineStatus.HIRED) {
+            throw new BadRequestException("Use the hire workflow to create the employee account and mark this application as hired");
+        }
         application.setStatus(requestDto.getStatus());
         application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
         application.setRejectedReason(trimToNull(requestDto.getRejectedReason()));
@@ -469,6 +567,128 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         if (requestDto.getStatus() == CandidatePipelineStatus.HIRED) {
             application.setHiredAt(LocalDateTime.now());
         }
+    }
+
+    private void validateApplicationCanBeHired(CandidateApplication application) {
+        if (application.getStatus() == CandidatePipelineStatus.HIRED || application.getHiredAt() != null) {
+            throw new BadRequestException("Candidate application is already hired");
+        }
+        if (application.getStatus() == CandidatePipelineStatus.REJECTED) {
+            throw new BadRequestException("Rejected applications cannot be hired without first reopening the recruitment decision");
+        }
+        if (!canHireFromStatus(application.getStatus())) {
+            throw new BadRequestException("Application must reach interview, technical, HR review, or offer stage before hiring");
+        }
+        if (!interviewRepository.existsByApplicationId(application.getId())) {
+            throw new BadRequestException("At least one interview must be scheduled before hiring a candidate");
+        }
+        if (candidateApplicationRepository.existsByCandidateIdAndStatusAndIdNot(
+                application.getCandidate().getId(),
+                CandidatePipelineStatus.HIRED,
+                application.getId())) {
+            throw new BadRequestException("Candidate is already hired through another application");
+        }
+    }
+
+    private boolean canHireFromStatus(CandidatePipelineStatus status) {
+        return status == CandidatePipelineStatus.INTERVIEW
+                || status == CandidatePipelineStatus.TECHNICAL
+                || status == CandidatePipelineStatus.HR_REVIEW
+                || status == CandidatePipelineStatus.OFFERED;
+    }
+
+    private EmployeeCreateRequestDto buildEmployeeCreateRequest(
+            CandidateApplication application,
+            RecruitmentHireRequestDto requestDto,
+            String temporaryPassword) {
+        Candidate candidate = application.getCandidate();
+        JobPosition jobPosition = application.getJobPosition();
+        String[] nameParts = splitFullName(candidate.getFullName());
+
+        EmployeeCreateRequestDto employeeRequest = new EmployeeCreateRequestDto();
+        employeeRequest.setEmployeeCode(trimToNull(requestDto.getEmployeeCode()));
+        employeeRequest.setFirstName(nameParts[0]);
+        employeeRequest.setLastName(nameParts[1]);
+        employeeRequest.setEmail(normalizeEmail(candidate.getEmail()));
+        employeeRequest.setPassword(temporaryPassword);
+        employeeRequest.setRole(resolveHireRole(requestDto.getRole()));
+        employeeRequest.setDesignation(firstNonBlank(requestDto.getDesignation(), candidate.getCurrentTitle(), jobPosition.getTitle()));
+        employeeRequest.setDepartment(firstNonBlank(requestDto.getDepartment(), jobPosition.getDepartment()));
+        employeeRequest.setPhone(trimToNull(candidate.getPhone()));
+        employeeRequest.setSalary(requestDto.getSalary() == null ? application.getExpectedSalary() : requestDto.getSalary());
+        employeeRequest.setJoinedDate(requestDto.getJoinedDate() == null ? LocalDate.now() : requestDto.getJoinedDate());
+        employeeRequest.setStatus(UserStatus.ACTIVE);
+        return employeeRequest;
+    }
+
+    private Team assignHiredEmployeeToTeam(Employee employee, RecruitmentHireRequestDto requestDto) {
+        if (requestDto.getTeamId() == null) {
+            return null;
+        }
+
+        Team team = teamRepository.findById(requestDto.getTeamId())
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found with id: " + requestDto.getTeamId()));
+        if (teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employee.getId()).isPresent()) {
+            throw new BadRequestException("Hired employee is already an active member of the selected team");
+        }
+
+        TeamMember teamMember = new TeamMember();
+        teamMember.setTeam(team);
+        teamMember.setEmployee(employee);
+        teamMember.setFunctionalRole(requestDto.getTeamFunctionalRole() == null
+                ? TeamFunctionalRole.MEMBER
+                : requestDto.getTeamFunctionalRole());
+        teamMemberRepository.save(teamMember);
+        auditLogService.logAction(
+                AuditActionType.ASSIGN,
+                AuditEntityType.TEAM,
+                team.getId(),
+                "{\"employeeId\":" + employee.getId() + "}"
+        );
+        return team;
+    }
+
+    private PlatformRole resolveHireRole(PlatformRole role) {
+        PlatformRole resolvedRole = role == null ? PlatformRole.EMPLOYEE : role;
+        if (!resolvedRole.isTenantBusinessRole() || resolvedRole == PlatformRole.PLATFORM_ADMIN) {
+            throw new BadRequestException("Only tenant business roles can be assigned when hiring a candidate");
+        }
+        return resolvedRole;
+    }
+
+    private String[] splitFullName(String fullName) {
+        String normalized = trimToNull(fullName);
+        if (normalized == null) {
+            return new String[]{"New", "Employee"};
+        }
+        String[] parts = normalized.split("\\s+");
+        if (parts.length == 1) {
+            return new String[]{parts[0], "Employee"};
+        }
+        String lastName = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+        return new String[]{parts[0], lastName};
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = trimToNull(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    private String generateTemporaryPassword() {
+        StringBuilder password = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+            int index = secureRandom.nextInt(TEMP_PASSWORD_CHARSET.length());
+            password.append(TEMP_PASSWORD_CHARSET.charAt(index));
+        }
+        return password.toString();
     }
 
     private void notifyCandidateStatus(CandidateApplication application) {

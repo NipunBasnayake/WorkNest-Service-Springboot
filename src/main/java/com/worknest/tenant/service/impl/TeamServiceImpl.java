@@ -296,7 +296,7 @@ public class TeamServiceImpl implements TeamService {
     public List<TeamResponseDto> listTeams() {
         authorizationService.requirePermission(Permission.VIEW_TEAM);
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        List<Team> teams = role == PlatformRole.EMPLOYEE
+        List<Team> teams = isScopedTeamRole(role)
                 ? findTeamsForEmployee(authorizationService.getCurrentEmployeeIdOrThrow())
                 : teamRepository.findAll();
         return toTeamResponses(teams);
@@ -358,7 +358,7 @@ public class TeamServiceImpl implements TeamService {
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
 
-        if (role == PlatformRole.EMPLOYEE) {
+        if (isScopedTeamRole(role)) {
             Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
             Page<Team> resultPage = teamRepository.searchByEmployeeVisibility(
                     currentEmployeeId,
@@ -389,6 +389,10 @@ public class TeamServiceImpl implements TeamService {
                 .totalElements(resultPage.getTotalElements())
                 .totalPages(resultPage.getTotalPages())
                 .build();
+    }
+
+    private boolean isScopedTeamRole(PlatformRole role) {
+        return role != null && !role.isTenantAdminEquivalent() && role != PlatformRole.HR;
     }
 
     private Team getTeamOrThrow(Long teamId) {

@@ -172,7 +172,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if (project == null) {
             return false;
         }
-        if (!getCurrentRoleOrThrow().isEmployeeOnly()) {
+        PlatformRole role = getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent() || role == PlatformRole.HR) {
             return true;
         }
 
@@ -207,7 +208,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if (task == null) {
             return false;
         }
-        if (!getCurrentRoleOrThrow().isEmployeeOnly()) {
+        PlatformRole role = getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent() || role == PlatformRole.HR) {
             return true;
         }
         return isTaskAssignee(task) || canAccessProject(task.getProject());
@@ -218,7 +220,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if (team == null) {
             return false;
         }
-        if (!getCurrentRoleOrThrow().isEmployeeOnly()) {
+        PlatformRole role = getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent() || role == PlatformRole.HR) {
             return true;
         }
 

@@ -52,14 +52,14 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> getEmployeeById(@PathVariable("id") Long id) {
         EmployeeResponseDto responseDto = employeeService.getEmployeeById(id);
         return ResponseEntity.ok(ApiResponse.success("Employee retrieved successfully", responseDto));
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<EmployeeResponseDto>>> listEmployees(
             @RequestParam(value = "role", required = false) PlatformRole role,
             @RequestParam(value = "status", required = false) UserStatus status,
@@ -129,7 +129,7 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id:\\d+}/skills")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<EmployeeSkillResponseDto>>> listSkills(@PathVariable("id") Long id) {
         List<EmployeeSkillResponseDto> response = employeeService.listSkillsByEmployee(id);
         return ResponseEntity.ok(ApiResponse.success("Employee skills retrieved successfully", response));

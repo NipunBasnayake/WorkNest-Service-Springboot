@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/chats/read-receipts")
+@RequestMapping("/api/{tenantSlug}/chats/read-receipts")
 public class ChatReadReceiptController {
 
     private final ChatReadReceiptService chatReadReceiptService;

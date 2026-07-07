@@ -1,6 +1,7 @@
 package com.worknest.security.jwt;
 
 import com.worknest.common.enums.PlatformRole;
+import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.entity.PlatformUser;
 import com.worknest.security.model.PlatformUserPrincipal;
 import io.jsonwebtoken.Claims;
@@ -38,10 +39,18 @@ public class JwtService {
     }
 
     public String generateAccessToken(PlatformUser platformUser) {
+        return generateAccessToken(platformUser, null);
+    }
+
+    public String generateAccessToken(PlatformUser platformUser, PlatformTenant tenant) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("uid", platformUser.getId());
         claims.put("role", platformUser.getRole().name());
         claims.put("tenantKey", platformUser.getTenantKey());
+        if (tenant != null) {
+            claims.put("tenantId", tenant.getId());
+            claims.put("tenantSlug", tenant.getSlug());
+        }
         return buildToken(claims, platformUser.getEmail());
     }
 
@@ -59,6 +68,25 @@ public class JwtService {
 
     public String extractTenantKey(String token) {
         return extractAllClaims(token).get("tenantKey", String.class);
+    }
+
+    public String extractTenantSlug(String token) {
+        return extractAllClaims(token).get("tenantSlug", String.class);
+    }
+
+    public Long extractTenantId(String token) {
+        Object value = extractAllClaims(token).get("tenantId");
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Long.parseLong(text);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     public PlatformRole extractRole(String token) {

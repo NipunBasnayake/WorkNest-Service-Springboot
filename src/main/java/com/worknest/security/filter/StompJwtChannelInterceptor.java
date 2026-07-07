@@ -1,12 +1,12 @@
 package com.worknest.security.filter;
 
 import com.worknest.common.enums.PlatformRole;
-import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.InvalidTokenException;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.security.jwt.JwtService;
 import com.worknest.security.model.PlatformUserPrincipal;
+import com.worknest.security.service.TenantSecurityValidator;
 import com.worknest.tenant.context.TenantContext;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.HrConversation;
@@ -17,22 +17,31 @@ import com.worknest.tenant.repository.HrConversationRepository;
 import com.worknest.tenant.repository.TeamChatRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import io.jsonwebtoken.JwtException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 public class StompJwtChannelInterceptor implements ChannelInterceptor {
+
+    private static final Logger log = LoggerFactory.getLogger(StompJwtChannelInterceptor.class);
+    private static final String SESSION_AUTHENTICATION_KEY = "worknest.stomp.authentication";
+    private static final String SESSION_TENANT_KEY = "worknest.stomp.tenantKey";
 
     private static final Pattern TEAM_CHAT_DESTINATION_PATTERN =
             Pattern.compile("^/(topic|app)/tenant/[^/]+/team-chat/(\\d+)(?:/.*)?$");
@@ -47,6 +56,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     private final TeamChatRepository teamChatRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final HrConversationRepository hrConversationRepository;
+    private final TenantSecurityValidator tenantSecurityValidator;
 
     public StompJwtChannelInterceptor(
             JwtService jwtService,
@@ -56,7 +66,8 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
             TeamChatRepository teamChatRepository,
             TeamMemberRepository teamMemberRepository,
             HrConversationRepository hrConversationRepository,
-            @Value("${app.tenant.header:X-Tenant-ID}") String tenantHeaderName) {
+            @Value("${app.tenant.header:X-Tenant-Slug}") String tenantHeaderName,
+            TenantSecurityValidator tenantSecurityValidator) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
         this.masterTenantLookupService = masterTenantLookupService;
@@ -65,66 +76,126 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
         this.teamMemberRepository = teamMemberRepository;
         this.hrConversationRepository = hrConversationRepository;
         this.tenantHeaderName = tenantHeaderName;
+        this.tenantSecurityValidator = tenantSecurityValidator;
     }
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
-        if (accessor.getCommand() == null) {
+
+        StompHeaderAccessor accessor =
+                MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+
+        if (accessor == null || accessor.getCommand() == null) {
             return message;
         }
 
-        if (accessor.getCommand() == StompCommand.CONNECT) {
-            authenticateConnect(accessor);
+        if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+            Authentication authentication = authenticateFromJwt(accessor);
+            accessor.setUser(authentication);
+            persistSessionAuthentication(accessor, authentication);
             return message;
         }
 
-        if (accessor.getCommand() == StompCommand.SEND || accessor.getCommand() == StompCommand.SUBSCRIBE) {
+        Authentication authentication = resolveSessionAuthentication(accessor);
+        if (authentication != null && accessor.getUser() == null) {
+            accessor.setUser(authentication);
+        }
+
+        if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())
+                || StompCommand.SEND.equals(accessor.getCommand())
+                || StompCommand.MESSAGE.equals(accessor.getCommand())) {
             enforceDestinationTenantBinding(accessor);
         }
 
         return message;
     }
 
-    private void authenticateConnect(StompHeaderAccessor accessor) {
-
+    private Authentication authenticateFromJwt(StompHeaderAccessor accessor) {
         String authHeader = accessor.getFirstNativeHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             throw new InvalidTokenException("Missing or invalid Authorization header for STOMP connection");
         }
 
         String token = authHeader.substring(7);
-        try {
-            String email = jwtService.extractUsername(token);
-            if (email == null) {
-                throw new InvalidTokenException("Invalid STOMP access token");
-            }
-
-            PlatformUserPrincipal principal = (PlatformUserPrincipal) userDetailsService.loadUserByUsername(email);
-            if (!jwtService.isTokenValid(token, principal)) {
-                throw new InvalidTokenException("Invalid STOMP access token");
-            }
-
-            validateTenantBinding(accessor, token, principal);
-
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
-            accessor.setUser(authentication);
-
-        } catch (JwtException | ClassCastException ex) {
-            throw new InvalidTokenException("Invalid STOMP access token");
+        String email = jwtService.extractUsername(token);
+        if (email == null) {
+            throw new InvalidTokenException("Invalid STOMP access token — could not extract username");
         }
+
+        PlatformUserPrincipal principal = (PlatformUserPrincipal) userDetailsService.loadUserByUsername(email);
+        if (!jwtService.isTokenValid(token, principal)) {
+            throw new InvalidTokenException("Invalid STOMP access token — not valid");
+        }
+
+        validateTenantBinding(accessor, token, principal);
+
+        UsernamePasswordAuthenticationToken authentication =
+                UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities());
+        accessor.setUser(authentication);
+
+        log.debug("[WS] Handshake successful for user={} on tenant={}", email, principal.getTenantKey());
+        return authentication;
     }
 
     private void enforceDestinationTenantBinding(StompHeaderAccessor accessor) {
-        if (!(accessor.getUser() instanceof UsernamePasswordAuthenticationToken authentication) ||
-                !(authentication.getPrincipal() instanceof PlatformUserPrincipal principal)) {
+        Authentication authentication = resolveSessionAuthentication(accessor);
+        if (!(authentication instanceof UsernamePasswordAuthenticationToken stompAuthentication) ||
+                !(stompAuthentication.getPrincipal() instanceof PlatformUserPrincipal principal)) {
             throw new InvalidTokenException("STOMP session is not authenticated");
         }
 
         String destination = accessor.getDestination();
-        validateDestinationTenant(principal, destination);
-        validateChatDestinationAccess(principal, destination);
+        String tenantKey = resolveTenantKey(accessor, principal);
+        validateDestinationTenant(principal, tenantKey, destination);
+        validateChatDestinationAccess(principal, tenantKey, destination);
+    }
+
+    private Authentication resolveSessionAuthentication(StompHeaderAccessor accessor) {
+        if (accessor.getUser() instanceof Authentication authentication) {
+            return authentication;
+        }
+
+        Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+        if (sessionAttributes == null) {
+            return null;
+        }
+
+        Object storedAuthentication = sessionAttributes.get(SESSION_AUTHENTICATION_KEY);
+        if (storedAuthentication instanceof Authentication authentication) {
+            return authentication;
+        }
+
+        return null;
+    }
+
+    private void persistSessionAuthentication(StompHeaderAccessor accessor, Authentication authentication) {
+        Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+        if (sessionAttributes == null) {
+            return;
+        }
+
+        sessionAttributes.put(SESSION_AUTHENTICATION_KEY, authentication);
+        if (authentication.getPrincipal() instanceof PlatformUserPrincipal principal && principal.getTenantKey() != null) {
+            sessionAttributes.put(SESSION_TENANT_KEY, principal.getTenantKey());
+        }
+    }
+
+    private String resolveTenantKey(StompHeaderAccessor accessor, PlatformUserPrincipal principal) {
+        if (principal.getTenantKey() != null && !principal.getTenantKey().isBlank()) {
+            return principal.getTenantKey();
+        }
+
+        Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+        if (sessionAttributes == null) {
+            return null;
+        }
+
+        Object storedTenantKey = sessionAttributes.get(SESSION_TENANT_KEY);
+        if (storedTenantKey instanceof String tenantKey && !tenantKey.isBlank()) {
+            return tenantKey;
+        }
+
+        return null;
     }
 
     private void validateTenantBinding(
@@ -138,6 +209,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
         }
 
         String tokenTenant = jwtService.extractTenantKey(token);
+        String tokenTenantSlug = jwtService.extractTenantSlug(token);
         String userTenant = principal.getTenantKey();
 
         if (tokenTenant == null || userTenant == null || !tokenTenant.equalsIgnoreCase(userTenant)) {
@@ -145,19 +217,34 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
         }
 
         String requestTenant = accessor.getFirstNativeHeader(tenantHeaderName);
-        if (requestTenant == null || !requestTenant.equalsIgnoreCase(tokenTenant)) {
-            throw new ForbiddenOperationException("STOMP tenant header does not match token tenant");
+        if (requestTenant == null) {
+            requestTenant = accessor.getFirstNativeHeader("X-Tenant-Slug");
+        }
+        if (requestTenant == null) {
+            requestTenant = accessor.getFirstNativeHeader("X-Tenant-ID");
+        }
+
+        if (requestTenant == null) {
+            throw new ForbiddenOperationException("STOMP tenant header is missing");
+        }
+
+        // Validate using TenantSecurityValidator
+        try {
+            com.worknest.multitenancy.context.TenantContextHolder.setTenantSlug(tokenTenantSlug);
+            tenantSecurityValidator.validateTenantSecurity(tokenTenantSlug, requestTenant);
+        } finally {
+            com.worknest.multitenancy.context.TenantContextHolder.clear();
         }
 
         boolean activeTenant = masterTenantLookupService.findByTenantKey(tokenTenant)
-                .map(tenant -> tenant.getStatus() == TenantStatus.ACTIVE)
+                .map(tenant -> com.worknest.common.enums.TenantStatus.ACTIVE == tenant.getStatus())
                 .orElse(false);
         if (!activeTenant) {
             throw new ForbiddenOperationException("Tenant is not active for STOMP connection");
         }
     }
 
-    private void validateDestinationTenant(PlatformUserPrincipal principal, String destination) {
+    private void validateDestinationTenant(PlatformUserPrincipal principal, String tenantKey, String destination) {
         if (destination == null) {
             return;
         }
@@ -176,14 +263,13 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
             throw new ForbiddenOperationException("Platform-level users cannot access tenant websocket destinations");
         }
 
-        if (principal.getTenantKey() == null ||
-                !tenantFromDestination.equalsIgnoreCase(principal.getTenantKey())) {
+        if (tenantKey == null || !tenantFromDestination.equalsIgnoreCase(tenantKey)) {
             throw new ForbiddenOperationException("STOMP destination tenant does not match authenticated tenant");
         }
     }
 
-    private void validateChatDestinationAccess(PlatformUserPrincipal principal, String destination) {
-        if (destination == null || principal.getTenantKey() == null) {
+    private void validateChatDestinationAccess(PlatformUserPrincipal principal, String tenantKey, String destination) {
+        if (destination == null || tenantKey == null) {
             return;
         }
 
@@ -191,7 +277,7 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
             return;
         }
 
-        runInTenantContext(principal.getTenantKey(), () -> {
+        runInTenantContext(tenantKey, () -> {
             Matcher teamMatcher = TEAM_CHAT_DESTINATION_PATTERN.matcher(destination);
             if (teamMatcher.matches()) {
                 long teamChatId = parseLongOrThrow(teamMatcher.group(2), "Invalid team chat destination");

@@ -16,7 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/analytics")
+@RequestMapping("/api/{tenantSlug}/analytics")
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;

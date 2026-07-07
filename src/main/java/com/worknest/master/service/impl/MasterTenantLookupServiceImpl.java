@@ -29,12 +29,31 @@ public class MasterTenantLookupServiceImpl implements MasterTenantLookupService 
             return Optional.empty();
         }
 
-        String sql = "SELECT id, tenant_key, company_name, database_name, db_url, db_username, " +
-                     "db_password, status, created_at, updated_at " +
+        String sql = "SELECT id, tenant_key, slug, company_name, database_name, db_url, db_username, " +
+                 "db_password, status, active, created_at, updated_at " +
                      "FROM platform_tenants WHERE tenant_key = ?";
 
         try {
             PlatformTenant tenant = masterJdbcTemplate.queryForObject(sql, new TenantRowMapper(), normalizedTenantKey);
+            return Optional.ofNullable(tenant);
+        } catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<PlatformTenant> findBySlug(String slug) {
+        String normalizedSlug = normalizeTenantKey(slug);
+        if (normalizedSlug == null) {
+            return Optional.empty();
+        }
+
+        String sql = "SELECT id, tenant_key, slug, company_name, database_name, db_url, db_username, " +
+                     "db_password, status, active, created_at, updated_at " +
+                     "FROM platform_tenants WHERE slug = ?";
+
+        try {
+            PlatformTenant tenant = masterJdbcTemplate.queryForObject(sql, new TenantRowMapper(), normalizedSlug);
             return Optional.ofNullable(tenant);
         } catch (EmptyResultDataAccessException e) {
             return Optional.empty();
@@ -55,12 +74,14 @@ public class MasterTenantLookupServiceImpl implements MasterTenantLookupService 
             PlatformTenant tenant = new PlatformTenant();
             tenant.setId(rs.getLong("id"));
             tenant.setTenantKey(rs.getString("tenant_key"));
+            tenant.setSlug(rs.getString("slug"));
             tenant.setCompanyName(rs.getString("company_name"));
             tenant.setDatabaseName(rs.getString("database_name"));
             tenant.setDbUrl(rs.getString("db_url"));
             tenant.setDbUsername(rs.getString("db_username"));
             tenant.setDbPassword(rs.getString("db_password"));
             tenant.setStatus(parseTenantStatus(rs.getString("status")));
+            tenant.setActive(rs.getBoolean("active"));
             tenant.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
             tenant.setUpdatedAt(rs.getTimestamp("updated_at").toLocalDateTime());
             return tenant;

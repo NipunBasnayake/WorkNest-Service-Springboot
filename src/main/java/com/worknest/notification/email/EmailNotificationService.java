@@ -251,4 +251,40 @@ public class EmailNotificationService {
                 templateFactory.attendanceConfirmation(recipientName, action, actionTime);
         emailDispatchService.sendHtmlEmailAsync(toEmail, content);
     }
+
+    public void sendCandidateStatusUpdateEmail(
+            String toEmail,
+            String recipientName,
+            String candidateName,
+            String jobTitle,
+            String status,
+            String updatedBy) {
+        EmailContent content = templateFactory.candidateApplicationUpdate(
+                recipientName,
+                candidateName,
+                jobTitle,
+                status,
+                updatedBy
+        );
+        emailDispatchService.sendHtmlEmailAsync(toEmail, content);
+    }
+
+    public void sendInterviewScheduledEmail(
+            String toEmail,
+            String recipientName,
+            String candidateName,
+            String jobTitle,
+            LocalDateTime scheduledAt,
+            String mode,
+            String interviewerName) {
+        EmailContent content = templateFactory.interviewScheduled(
+                recipientName,
+                candidateName,
+                jobTitle,
+                scheduledAt,
+                mode,
+                interviewerName
+        );
+        emailDispatchService.sendHtmlEmailAsync(toEmail, content);
+    }
 }

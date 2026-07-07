@@ -131,6 +131,7 @@ public class ProjectServiceImpl implements ProjectService {
         authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
         enforceProjectManagementAccess(project);
+        ensureProjectOpenForMutation(project, "editing project details");
 
         validateProjectDates(requestDto.getStartDate(), requestDto.getEndDate());
         validateProjectStatusTransition(project.getStatus(), requestDto.getStatus());
@@ -201,6 +202,7 @@ public class ProjectServiceImpl implements ProjectService {
         authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
         enforceProjectManagementAccess(project);
+        ensureProjectOpenForMutation(project, "changing team assignments");
         ProjectTeam projectTeam = projectTeamRepository.findByProjectIdAndTeamId(projectId, teamId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project-team assignment not found"));
         projectTeamRepository.delete(projectTeam);
@@ -217,6 +219,7 @@ public class ProjectServiceImpl implements ProjectService {
         authorizationService.requirePermission(Permission.MANAGE_PROJECT);
         Project project = getProjectOrThrow(projectId);
         enforceProjectManagementAccess(project);
+        ensureProjectOpenForMutation(project, "deleting the project");
         long taskCount = taskRepository.countByProjectId(projectId);
         if (taskCount > 0) {
             throw new BadRequestException("Cannot delete project with existing tasks. Delete tasks first.");
@@ -241,7 +244,7 @@ public class ProjectServiceImpl implements ProjectService {
     public List<ProjectResponseDto> listProjects() {
         authorizationService.requirePermission(Permission.VIEW_PROJECT);
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        if (role == PlatformRole.EMPLOYEE) {
+        if (isScopedProjectRole(role)) {
             Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
             List<Project> readableProjects = listReadableProjectsForEmployee(currentEmployeeId);
             readableProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
@@ -284,7 +287,7 @@ public class ProjectServiceImpl implements ProjectService {
         String resolvedSortBy = isSortable(sortBy) ? sortBy : "createdAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
 
-        if (role == PlatformRole.EMPLOYEE) {
+        if (isScopedProjectRole(role)) {
             Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
             Page<Project> resultPage = projectRepository.searchReadableByEmployee(
                     currentEmployeeId,
@@ -402,16 +405,26 @@ public class ProjectServiceImpl implements ProjectService {
             return;
         }
 
-        if ((currentStatus == ProjectStatus.COMPLETED || currentStatus == ProjectStatus.CANCELLED)
-                && currentStatus != newStatus) {
-            throw new BadRequestException("Cannot change status after project is " + currentStatus);
+        if (isClosedProjectStatus(currentStatus) && currentStatus != newStatus) {
+            if (newStatus == ProjectStatus.IN_PROGRESS) {
+                return;
+            }
+            throw new BadRequestException("Closed projects can only be reopened to IN_PROGRESS before further changes");
         }
     }
 
     private void ensureProjectAllowsTeamAssignment(Project project) {
-        if (project.getStatus() == ProjectStatus.COMPLETED || project.getStatus() == ProjectStatus.CANCELLED) {
-            throw new BadRequestException("Cannot assign teams to a project in status: " + project.getStatus());
+        ensureProjectOpenForMutation(project, "changing team assignments");
+    }
+
+    private void ensureProjectOpenForMutation(Project project, String action) {
+        if (project != null && isClosedProjectStatus(project.getStatus())) {
+            throw new BadRequestException("Project is " + project.getStatus() + " and locked. Reopen it before " + action + ".");
         }
+    }
+
+    private boolean isClosedProjectStatus(ProjectStatus status) {
+        return status == ProjectStatus.COMPLETED || status == ProjectStatus.CANCELLED;
     }
 
     private ProjectResponseDto toProjectResponse(Project project) {
@@ -699,7 +712,7 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private boolean canReadProject(Project project, PlatformRole role, Long currentEmployeeId) {
-        if (role != PlatformRole.EMPLOYEE) {
+        if (!isScopedProjectRole(role)) {
             return true;
         }
         if (currentEmployeeId == null) {
@@ -729,6 +742,10 @@ public class ProjectServiceImpl implements ProjectService {
             return;
         }
         throw new ForbiddenOperationException("Only tenant admins can create projects");
+    }
+
+    private boolean isScopedProjectRole(PlatformRole role) {
+        return role != null && !role.isTenantAdminEquivalent() && role != PlatformRole.HR;
     }
 
     private Employee resolveProjectCreatorEmployeeOrNull() {

@@ -3,6 +3,8 @@ package com.worknest.auth.controller;
 import com.worknest.auth.dto.*;
 import com.worknest.auth.service.AuthService;
 import com.worknest.common.api.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,23 +22,29 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponseDto>> login(
-            @Valid @RequestBody LoginRequestDto requestDto) {
-        return ResponseEntity.ok(ApiResponse.success("Login successful", authService.login(requestDto)));
+            @Valid @RequestBody LoginRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        return ResponseEntity.ok(ApiResponse.success("Login successful", authService.login(requestDto, request, response)));
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<RefreshTokenResponseDto>> refreshToken(
-            @Valid @RequestBody RefreshTokenRequestDto requestDto) {
+            @Valid @RequestBody(required = false) RefreshTokenRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         return ResponseEntity.ok(ApiResponse.success(
                 "Token refreshed successfully",
-                authService.refreshAccessToken(requestDto)
+                authService.refreshAccessToken(requestDto == null ? new RefreshTokenRequestDto() : requestDto, request, response)
         ));
     }
 
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<LogoutResponseDto>> logout(
-            @Valid @RequestBody LogoutRequestDto requestDto) {
-        return ResponseEntity.ok(ApiResponse.success("Logout successful", authService.logout(requestDto)));
+            @Valid @RequestBody(required = false) LogoutRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        return ResponseEntity.ok(ApiResponse.success("Logout successful", authService.logout(requestDto == null ? new LogoutRequestDto() : requestDto, request, response)));
     }
 
     @PostMapping("/forgot-password")
@@ -72,5 +80,22 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<AuthUserDto>> getCurrentUser() {
         return ResponseEntity.ok(ApiResponse.success("Current user retrieved", authService.getCurrentUser()));
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<ApiResponse<AuthSessionsResponseDto>> getActiveSessions(HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Active sessions retrieved", authService.getActiveSessions(request)));
+    }
+
+    @DeleteMapping("/sessions/{id}")
+    public ResponseEntity<ApiResponse<AuthSessionRevocationResponseDto>> revokeSession(
+            @PathVariable("id") Long id,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Session revoked", authService.revokeSession(id, request)));
+    }
+
+    @PostMapping("/sessions/revoke-others")
+    public ResponseEntity<ApiResponse<AuthSessionRevocationResponseDto>> revokeOtherSessions(HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Other sessions revoked", authService.revokeOtherSessions(request)));
     }
 }

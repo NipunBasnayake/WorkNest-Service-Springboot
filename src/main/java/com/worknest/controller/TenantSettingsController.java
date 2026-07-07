@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/tenant/settings")
+@RequestMapping("/api/{tenantSlug}/settings")
 public class TenantSettingsController {
 
     private final WorkspaceSettingsService workspaceSettingsService;

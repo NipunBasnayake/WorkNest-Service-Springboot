@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @Validated
-@RequestMapping("/api/tenant/attendance")
+@RequestMapping("/api/{tenantSlug}/attendance")
 public class AttendanceController {
 
     private final AttendanceService attendanceService;
@@ -81,14 +81,14 @@ public class AttendanceController {
     }
 
     @GetMapping("/employee/{employeeId}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByEmployee(@PathVariable("employeeId") @Positive Long employeeId) {
         List<AttendanceResponseDto> response = attendanceService.getByEmployee(employeeId);
         return ResponseEntity.ok(ApiResponse.success("Attendance records retrieved", response));
     }
 
     @GetMapping("/date/{workDate}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByDate(
             @PathVariable("workDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
         List<AttendanceResponseDto> response = attendanceService.getByDate(workDate);
@@ -96,7 +96,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/summary/daily")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AttendanceDailySummaryDto>> getDailySummary(
             @RequestParam("workDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate workDate) {
         AttendanceDailySummaryDto response = attendanceService.getDailySummary(workDate);
@@ -104,7 +104,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/summary/monthly")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AttendanceMonthlySummaryDto>> getMonthlySummary(
             @RequestParam("employeeId") @Positive Long employeeId,
             @RequestParam("year") @Min(2000) int year,

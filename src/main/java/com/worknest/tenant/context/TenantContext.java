@@ -1,19 +1,19 @@
 package com.worknest.tenant.context;
 
+import com.worknest.multitenancy.context.TenantContextHolder;
+
 public class TenantContext {
 
-    private static final ThreadLocal<String> CURRENT_TENANT = new ThreadLocal<>();
-
     public static void setTenantId(String tenantId) {
-        CURRENT_TENANT.set(tenantId);
+        TenantContextHolder.setTenantSlug(tenantId);
     }
 
     public static String getTenantId() {
-        return CURRENT_TENANT.get();
+        return TenantContextHolder.getTenantSlug();
     }
 
     public static void clear() {
-        CURRENT_TENANT.remove();
+        TenantContextHolder.clear();
     }
 
     private TenantContext() {

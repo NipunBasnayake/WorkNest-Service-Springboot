@@ -16,5 +16,8 @@ public class ChatReadReceiptResponseDto {
     private ChatType chatType;
     private Long messageId;
     private EmployeeSimpleDto employee;
+    private EmployeeSimpleDto reader;
+    private Long readerEmployeeId;
+    private String readerName;
     private LocalDateTime readAt;
 }

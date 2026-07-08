@@ -44,13 +44,13 @@ public class RecruitmentController {
     }
 
     @GetMapping("/jobs/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<JobPositionResponseDto>> getJob(@PathVariable("id") @Positive Long id) {
         return ResponseEntity.ok(ApiResponse.success("Job position retrieved successfully", recruitmentService.getJobPositionById(id)));
     }
 
     @GetMapping("/jobs")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<JobPositionResponseDto>>> listJobs(
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
@@ -80,13 +80,13 @@ public class RecruitmentController {
     }
 
     @GetMapping("/candidates/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<CandidateResponseDto>> getCandidate(@PathVariable("id") @Positive Long id) {
         return ResponseEntity.ok(ApiResponse.success("Candidate retrieved successfully", recruitmentService.getCandidateById(id)));
     }
 
     @GetMapping("/candidates")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<CandidateResponseDto>>> listCandidates(
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "page", defaultValue = "0") @PositiveOrZero int page,
@@ -109,7 +109,7 @@ public class RecruitmentController {
     }
 
     @GetMapping("/candidates/{id:\\d+}/comments")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<CandidateCommentResponseDto>>> listComments(@PathVariable("id") @Positive Long id) {
         return ResponseEntity.ok(ApiResponse.success("Candidate comments retrieved successfully", recruitmentService.listCandidateComments(id)));
     }
@@ -142,13 +142,13 @@ public class RecruitmentController {
     }
 
     @GetMapping("/applications/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<CandidateApplicationResponseDto>> getApplication(@PathVariable("id") @Positive Long id) {
         return ResponseEntity.ok(ApiResponse.success("Application retrieved successfully", recruitmentService.getApplicationById(id)));
     }
 
     @GetMapping("/applications")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<CandidateApplicationResponseDto>>> listApplications(
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "status", required = false) CandidatePipelineStatus status,
@@ -161,7 +161,7 @@ public class RecruitmentController {
     }
 
     @GetMapping("/pipeline")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<RecruitmentPipelineResponseDto>> getPipeline(@RequestParam(value = "jobPositionId", required = false) Long jobPositionId) {
         return ResponseEntity.ok(ApiResponse.success("Pipeline retrieved successfully", recruitmentService.getPipeline(jobPositionId)));
     }
@@ -185,7 +185,7 @@ public class RecruitmentController {
     }
 
     @GetMapping("/interviews")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<InterviewResponseDto>>> listInterviews(
             @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
@@ -193,7 +193,7 @@ public class RecruitmentController {
     }
 
     @GetMapping("/dashboard")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<RecruitmentDashboardDto>> getDashboard() {
         return ResponseEntity.ok(ApiResponse.success("Recruitment dashboard retrieved successfully", recruitmentService.getDashboard()));
     }

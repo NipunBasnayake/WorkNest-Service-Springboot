@@ -199,7 +199,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         Candidate candidate = getCandidateOrThrow(candidateId);
         FileStorageService.StoredFileResult storedFileResult = fileStorageService.store(resumeFile, "doc");
         candidate.setResumeFileName(storedFileResult.name());
-        candidate.setResumeFileUrl(storedFileResult.url());
+        candidate.setResumeFileUrl(storedFileResult.path());
         candidate.setResumeMimeType(storedFileResult.mimeType());
         candidate.setResumeFileSizeBytes(storedFileResult.size());
         Candidate updated = candidateRepository.save(candidate);
@@ -781,7 +781,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .source(candidate.getSource())
                 .summary(candidate.getSummary())
                 .resumeFileName(candidate.getResumeFileName())
-                .resumeFileUrl(candidate.getResumeFileUrl())
+                .resumeFileUrl(fileStorageService.toPublicUrl(candidate.getResumeFileUrl()))
                 .resumeMimeType(candidate.getResumeMimeType())
                 .resumeFileSizeBytes(candidate.getResumeFileSizeBytes())
                 .createdAt(candidate.getCreatedAt())

@@ -349,10 +349,10 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         authorizationService.requirePermission(Permission.VIEW_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
-        if (currentRole == PlatformRole.EMPLOYEE) {
+        if (!currentRole.isTenantAdminEquivalent() && !currentRole.isHrEquivalent()) {
             Employee currentEmployee = getCurrentEmployeeOrThrow();
             if (!leaveRequest.getEmployee().getId().equals(currentEmployee.getId())) {
-                throw new ForbiddenOperationException("Employees can only view their own leave requests");
+                throw new ForbiddenOperationException("You can only view your own leave requests");
             }
         }
         return toLeaveResponse(leaveRequest, true);

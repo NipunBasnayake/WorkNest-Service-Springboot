@@ -131,13 +131,15 @@ public class AuthServiceImpl implements AuthService {
         PlatformTenant tenant = resolveTenantForUser(user);
         String accessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
         String csrfToken = generateSecureToken();
+        String refreshTokenValue = resolveRefreshTokenValue(refreshToken);
 
         platformUserService.updateLastLogin(user.getId());
-        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(refreshToken), csrfToken, computeCookieMaxAgeSeconds(refreshToken));
+        authCookieService.issueAuthCookies(response, refreshTokenValue, csrfToken, computeCookieMaxAgeSeconds(refreshToken));
 
         return LoginResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(accessToken)
+                .refreshToken(refreshTokenValue)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
                 .csrfToken(csrfToken)
                 .sessionId(refreshToken.getId())
@@ -149,8 +151,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        authCookieService.validateCsrfToken(request);
-        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
+        if (requestRefreshToken == null) {
+            authCookieService.validateCsrfToken(request);
+        }
+        String refreshTokenValue = requestRefreshToken != null
+                ? requestRefreshToken
+                : authCookieService.resolveRefreshToken(request, null);
         RefreshToken currentToken = refreshTokenService.validateTokenForRefresh(refreshTokenValue);
         PlatformUser user = currentToken.getPlatformUser();
         String clientIp = extractClientIpAddress(request);
@@ -175,12 +182,14 @@ public class AuthServiceImpl implements AuthService {
         PlatformTenant tenant = resolveTenantForUser(user);
         String newAccessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
         String csrfToken = generateSecureToken();
+        String rotatedRefreshTokenValue = resolveRefreshTokenValue(rotatedToken);
 
-        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(rotatedToken), csrfToken, computeCookieMaxAgeSeconds(rotatedToken));
+        authCookieService.issueAuthCookies(response, rotatedRefreshTokenValue, csrfToken, computeCookieMaxAgeSeconds(rotatedToken));
 
         return RefreshTokenResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(newAccessToken)
+                .refreshToken(rotatedRefreshTokenValue)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
                 .csrfToken(csrfToken)
                 .sessionId(rotatedToken.getId())
@@ -190,8 +199,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LogoutResponseDto logout(LogoutRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        authCookieService.validateCsrfToken(request);
-        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
+        if (requestRefreshToken == null) {
+            authCookieService.validateCsrfToken(request);
+        }
+        String refreshTokenValue = requestRefreshToken != null
+                ? requestRefreshToken
+                : authCookieService.resolveRefreshToken(request, null);
         RefreshToken token = refreshTokenService.validateToken(refreshTokenValue);
         PlatformUser tokenUser = token.getPlatformUser();
 
@@ -497,6 +511,14 @@ public class AuthServiceImpl implements AuthService {
         }
         String normalized = email.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
     }
 
     private String resolveRequestedTenantKey(String tenantKeyFromPayload) {

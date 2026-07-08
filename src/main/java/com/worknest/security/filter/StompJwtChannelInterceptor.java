@@ -297,10 +297,6 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     }
 
     private void validateTeamChatAccess(PlatformUserPrincipal principal, Long teamChatId) {
-        if (principal.getRole() == PlatformRole.TENANT_ADMIN || principal.getRole() == PlatformRole.ADMIN) {
-            return;
-        }
-
         TeamChat teamChat = teamChatRepository.findByIdWithTeamAndManager(teamChatId)
                 .orElseThrow(() -> new ForbiddenOperationException("Team chat not found"));
         Employee currentEmployee = getEmployeeByEmailOrThrow(principal.getUsername());
@@ -317,6 +313,12 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
     }
 
     private void validateHrChatAccess(PlatformUserPrincipal principal, Long conversationId) {
+        if (principal.getRole() == PlatformRole.TENANT_ADMIN
+                || principal.getRole() == PlatformRole.ADMIN
+                || principal.getRole() == PlatformRole.HR) {
+            return;
+        }
+
         HrConversation conversation = hrConversationRepository.findByIdWithParticipants(conversationId)
                 .orElseThrow(() -> new ForbiddenOperationException("HR conversation not found"));
         Employee currentEmployee = getEmployeeByEmailOrThrow(principal.getUsername());

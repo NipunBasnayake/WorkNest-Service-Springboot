@@ -18,7 +18,7 @@ import java.util.UUID;
 @Service
 public class FileStorageService {
 
-    private static final long MAX_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
+    private static final long MAX_FILE_SIZE_BYTES = 10L * 1024L * 1024L;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "pdf");
 
     private final Path frontendPublicUploadsPath;
@@ -40,7 +40,7 @@ public class FileStorageService {
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new BadRequestException("File size exceeds 5MB limit");
+            throw new BadRequestException("File size exceeds 10MB limit");
         }
 
         String originalName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "file" : file.getOriginalFilename());

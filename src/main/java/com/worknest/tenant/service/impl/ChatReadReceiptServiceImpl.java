@@ -1,5 +1,6 @@
 package com.worknest.tenant.service.impl;
 
+import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.security.util.SecurityUtils;
@@ -89,11 +90,13 @@ public class ChatReadReceiptServiceImpl implements ChatReadReceiptService {
 
                 boolean participant = hrMessage.getConversation().getEmployee().getId().equals(currentEmployee.getId())
                         || hrMessage.getConversation().getHr().getId().equals(currentEmployee.getId());
-                if (!participant) {
+                boolean privileged = isTenantAdminEquivalent();
+                boolean hrResponder = isHrEquivalent();
+                if (!participant && !privileged && !hrResponder) {
                     throw new ForbiddenOperationException("You are not a participant of this HR conversation");
                 }
 
-                if (markRead && !hrMessage.getSender().getId().equals(currentEmployee.getId())) {
+                if (markRead && !privileged && !hrMessage.getSender().getId().equals(currentEmployee.getId())) {
                     hrMessage.setRead(true);
                     hrMessageRepository.save(hrMessage);
                 }
@@ -115,6 +118,16 @@ public class ChatReadReceiptServiceImpl implements ChatReadReceiptService {
         }
     }
 
+    private boolean isTenantAdminEquivalent() {
+        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        return role.isTenantAdminEquivalent();
+    }
+
+    private boolean isHrEquivalent() {
+        PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        return role.isHrEquivalent();
+    }
+
     private Employee getCurrentEmployeeOrThrow() {
         String email = securityUtils.getCurrentUserEmailOrThrow();
         return employeeRepository.findByEmailIgnoreCase(email)
@@ -122,12 +135,26 @@ public class ChatReadReceiptServiceImpl implements ChatReadReceiptService {
     }
 
     private ChatReadReceiptResponseDto toResponse(ChatReadReceipt readReceipt) {
+        Employee employee = readReceipt.getEmployee();
         return ChatReadReceiptResponseDto.builder()
                 .id(readReceipt.getId())
                 .chatType(readReceipt.getChatType())
                 .messageId(readReceipt.getMessageId())
-                .employee(tenantDtoMapper.toEmployeeSimple(readReceipt.getEmployee()))
+                .employee(tenantDtoMapper.toEmployeeSimple(employee))
+                .reader(tenantDtoMapper.toEmployeeSimple(employee))
+                .readerEmployeeId(employee.getId())
+                .readerName(buildFullName(employee))
                 .readAt(readReceipt.getReadAt())
                 .build();
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

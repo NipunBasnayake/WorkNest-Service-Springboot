@@ -72,6 +72,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .ignoringRequestMatchers(
+                                "/api/**",
                                 "/api/auth/login",
                                 "/api/auth/register",
                                 "/api/auth/register-company",

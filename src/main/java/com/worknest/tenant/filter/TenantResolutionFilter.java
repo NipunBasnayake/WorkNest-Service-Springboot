@@ -92,11 +92,14 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
             }
 
             TenantContextHolder.setTenantSlug(tenant.getSlug());
-            MDC.put("tenantId", tenant.getSlug());
+            TenantContextHolder.setTenantKey(tenant.getTenantKey());
+            MDC.put("tenantId", tenant.getTenantKey());
+            MDC.put("tenantSlug", tenant.getSlug());
             filterChain.doFilter(request, response);
         } finally {
             TenantContextHolder.clear();
             MDC.remove("tenantId");
+            MDC.remove("tenantSlug");
             MDC.remove("traceId");
         }
     }

@@ -31,7 +31,7 @@ public class TaskController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> createTask(
             @Valid @RequestBody TaskCreateRequestDto requestDto) {
         TaskResponseDto response = taskService.createTask(requestDto);
@@ -40,7 +40,7 @@ public class TaskController {
     }
 
     @PutMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> updateTask(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskUpdateRequestDto requestDto) {
@@ -49,7 +49,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> patchTask(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskUpdateRequestDto requestDto) {
@@ -58,7 +58,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}/status")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','EMPLOYEE')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> changeStatus(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskStatusUpdateRequestDto requestDto) {
@@ -67,7 +67,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}/priority")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> changePriority(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskPriorityUpdateRequestDto requestDto) {
@@ -76,7 +76,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}/assignee")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> changeAssignee(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskAssigneeUpdateRequestDto requestDto) {
@@ -85,7 +85,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}/assign")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> assignTask(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskAssigneeUpdateRequestDto requestDto) {
@@ -94,7 +94,7 @@ public class TaskController {
     }
 
     @PatchMapping("/{id:\\d+}/due-date")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<TaskResponseDto>> changeDueDate(
             @PathVariable("id") @Positive Long id,
             @Valid @RequestBody TaskDueDateUpdateRequestDto requestDto) {
@@ -103,7 +103,7 @@ public class TaskController {
     }
 
     @DeleteMapping("/{id:\\d+}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER')")
     public ResponseEntity<ApiResponse<Void>> deleteTask(@PathVariable("id") @Positive Long id) {
         taskService.deleteTask(id);
         return ResponseEntity.ok(ApiResponse.success("Task deleted successfully"));

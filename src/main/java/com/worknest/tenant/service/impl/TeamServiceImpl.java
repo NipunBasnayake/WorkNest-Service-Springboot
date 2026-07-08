@@ -13,6 +13,7 @@ import com.worknest.tenant.dto.team.*;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Team;
+import com.worknest.tenant.entity.TeamChat;
 import com.worknest.tenant.entity.TeamMember;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
@@ -94,6 +95,7 @@ public class TeamServiceImpl implements TeamService {
 
         Team saved = teamRepository.save(team);
         ensureManagerMembership(saved, manager);
+        ensureTeamChatExists(saved);
         auditLogService.logAction(
                 AuditActionType.CREATE,
                 AuditEntityType.TEAM,
@@ -122,6 +124,7 @@ public class TeamServiceImpl implements TeamService {
 
         Team updated = teamRepository.save(team);
         ensureManagerMembership(updated, manager);
+        ensureTeamChatExists(updated);
         auditLogService.logAction(
                 AuditActionType.UPDATE,
                 AuditEntityType.TEAM,
@@ -139,6 +142,7 @@ public class TeamServiceImpl implements TeamService {
         team.setManager(manager);
         Team updated = teamRepository.save(team);
         ensureManagerMembership(updated, manager);
+        ensureTeamChatExists(updated);
         notifyTeamLeaderChange(updated);
         auditLogService.logAction(
                 AuditActionType.ASSIGN,
@@ -483,6 +487,25 @@ public class TeamServiceImpl implements TeamService {
             return true;
         }
         return teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employeeId).isPresent();
+    }
+
+    private void ensureTeamChatExists(Team team) {
+        if (team == null || team.getId() == null) {
+            return;
+        }
+
+        teamChatRepository.findByTeamId(team.getId()).orElseGet(() -> {
+            TeamChat created = new TeamChat();
+            created.setTeam(team);
+            TeamChat saved = teamChatRepository.save(created);
+            auditLogService.logAction(
+                    AuditActionType.CREATE,
+                    AuditEntityType.TEAM_CHAT,
+                    saved.getId(),
+                    "{\"teamId\":" + team.getId() + "}"
+            );
+            return saved;
+        });
     }
 
     private List<Team> findTeamsForEmployee(Long employeeId) {

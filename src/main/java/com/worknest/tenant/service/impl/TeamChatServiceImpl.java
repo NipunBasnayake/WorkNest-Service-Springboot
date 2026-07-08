@@ -1,10 +1,10 @@
 package com.worknest.tenant.service.impl;
 
-import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
+import com.worknest.tenant.dto.common.EmployeeSimpleDto;
 import com.worknest.tenant.dto.chat.TeamChatCreateRequestDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageResponseDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageSendRequestDto;
@@ -16,8 +16,8 @@ import com.worknest.tenant.entity.TeamChatMessage;
 import com.worknest.tenant.entity.TeamMember;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
+import com.worknest.tenant.enums.ChatType;
 import com.worknest.tenant.enums.NotificationType;
-import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.TeamChatMessageRepository;
 import com.worknest.tenant.repository.TeamChatRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
@@ -25,12 +25,15 @@ import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
 import com.worknest.tenant.service.TeamChatService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -42,7 +45,6 @@ public class TeamChatServiceImpl implements TeamChatService {
     private final TeamChatMessageRepository teamChatMessageRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
-    private final EmployeeRepository employeeRepository;
     private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final NotificationService notificationService;
@@ -54,7 +56,6 @@ public class TeamChatServiceImpl implements TeamChatService {
             TeamChatMessageRepository teamChatMessageRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
-            EmployeeRepository employeeRepository,
             AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
@@ -64,7 +65,6 @@ public class TeamChatServiceImpl implements TeamChatService {
         this.teamChatMessageRepository = teamChatMessageRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
-        this.employeeRepository = employeeRepository;
         this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.notificationService = notificationService;
@@ -85,33 +85,15 @@ public class TeamChatServiceImpl implements TeamChatService {
         Employee currentEmployee = authorizationService.getCurrentEmployeeOrNull();
         ensureTeamChatAccess(team, currentEmployee);
 
-        TeamChat teamChat = teamChatRepository.findByTeamId(teamId)
-                .orElseGet(() -> {
-                    TeamChat created = new TeamChat();
-                    created.setTeam(team);
-                    TeamChat saved = teamChatRepository.save(created);
-                    auditLogService.logAction(
-                            AuditActionType.CREATE,
-                            AuditEntityType.TEAM_CHAT,
-                            saved.getId(),
-                            "{\"teamId\":" + teamId + "}"
-                    );
-                    return saved;
-                });
+        TeamChat teamChat = getOrCreateTeamChat(team);
 
         return toTeamChatResponse(teamChat);
     }
 
     @Override
-    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    @Transactional(transactionManager = "transactionManager")
     public List<TeamChatResponseDto> listMyTeamChats() {
         authorizationService.requirePermission(Permission.CHAT_ACCESS);
-        if (isPrivilegedRole()) {
-            return teamChatRepository.findAll().stream()
-                    .sorted(java.util.Comparator.comparing(TeamChat::getUpdatedAt).reversed())
-                    .map(this::toTeamChatResponse)
-                    .toList();
-        }
         Employee currentEmployee = getCurrentEmployeeOrThrow();
 
         Set<Long> teamIds = teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(currentEmployee.getId())
@@ -128,7 +110,9 @@ public class TeamChatServiceImpl implements TeamChatService {
             return List.of();
         }
 
-        return teamChatRepository.findByTeamIdInOrderByUpdatedAtDesc(teamIds).stream()
+        return teamRepository.findAllById(teamIds).stream()
+                .map(this::getOrCreateTeamChat)
+                .sorted(java.util.Comparator.comparing(TeamChat::getUpdatedAt).reversed())
                 .map(this::toTeamChatResponse)
                 .toList();
     }
@@ -196,25 +180,37 @@ public class TeamChatServiceImpl implements TeamChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Team chat not found with id: " + teamChatId));
     }
 
+    private TeamChat getOrCreateTeamChat(Team team) {
+        return teamChatRepository.findByTeamId(team.getId())
+                .orElseGet(() -> {
+                    try {
+                        TeamChat created = new TeamChat();
+                        created.setTeam(team);
+                        TeamChat saved = teamChatRepository.save(created);
+                        auditLogService.logAction(
+                                AuditActionType.CREATE,
+                                AuditEntityType.TEAM_CHAT,
+                                saved.getId(),
+                                "{\"teamId\":" + team.getId() + "}"
+                        );
+                        return saved;
+                    } catch (DataIntegrityViolationException ex) {
+                        return teamChatRepository.findByTeamId(team.getId()).orElseThrow(() -> ex);
+                    }
+                });
+    }
+
     private Employee getCurrentEmployeeOrThrow() {
         return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private void ensureTeamChatAccess(Team team, Employee currentEmployee) {
-        if (isPrivilegedRole()) {
-            return;
-        }
         if (currentEmployee == null) {
             throw new ForbiddenOperationException("Only team participants can access team chat");
         }
         if (!isTeamParticipant(team, currentEmployee.getId())) {
             throw new ForbiddenOperationException("Only team participants can access team chat");
         }
-    }
-
-    private boolean isPrivilegedRole() {
-        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        return role.isTenantAdminEquivalent();
     }
 
     private boolean isTeamParticipant(Team team, Long employeeId) {
@@ -251,22 +247,64 @@ public class TeamChatServiceImpl implements TeamChatService {
     }
 
     private TeamChatResponseDto toTeamChatResponse(TeamChat teamChat) {
+        TeamChatMessage latestMessage = teamChatMessageRepository
+                .findFirstByTeamChatIdOrderByCreatedAtDesc(teamChat.getId())
+                .orElse(null);
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrNull();
+        long unreadCount = currentEmployeeId == null
+                ? 0L
+                : teamChatMessageRepository.countUnreadForEmployee(teamChat.getId(), currentEmployeeId, ChatType.TEAM);
+
         return TeamChatResponseDto.builder()
                 .id(teamChat.getId())
                 .teamId(teamChat.getTeam().getId())
                 .teamName(teamChat.getTeam().getName())
+                .participants(teamParticipants(teamChat.getTeam()))
+                .lastMessage(latestMessage == null ? null : latestMessage.getMessage())
+                .lastMessageAt(latestMessage == null ? teamChat.getUpdatedAt() : latestMessage.getCreatedAt())
+                .unreadCount(unreadCount)
                 .createdAt(teamChat.getCreatedAt())
                 .updatedAt(teamChat.getUpdatedAt())
                 .build();
     }
 
     private TeamChatMessageResponseDto toMessageResponse(TeamChatMessage teamChatMessage) {
+        Employee sender = teamChatMessage.getSender();
         return TeamChatMessageResponseDto.builder()
                 .id(teamChatMessage.getId())
+                .chatType(ChatType.TEAM)
+                .conversationId(teamChatMessage.getTeamChat().getId())
                 .teamChatId(teamChatMessage.getTeamChat().getId())
-                .sender(tenantDtoMapper.toEmployeeSimple(teamChatMessage.getSender()))
+                .sender(tenantDtoMapper.toEmployeeSimple(sender))
+                .senderEmployeeId(sender.getId())
+                .senderName(buildFullName(sender))
                 .message(teamChatMessage.getMessage())
                 .createdAt(teamChatMessage.getCreatedAt())
                 .build();
+    }
+
+    private List<EmployeeSimpleDto> teamParticipants(Team team) {
+        Map<Long, Employee> participants = new LinkedHashMap<>();
+        if (team.getManager() != null) {
+            participants.put(team.getManager().getId(), team.getManager());
+        }
+
+        teamMemberRepository.findByTeamIdAndLeftAtIsNull(team.getId()).stream()
+                .map(TeamMember::getEmployee)
+                .forEach(employee -> participants.putIfAbsent(employee.getId(), employee));
+
+        return participants.values().stream()
+                .map(tenantDtoMapper::toEmployeeSimple)
+                .toList();
+    }
+
+    private String buildFullName(Employee employee) {
+        if (employee == null) {
+            return "-";
+        }
+        String firstName = employee.getFirstName() == null ? "" : employee.getFirstName().trim();
+        String lastName = employee.getLastName() == null ? "" : employee.getLastName().trim();
+        String fullName = (firstName + " " + lastName).trim();
+        return fullName.isBlank() ? employee.getEmail() : fullName;
     }
 }

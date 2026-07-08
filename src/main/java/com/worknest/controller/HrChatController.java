@@ -34,6 +34,14 @@ public class HrChatController {
                 .body(ApiResponse.success("HR conversation ready", response));
     }
 
+    @PostMapping("/conversations/support")
+    @PreAuthorize("hasAnyRole('MANAGER','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<HrConversationResponseDto>> createOrGetMySupportConversation() {
+        HrConversationResponseDto response = hrChatService.createOrGetMySupportConversation();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("HR support conversation ready", response));
+    }
+
     @GetMapping("/targets")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<HrConversationTargetsResponseDto>> listConversationTargets() {

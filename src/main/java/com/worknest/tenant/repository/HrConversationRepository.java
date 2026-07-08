@@ -12,6 +12,10 @@ public interface HrConversationRepository extends JpaRepository<HrConversation, 
 
     Optional<HrConversation> findByEmployeeIdAndHrId(Long employeeId, Long hrId);
 
+    Optional<HrConversation> findFirstByEmployeeIdOrderByUpdatedAtDesc(Long employeeId);
+
+    List<HrConversation> findByEmployeeIdOrderByUpdatedAtDesc(Long employeeId);
+
     List<HrConversation> findByEmployeeIdOrHrIdOrderByUpdatedAtDesc(Long employeeId, Long hrId);
 
     @Query("""

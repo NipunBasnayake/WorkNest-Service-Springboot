@@ -459,14 +459,13 @@ public class AuthServiceImpl implements AuthService {
         if (requireRequestedTenantKey && normalizedRequestedTenant == null) {
             throw new ForbiddenOperationException("Tenant key is required for tenant-scoped users");
         }
-        if (normalizedRequestedTenant != null &&
-                !normalizedRequestedTenant.equalsIgnoreCase(userTenantKey)) {
-            throw new ForbiddenOperationException("Requested tenant does not match user tenant");
-        }
-
         PlatformTenant tenant = masterTenantLookupService.findByTenantKey(userTenantKey)
                 .orElseThrow(() -> new TenantNotFoundException(
                         "Tenant not found for user: " + userTenantKey));
+
+        if (normalizedRequestedTenant != null && !requestedTenantMatches(tenant, normalizedRequestedTenant)) {
+            throw new ForbiddenOperationException("Requested tenant does not match user tenant");
+        }
 
         if (tenant.getStatus() != TenantStatus.ACTIVE) {
             throw new ForbiddenOperationException("Tenant is not active: " + userTenantKey);
@@ -483,8 +482,12 @@ public class AuthServiceImpl implements AuthService {
 
         String tokenTenantKey = normalizeTenantKey(user.getTenantKey());
         String normalizedRequestedTenant = normalizeTenantKey(requestedTenantKey);
-        if (tokenTenantKey == null || normalizedRequestedTenant == null ||
-                !tokenTenantKey.equalsIgnoreCase(normalizedRequestedTenant)) {
+        if (tokenTenantKey == null || normalizedRequestedTenant == null) {
+            throw new ForbiddenOperationException("Refresh token tenant does not match the requested tenant");
+        }
+
+        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tokenTenantKey).orElse(null);
+        if (tenant == null || !requestedTenantMatches(tenant, normalizedRequestedTenant)) {
             throw new ForbiddenOperationException("Refresh token tenant does not match the requested tenant");
         }
     }
@@ -531,6 +534,20 @@ public class AuthServiceImpl implements AuthService {
         }
 
         return payloadTenantKey != null ? payloadTenantKey : headerTenantKey;
+    }
+
+    private boolean requestedTenantMatches(PlatformTenant tenant, String requestedTenant) {
+        if (tenant == null || requestedTenant == null) {
+            return false;
+        }
+
+        String normalizedRequestedTenant = normalizeTenantKey(requestedTenant);
+        String tenantKey = normalizeTenantKey(tenant.getTenantKey());
+        String tenantSlug = normalizeTenantKey(tenant.getSlug());
+
+        return normalizedRequestedTenant != null
+                && (normalizedRequestedTenant.equalsIgnoreCase(tenantKey)
+                || normalizedRequestedTenant.equalsIgnoreCase(tenantSlug));
     }
 
     private PlatformTenant resolveTenantForUser(PlatformUser user) {

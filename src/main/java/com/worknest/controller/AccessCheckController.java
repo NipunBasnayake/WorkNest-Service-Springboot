@@ -20,7 +20,7 @@ public class AccessCheckController {
         return ApiResponse.success("Platform access granted", buildAuthSummary(authentication));
     }
 
-    @GetMapping("/api/tenant/access-check")
+    @GetMapping({"/api/tenant/access-check", "/api/{tenantSlug}/access-check"})
     public ApiResponse<Map<String, String>> tenantAccessCheck(Authentication authentication) {
         Map<String, String> summary = buildAuthSummary(authentication);
         summary.put("tenantContext", TenantContext.getTenantId());

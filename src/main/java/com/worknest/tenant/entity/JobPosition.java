@@ -14,7 +14,8 @@ import java.time.LocalDateTime;
         name = "job_positions",
         indexes = {
                 @Index(name = "idx_job_positions_status", columnList = "status"),
-                @Index(name = "idx_job_positions_department", columnList = "department")
+                @Index(name = "idx_job_positions_department", columnList = "department"),
+                @Index(name = "uk_job_positions_slug", columnList = "slug", unique = true)
         }
 )
 @Getter
@@ -29,11 +30,26 @@ public class JobPosition {
     @Column(name = "title", nullable = false, length = 180)
     private String title;
 
+    @Column(name = "slug", length = 220, unique = true)
+    private String slug;
+
     @Column(name = "department", length = 120)
     private String department;
 
+    @Column(name = "summary", length = 500)
+    private String summary;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "responsibilities", columnDefinition = "TEXT")
+    private String responsibilities;
+
+    @Column(name = "requirements", columnDefinition = "TEXT")
+    private String requirements;
+
+    @Column(name = "benefits", columnDefinition = "TEXT")
+    private String benefits;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "employment_type", nullable = false, length = 30)
@@ -41,6 +57,12 @@ public class JobPosition {
 
     @Column(name = "location", length = 160)
     private String location;
+
+    @Column(name = "experience", length = 120)
+    private String experience;
+
+    @Column(name = "salary", length = 120)
+    private String salary;
 
     @Column(name = "openings", nullable = false)
     private Integer openings;
@@ -51,6 +73,15 @@ public class JobPosition {
 
     @Column(name = "published", nullable = false)
     private boolean published;
+
+    @Column(name = "visible_to_external_applicants")
+    private Boolean visibleToExternalApplicants = true;
+
+    @Column(name = "deleted")
+    private Boolean deleted = false;
+
+    @Column(name = "expires_at")
+    private LocalDateTime expiresAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -69,10 +100,22 @@ public class JobPosition {
         if (openings == null || openings < 1) {
             openings = 1;
         }
+        if (visibleToExternalApplicants == null) {
+            visibleToExternalApplicants = true;
+        }
+        if (deleted == null) {
+            deleted = false;
+        }
     }
 
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
+        if (visibleToExternalApplicants == null) {
+            visibleToExternalApplicants = true;
+        }
+        if (deleted == null) {
+            deleted = false;
+        }
     }
 }

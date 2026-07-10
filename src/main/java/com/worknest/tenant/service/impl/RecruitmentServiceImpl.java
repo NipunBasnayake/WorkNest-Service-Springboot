@@ -6,6 +6,7 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.util.SlugUtils;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
@@ -101,7 +102,25 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public JobPositionResponseDto createJobPosition(JobPositionCreateRequestDto requestDto) {
         requireManagePermission();
         JobPosition position = new JobPosition();
-        applyJobPosition(position, requestDto.getTitle(), requestDto.getDepartment(), requestDto.getDescription(), requestDto.getEmploymentType(), requestDto.getLocation(), requestDto.getOpenings(), requestDto.getStatus(), requestDto.getPublished());
+        applyJobPosition(
+                position,
+                requestDto.getTitle(),
+                requestDto.getDepartment(),
+                requestDto.getSummary(),
+                requestDto.getDescription(),
+                requestDto.getResponsibilities(),
+                requestDto.getRequirements(),
+                requestDto.getBenefits(),
+                requestDto.getEmploymentType(),
+                requestDto.getLocation(),
+                requestDto.getExperience(),
+                requestDto.getSalary(),
+                requestDto.getOpenings(),
+                requestDto.getStatus(),
+                requestDto.getPublished(),
+                requestDto.getVisibleToExternalApplicants(),
+                requestDto.getExpiresAt());
+        ensureJobSlug(position);
         JobPosition saved = jobPositionRepository.save(position);
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.JOB_POSITION, saved.getId(), jsonField("title", saved.getTitle()));
         return toJobPositionResponse(saved);
@@ -111,7 +130,25 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public JobPositionResponseDto updateJobPosition(Long jobPositionId, JobPositionUpdateRequestDto requestDto) {
         requireManagePermission();
         JobPosition position = getJobPositionOrThrow(jobPositionId);
-        applyJobPosition(position, requestDto.getTitle(), requestDto.getDepartment(), requestDto.getDescription(), requestDto.getEmploymentType(), requestDto.getLocation(), requestDto.getOpenings(), requestDto.getStatus(), requestDto.getPublished());
+        applyJobPosition(
+                position,
+                requestDto.getTitle(),
+                requestDto.getDepartment(),
+                requestDto.getSummary(),
+                requestDto.getDescription(),
+                requestDto.getResponsibilities(),
+                requestDto.getRequirements(),
+                requestDto.getBenefits(),
+                requestDto.getEmploymentType(),
+                requestDto.getLocation(),
+                requestDto.getExperience(),
+                requestDto.getSalary(),
+                requestDto.getOpenings(),
+                requestDto.getStatus(),
+                requestDto.getPublished(),
+                requestDto.getVisibleToExternalApplicants(),
+                requestDto.getExpiresAt());
+        ensureJobSlug(position);
         JobPosition updated = jobPositionRepository.save(position);
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.JOB_POSITION, updated.getId(), jsonField("title", updated.getTitle()));
         return toJobPositionResponse(updated);
@@ -529,15 +566,63 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return employeeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
     }
 
-    private void applyJobPosition(JobPosition position, String title, String department, String description, EmploymentType employmentType, String location, Integer openings, JobPositionStatus status, Boolean published) {
+    private void applyJobPosition(
+            JobPosition position,
+            String title,
+            String department,
+            String summary,
+            String description,
+            String responsibilities,
+            String requirements,
+            String benefits,
+            EmploymentType employmentType,
+            String location,
+            String experience,
+            String salary,
+            Integer openings,
+            JobPositionStatus status,
+            Boolean published,
+            Boolean visibleToExternalApplicants,
+            LocalDateTime expiresAt) {
         position.setTitle(title.trim());
         position.setDepartment(trimToNull(department));
+        position.setSummary(trimToNull(summary));
         position.setDescription(trimToNull(description));
+        position.setResponsibilities(trimToNull(responsibilities));
+        position.setRequirements(trimToNull(requirements));
+        position.setBenefits(trimToNull(benefits));
         position.setEmploymentType(employmentType);
         position.setLocation(trimToNull(location));
+        position.setExperience(trimToNull(experience));
+        position.setSalary(trimToNull(salary));
         position.setOpenings(openings);
         position.setStatus(status == null ? JobPositionStatus.OPEN : status);
         position.setPublished(Boolean.TRUE.equals(published));
+        if (visibleToExternalApplicants != null) {
+            position.setVisibleToExternalApplicants(visibleToExternalApplicants);
+        } else if (position.getVisibleToExternalApplicants() == null) {
+            position.setVisibleToExternalApplicants(true);
+        }
+        position.setExpiresAt(expiresAt);
+    }
+
+    private void ensureJobSlug(JobPosition position) {
+        if (trimToNull(position.getSlug()) != null) {
+            return;
+        }
+
+        String baseSlug = SlugUtils.slugify(position.getTitle());
+        if (baseSlug == null) {
+            baseSlug = "job-position";
+        }
+
+        String candidate = baseSlug;
+        int suffix = 2;
+        while (jobPositionRepository.existsBySlug(candidate)) {
+            candidate = baseSlug + "-" + suffix;
+            suffix++;
+        }
+        position.setSlug(candidate);
     }
 
     private void applyCandidate(Candidate candidate, String fullName, String email, String phone, String currentTitle, Integer yearsOfExperience, String source, String summary) {
@@ -793,13 +878,22 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return JobPositionResponseDto.builder()
                 .id(position.getId())
                 .title(position.getTitle())
+                .slug(position.getSlug())
                 .department(position.getDepartment())
+                .summary(position.getSummary())
                 .description(position.getDescription())
+                .responsibilities(position.getResponsibilities())
+                .requirements(position.getRequirements())
+                .benefits(position.getBenefits())
                 .employmentType(position.getEmploymentType())
                 .location(position.getLocation())
+                .experience(position.getExperience())
+                .salary(position.getSalary())
                 .openings(position.getOpenings())
                 .status(position.getStatus())
                 .published(position.isPublished())
+                .visibleToExternalApplicants(position.getVisibleToExternalApplicants())
+                .expiresAt(position.getExpiresAt())
                 .applicationCount(candidateApplicationRepository.countByJobPositionId(position.getId()))
                 .createdAt(position.getCreatedAt())
                 .updatedAt(position.getUpdatedAt())

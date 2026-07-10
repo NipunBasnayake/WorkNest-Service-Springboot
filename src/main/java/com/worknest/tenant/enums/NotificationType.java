@@ -12,5 +12,6 @@ public enum NotificationType {
     ANNOUNCEMENT,
     HR_MESSAGE,
     TEAM_MESSAGE,
+    RECRUITMENT_APPLICATION,
     SYSTEM
 }

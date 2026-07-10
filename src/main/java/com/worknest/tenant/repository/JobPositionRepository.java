@@ -31,7 +31,7 @@ public interface JobPositionRepository extends JpaRepository<JobPosition, Long> 
             WHERE j.published = true
               AND j.status = :status
               AND COALESCE(j.deleted, false) = false
-              AND COALESCE(j.visibleToExternalApplicants, true) = true
+              AND j.visibleToExternalApplicants = true
               AND j.slug IS NOT NULL
               AND (j.expiresAt IS NULL OR j.expiresAt > :now)
             ORDER BY j.createdAt DESC
@@ -51,7 +51,7 @@ public interface JobPositionRepository extends JpaRepository<JobPosition, Long> 
               AND j.published = true
               AND j.status = :status
               AND COALESCE(j.deleted, false) = false
-              AND COALESCE(j.visibleToExternalApplicants, true) = true
+              AND j.visibleToExternalApplicants = true
               AND (j.expiresAt IS NULL OR j.expiresAt > :now)
             """)
     Optional<JobPosition> findPublishedJobBySlug(

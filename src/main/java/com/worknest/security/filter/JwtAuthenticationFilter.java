@@ -146,10 +146,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 throw new ForbiddenOperationException("Token tenant does not match request tenant path");
             }
 
-            if (headerTenantSlug != null && !headerTenantSlug.equalsIgnoreCase(requestTenantSlug)) {
+            if (headerTenantSlug != null
+                    && !headerTenantMatches(headerTenantSlug, requestTenantSlug, userTenantKey, tokenTenantKey)) {
                 throw new ForbiddenOperationException("Request tenant header does not match request tenant path");
             }
         }
+    }
+
+    private boolean headerTenantMatches(
+            String headerTenant,
+            String requestTenantSlug,
+            String userTenantKey,
+            String tokenTenantKey) {
+        String normalizedHeader = normalize(headerTenant);
+        if (normalizedHeader == null) {
+            return false;
+        }
+        return normalizedHeader.equalsIgnoreCase(normalize(requestTenantSlug))
+                || normalizedHeader.equalsIgnoreCase(normalize(userTenantKey))
+                || normalizedHeader.equalsIgnoreCase(normalize(tokenTenantKey));
     }
 
     private String extractRequestTenantSlug(String uri) {

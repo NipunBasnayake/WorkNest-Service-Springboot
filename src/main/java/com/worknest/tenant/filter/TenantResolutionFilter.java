@@ -59,13 +59,7 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
 
             String tenantSlug = resolveTenantSlugFromRequest(requestUri);
             log.debug("[TENANT] Resolved slug={}", tenantSlug);
-            String headerTenantSlug = normalizeTenantSlug(request.getHeader(tenantHeaderName));
-
-            if (tenantSlug != null && headerTenantSlug != null && !tenantSlug.equalsIgnoreCase(headerTenantSlug)) {
-                sendErrorResponse(response, HttpStatus.FORBIDDEN,
-                        "Tenant slug mismatch between URL and header", TENANT_SPOOF_ERROR, requestUri);
-                return;
-            }
+            String headerTenant = normalizeTenantSlug(request.getHeader(tenantHeaderName));
 
             if (tenantSlug == null) {
                 if (isTenantApi(requestUri) || isPublicCareerApi(requestUri)) {
@@ -82,6 +76,12 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
             if (tenant == null) {
                 sendErrorResponse(response, HttpStatus.NOT_FOUND,
                         "Tenant not found: " + tenantSlug, "TENANT_NOT_FOUND", requestUri);
+                return;
+            }
+
+            if (headerTenant != null && !tenantHeaderMatches(tenant, headerTenant)) {
+                sendErrorResponse(response, HttpStatus.FORBIDDEN,
+                        "Tenant mismatch between URL and header", TENANT_SPOOF_ERROR, requestUri);
                 return;
             }
 
@@ -156,6 +156,15 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
         }
         String normalized = tenantSlug.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean tenantHeaderMatches(PlatformTenant tenant, String headerTenant) {
+        String normalizedHeader = normalizeTenantSlug(headerTenant);
+        String tenantKey = normalizeTenantSlug(tenant.getTenantKey());
+        String tenantSlug = normalizeTenantSlug(tenant.getSlug());
+        return normalizedHeader != null
+                && (normalizedHeader.equalsIgnoreCase(tenantKey)
+                || normalizedHeader.equalsIgnoreCase(tenantSlug));
     }
 
     private void sendErrorResponse(HttpServletResponse response, HttpStatus status,

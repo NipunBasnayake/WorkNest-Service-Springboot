@@ -198,7 +198,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     private PlatformTenant getActiveTenantOrThrow(String tenantKey) {
         PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tenantKey)
                 .orElseThrow(() -> new TenantNotFoundException("Tenant not found: " + tenantKey));
-        if (tenant.getStatus() != TenantStatus.ACTIVE) {
+        if (tenant.getStatus() != TenantStatus.ACTIVE && tenant.getStatus() != TenantStatus.PROVISIONING) {
             throw new TenantResolutionException("Tenant is not active: " + tenantKey);
         }
         return tenant;
@@ -259,4 +259,3 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         }
     }
 }
-

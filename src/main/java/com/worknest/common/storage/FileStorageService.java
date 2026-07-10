@@ -18,6 +18,7 @@ import org.springframework.web.util.UriUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +30,8 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @Service
 public class FileStorageService {
@@ -38,7 +41,7 @@ public class FileStorageService {
     private static final String INTERNAL_PREFIX = "wnfile://";
     private static final String STORAGE_BUCKET = "worknest-local";
     private static final String HMAC_ALGORITHM = "HmacSHA256";
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "pdf");
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "pdf", "docx");
 
     private final Path storageRootPath;
     private final String signedUrlSecret;
@@ -91,17 +94,17 @@ public class FileStorageService {
         String originalName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "file" : file.getOriginalFilename());
         String extension = extractExtension(originalName);
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new BadRequestException("Only jpg, jpeg, png, and pdf files are allowed");
+            throw new BadRequestException("Only jpg, jpeg, png, pdf, and docx files are allowed");
         }
 
         String normalizedType = normalizeType(type);
-        if ("image".equals(normalizedType) && "pdf".equals(extension)) {
-            throw new BadRequestException("PDF files are not allowed for image type");
+        if ("image".equals(normalizedType) && !Set.of("jpg", "jpeg", "png").contains(extension)) {
+            throw new BadRequestException("Only jpg, jpeg, and png files are allowed for image type");
         }
 
         String mimeType = detectMimeType(extension, fileBytes);
         String folderName = "image".equals(normalizedType) ? "images" : "docs";
-        String currentTenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String currentTenantKey = resolveCurrentTenantKey();
         Path targetDirectory = tenantFolder(currentTenantKey, folderName);
 
         String filename = UUID.randomUUID() + "_" + sanitizeFilename(stripPath(originalName), extension);
@@ -175,7 +178,7 @@ public class FileStorageService {
 
     public StoredFileResource loadAsResource(String storedReference) {
         LocalFileRef ref = parseLocalReference(storedReference);
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        String tenantKey = resolveCurrentTenantKey();
         return loadFromTenant(tenantKey, ref);
     }
 
@@ -307,7 +310,11 @@ public class FileStorageService {
                 }
                 yield "application/pdf";
             }
-            default -> throw new BadRequestException("Only jpg, jpeg, png, and pdf files are allowed");
+            case "docx" -> {
+                validateDocx(fileBytes);
+                yield "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            }
+            default -> throw new BadRequestException("Only jpg, jpeg, png, pdf, and docx files are allowed");
         };
     }
 
@@ -317,8 +324,47 @@ public class FileStorageService {
             case "jpg", "jpeg" -> "image/jpeg";
             case "png" -> "image/png";
             case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             default -> "application/octet-stream";
         };
+    }
+
+    private void validateDocx(byte[] fileBytes) {
+        if (fileBytes.length < 4
+                || fileBytes[0] != 'P'
+                || fileBytes[1] != 'K') {
+            throw new BadRequestException("Uploaded file content does not match a DOCX document");
+        }
+
+        boolean hasContentTypes = false;
+        boolean hasDocument = false;
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(fileBytes))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                String entryName = entry.getName();
+                if ("[Content_Types].xml".equals(entryName)) {
+                    hasContentTypes = true;
+                }
+                if ("word/document.xml".equals(entryName)) {
+                    hasDocument = true;
+                }
+                if (hasContentTypes && hasDocument) {
+                    return;
+                }
+            }
+        } catch (IOException ex) {
+            throw new BadRequestException("Uploaded file content does not match a DOCX document");
+        }
+
+        throw new BadRequestException("Uploaded file content does not match a DOCX document");
+    }
+
+    private String resolveCurrentTenantKey() {
+        String tenantKey = trimToNull(TenantContextHolder.getTenantKey());
+        if (tenantKey != null) {
+            return tenantKey;
+        }
+        return securityUtils.getCurrentTenantKeyOrThrow();
     }
 
     private LocalFileRef parseLocalReference(String storedReference) {

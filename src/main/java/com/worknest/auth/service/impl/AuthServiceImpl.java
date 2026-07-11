@@ -100,7 +100,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResponseDto login(LoginRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public LoginResponseDto login(
+            LoginRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         PlatformUser user = platformUserService.findByEmailOrThrow(requestDto.getEmail());
         String clientIp = extractClientIpAddress(request);
         String userAgent = extractUserAgent(request);
@@ -149,7 +152,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public RefreshTokenResponseDto refreshAccessToken(
+            RefreshTokenRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
         String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
         if (requestRefreshToken == null) {
@@ -197,7 +203,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LogoutResponseDto logout(LogoutRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public LogoutResponseDto logout(
+            LogoutRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
         String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
         if (requestRefreshToken == null) {
@@ -226,7 +235,8 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
-    public AuthSessionsResponseDto getActiveSessions(HttpServletRequest request) {
+    public AuthSessionsResponseDto getActiveSessions(
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");
@@ -246,7 +256,9 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthSessionRevocationResponseDto revokeSession(Long sessionId, HttpServletRequest request) {
+    public AuthSessionRevocationResponseDto revokeSession(
+            Long sessionId,
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");
@@ -267,7 +279,8 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthSessionRevocationResponseDto revokeOtherSessions(HttpServletRequest request) {
+    public AuthSessionRevocationResponseDto revokeOtherSessions(
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");

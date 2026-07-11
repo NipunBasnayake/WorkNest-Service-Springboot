@@ -114,24 +114,18 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public List<ProjectTaskProgressDto> getProjectProgressSummary() {
-        List<Project> projects;
         List<Long> scopedProjectIds = resolveScopedProjectIds();
-        if (scopedProjectIds == null) {
-            projects = projectRepository.findAll();
-        } else if (scopedProjectIds.isEmpty()) {
-            projects = List.of();
-        } else {
-            projects = projectRepository.findAllById(scopedProjectIds);
-        }
-
-        return projects.stream()
-                .map(project -> {
-                    long total = taskRepository.countByProjectId(project.getId());
-                    long done = taskRepository.countByProjectIdAndStatus(project.getId(), TaskStatus.DONE);
+        List<Object[]> rows = scopedProjectIds == null
+                ? taskRepository.summarizeProjectProgress(TaskStatus.DONE)
+                : scopedProjectIds.isEmpty() ? List.of() : taskRepository.summarizeProjectProgressForProjects(scopedProjectIds, TaskStatus.DONE);
+        return rows.stream()
+                .map(row -> {
+                    long total = ((Number) row[2]).longValue();
+                    long done = ((Number) row[3]).longValue();
                     double completionPercent = total == 0 ? 0d : ((double) done * 100.0) / total;
                     return ProjectTaskProgressDto.builder()
-                            .projectId(project.getId())
-                            .projectName(project.getName())
+                            .projectId(((Number) row[0]).longValue())
+                            .projectName(row[1].toString())
                             .totalTasks(total)
                             .doneTasks(done)
                             .completionPercent(Math.round(completionPercent * 100.0) / 100.0)

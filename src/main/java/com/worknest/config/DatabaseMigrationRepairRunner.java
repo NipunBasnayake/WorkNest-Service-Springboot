@@ -35,11 +35,11 @@ public class DatabaseMigrationRepairRunner implements CommandLineRunner {
                     "WHERE slug IS NULL OR slug = ''"
                 );
 
-                // Set active = 1 for ACTIVE tenants
+                // Keep the legacy active flag synchronized with the status enum.
                 masterJdbcTemplate.execute(
                     "UPDATE platform_tenants " +
-                    "SET active = 1 " +
-                    "WHERE status = 'ACTIVE' AND active = 0"
+                    "SET active = CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END " +
+                    "WHERE active <> CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END"
                 );
 
                 log.info("[TENANT] Tenant database state repairs completed successfully.");

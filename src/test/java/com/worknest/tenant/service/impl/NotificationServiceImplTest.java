@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceImplTest {
@@ -61,7 +62,7 @@ class NotificationServiceImplTest {
                 auditLogService
         );
 
-        doNothing().when(authorizationService).requirePermission(any(Permission.class));
+        lenient().doNothing().when(authorizationService).requirePermission(any(Permission.class));
     }
 
     @Test

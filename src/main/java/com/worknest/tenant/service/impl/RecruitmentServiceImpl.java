@@ -25,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -61,6 +62,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final FileStorageService fileStorageService;
     private final EmailNotificationService emailNotificationService;
     private final SecureRandom secureRandom;
+    @Autowired(required = false)
+    private TenantRealtimePublisher tenantRealtimePublisher;
 
     public RecruitmentServiceImpl(
             JobPositionRepository jobPositionRepository,
@@ -122,6 +125,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 requestDto.getExpiresAt());
         ensureJobSlug(position);
         JobPosition saved = jobPositionRepository.save(position);
+        publishRecruitmentRealtime("JOB_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.JOB_POSITION, saved.getId(), jsonField("title", saved.getTitle()));
         return toJobPositionResponse(saved);
     }
@@ -150,6 +154,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 requestDto.getExpiresAt());
         ensureJobSlug(position);
         JobPosition updated = jobPositionRepository.save(position);
+        publishRecruitmentRealtime("JOB_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.JOB_POSITION, updated.getId(), jsonField("title", updated.getTitle()));
         return toJobPositionResponse(updated);
     }
@@ -287,6 +292,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         application.setStatus(requestedStatus);
         application.setCreatedBy(authorizationService.getCurrentEmployeeOrNull());
         CandidateApplication saved = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("APPLICATION_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.CANDIDATE_APPLICATION, saved.getId(), jsonField("candidateId", String.valueOf(candidate.getId())));
         notifyCandidateStatus(saved);
         return toApplicationResponse(saved);
@@ -298,6 +304,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         CandidateApplication application = getApplicationOrThrow(applicationId);
         applyApplicationUpdates(application, requestDto);
         CandidateApplication updated = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("APPLICATION_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.CANDIDATE_APPLICATION, updated.getId(), jsonField("status", updated.getStatus().name()));
         notifyCandidateStatus(updated);
         return toApplicationResponse(updated);
@@ -337,6 +344,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
         }
         CandidateApplication updatedApplication = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("CANDIDATE_HIRED", updatedApplication.getId());
 
         notificationService.createSystemNotification(
                 createdEmployee.getId(),
@@ -443,6 +451,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setMeetingLink(trimToNull(requestDto.getMeetingLink()));
         interview.setNotes(trimToNull(requestDto.getNotes()));
         Interview saved = interviewRepository.save(interview);
+        publishRecruitmentRealtime("INTERVIEW_SCHEDULED", saved.getId());
         auditLogService.logAction(AuditActionType.SCHEDULE, AuditEntityType.INTERVIEW, saved.getId(), jsonField("applicationId", String.valueOf(application.getId())));
         emailNotificationService.sendInterviewScheduledEmail(
             application.getCandidate().getEmail(),
@@ -469,6 +478,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setNotes(trimToNull(requestDto.getNotes()));
         interview.setStatus(InterviewStatus.RESCHEDULED);
         Interview updated = interviewRepository.save(interview);
+        publishRecruitmentRealtime("INTERVIEW_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.INTERVIEW, updated.getId(), jsonField("scheduledAt", updated.getScheduledAt().toString()));
         emailNotificationService.sendInterviewScheduledEmail(
             interview.getApplication().getCandidate().getEmail(),
@@ -532,6 +542,15 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .stageCounts(stageCounts)
                 .jobCounts(jobCounts)
                 .build();
+    }
+
+    private void publishRecruitmentRealtime(String eventType, Long entityId) {
+        if (tenantRealtimePublisher != null) {
+            tenantRealtimePublisher.publishRecruitmentUpdate(
+                    authorizationService.getCurrentTenantKeyOrThrow(),
+                    java.util.Map.of("eventType", eventType, "entityId", entityId)
+            );
+        }
     }
 
     private void requireViewPermission() {

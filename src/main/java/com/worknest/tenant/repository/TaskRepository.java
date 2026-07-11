@@ -321,6 +321,25 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             Pageable pageable);
 
     @Query("""
+            SELECT t.project.id, t.project.name, COUNT(t),
+                   SUM(CASE WHEN t.status = :doneStatus THEN 1 ELSE 0 END)
+            FROM Task t
+            GROUP BY t.project.id, t.project.name
+            ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> summarizeProjectProgress(@Param("doneStatus") TaskStatus doneStatus);
+
+    @Query("""
+            SELECT t.project.id, t.project.name, COUNT(t),
+                   SUM(CASE WHEN t.status = :doneStatus THEN 1 ELSE 0 END)
+            FROM Task t
+            WHERE t.project.id IN :projectIds
+            GROUP BY t.project.id, t.project.name
+            ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> summarizeProjectProgressForProjects(@Param("projectIds") List<Long> projectIds, @Param("doneStatus") TaskStatus doneStatus);
+
+    @Query("""
             SELECT t
             FROM Task t
             WHERE t.assignee IS NOT NULL

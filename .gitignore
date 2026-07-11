@@ -41,3 +41,8 @@ build/
 
 .idea
 .env
+### WorkNest local file storage ###
+worknest-uploads/
+uploads/**
+!uploads/**/
+!uploads/**/.gitkeep

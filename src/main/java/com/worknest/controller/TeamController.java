@@ -178,6 +178,13 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success("Team details retrieved successfully", response));
     }
 
+    @GetMapping("/{teamId:\\d+}/assignable-members")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<List<TeamAssignableMemberResponseDto>>> listAssignableMembers(
+            @PathVariable("teamId") @Positive Long teamId) {
+        List<TeamAssignableMemberResponseDto> response = teamService.listAssignableMembers(teamId);
+        return ResponseEntity.ok(ApiResponse.success("Assignable team members retrieved successfully", response));
+    }
     @GetMapping("/{id:\\d+}/members")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<ApiResponse<List<TeamMemberResponseDto>>> listMembers(@PathVariable("id") @Positive Long id) {

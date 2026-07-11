@@ -54,6 +54,21 @@ spring:
       max-file-size: 10MB
       max-request-size: 20MB
 
+storage:
+  root: uploads
+  max-image-size: 2MB
+  max-document-size: 10MB
+  allowed-image-types:
+    - jpg
+    - jpeg
+    - png
+    - webp
+  allowed-document-types:
+    - pdf
+    - docx
+    - xlsx
+    - pptx
+    - zip
 logging:
   pattern:
     level: "%5p [tenant:%X{tenantId:-na}]"
@@ -119,16 +134,6 @@ app:
     allowed-origins:
       - http://localhost:3000
       - http://localhost:5173
-  storage:
-    local-uploads-dir: ./worknest-uploads
-    signed-url-secret: V29ya05lc3RTdXBlclNlY3JldEtleUZvckpXVDEyMzQ1Njc4OTAxMjM0NTY3ODkw
-    max-file-size-bytes: 10485760
-    allowed-mime-types:
-      - image/png
-      - image/jpeg
-      - application/pdf
-      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
-      - text/plain
   email:
     from: noreply@example.com
     executor:

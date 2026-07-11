@@ -1,5 +1,6 @@
 package com.worknest.tenant.repository;
 
+import com.worknest.common.enums.UserStatus;
 import com.worknest.tenant.entity.TeamMember;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -13,6 +14,19 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     List<TeamMember> findByTeamIdOrderByJoinedAtDesc(Long teamId);
 
     List<TeamMember> findByTeamIdAndLeftAtIsNull(Long teamId);
+
+    @Query("""
+            SELECT tm
+            FROM TeamMember tm
+            JOIN FETCH tm.employee e
+            WHERE tm.team.id = :teamId
+              AND tm.leftAt IS NULL
+              AND e.status = :status
+            ORDER BY LOWER(e.firstName), LOWER(e.lastName), LOWER(e.email)
+            """)
+    List<TeamMember> findAssignableMembersByTeamId(
+            @Param("teamId") Long teamId,
+            @Param("status") UserStatus status);
 
     List<TeamMember> findByEmployeeIdAndLeftAtIsNull(Long employeeId);
 

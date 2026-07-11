@@ -117,6 +117,8 @@ public class SecurityConfig {
                         .authenticated()
                         .requestMatchers("/api/platform/**")
                         .hasRole("PLATFORM_ADMIN")
+                        .requestMatchers("/files/**")
+                        .authenticated()
                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                         .permitAll()
                         .requestMatchers("/api/*/**")

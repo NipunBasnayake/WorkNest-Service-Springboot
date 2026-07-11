@@ -152,7 +152,10 @@ public class DemoTenantDataSeeder implements CommandLineRunner {
             task.setStatus(TaskStatus.TODO);
             task.setPriority(TaskPriority.MEDIUM);
             task.setAssignee(engineer);
+            task.setAssignedTeam(savedTeam);
             task.setCreatedBy(manager);
+            task.setAssignedBy(manager);
+            task.setAssignedByUserId(manager.getPlatformUserId());
             task.setDueDate(LocalDate.now().plusDays(5));
             taskRepository.save(task);
 

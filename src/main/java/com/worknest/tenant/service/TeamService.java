@@ -43,4 +43,6 @@ public interface TeamService {
     TeamDetailResponseDto getTeamDetails(Long teamId);
 
     List<TeamMemberResponseDto> listTeamMembers(Long teamId);
+
+    List<TeamAssignableMemberResponseDto> listAssignableMembers(Long teamId);
 }

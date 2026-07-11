@@ -14,11 +14,17 @@ import java.time.LocalDate;
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    List<Task> findAllByOrderByCreatedAtDesc();
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    List<Task> findByAssignedTeamIdOrderByCreatedAtDesc(Long assignedTeamId);
+
+
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByProjectIdOrderByCreatedAtDesc(Long projectId);
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByAssigneeIdOrderByCreatedAtDesc(Long assigneeId);
 
         @Query("""
@@ -41,13 +47,13 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                                                           )
                         ORDER BY t.createdAt DESC
                         """)
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
                 List<Task> findDistinctVisibleByEmployeeOrderByCreatedAtDesc(
                                 @Param("employeeId") Long employeeId,
                                 @Param("teamLeadRole") TeamFunctionalRole teamLeadRole,
                                 @Param("projectManagerRole") TeamFunctionalRole projectManagerRole);
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByProjectIdAndStatusOrderByCreatedAtDesc(Long projectId, TaskStatus status);
 
     boolean existsByProjectIdAndAssigneeId(Long projectId, Long assigneeId);
@@ -90,6 +96,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             SELECT t
             FROM Task t
             WHERE (:projectId IS NULL OR t.project.id = :projectId)
+              AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
               AND (:status IS NULL OR t.status = :status)
               AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
               AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
@@ -100,9 +107,106 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                     OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     Page<Task> search(
             @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId,
+            @Param("status") TaskStatus status,
+            @Param("assigneeId") Long assigneeId,
+            @Param("dueFrom") LocalDate dueFrom,
+            @Param("dueTo") LocalDate dueTo,
+            @Param("search") String search,
+            Pageable pageable);
+
+    @Query(
+            value = """
+                    SELECT t
+                    FROM Task t
+                    WHERE (:projectId IS NULL OR t.project.id = :projectId)
+                      AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+                      AND (:status IS NULL OR t.status = :status)
+                      AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
+                      AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
+                      AND (:dueTo IS NULL OR t.dueDate <= :dueTo)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                            OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                      AND (
+                            t.assignee.id = :employeeId
+                            OR (
+                                t.assignedTeam IS NOT NULL
+                                AND t.assignedTeam.manager IS NOT NULL
+                                AND t.assignedTeam.manager.id = :employeeId
+                            )
+                            OR EXISTS (
+                                SELECT tm.id
+                                FROM TeamMember tm
+                                WHERE tm.team.id = t.assignedTeam.id
+                                  AND tm.employee.id = :employeeId
+                                  AND tm.leftAt IS NULL
+                                  AND (tm.functionalRole = :teamLeadRole OR tm.functionalRole = :projectManagerRole)
+                            )
+                            OR EXISTS (
+                                SELECT pm.id
+                                FROM ProjectTeam pt
+                                JOIN TeamMember pm ON pm.team.id = pt.team.id
+                                WHERE pt.project.id = t.project.id
+                                  AND pm.employee.id = :employeeId
+                                  AND pm.leftAt IS NULL
+                                  AND pm.functionalRole = :projectManagerRole
+                            )
+                          )
+                    """,
+            countQuery = """
+                    SELECT COUNT(t)
+                    FROM Task t
+                    WHERE (:projectId IS NULL OR t.project.id = :projectId)
+                      AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+                      AND (:status IS NULL OR t.status = :status)
+                      AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
+                      AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
+                      AND (:dueTo IS NULL OR t.dueDate <= :dueTo)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                            OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                      AND (
+                            t.assignee.id = :employeeId
+                            OR (
+                                t.assignedTeam IS NOT NULL
+                                AND t.assignedTeam.manager IS NOT NULL
+                                AND t.assignedTeam.manager.id = :employeeId
+                            )
+                            OR EXISTS (
+                                SELECT tm.id
+                                FROM TeamMember tm
+                                WHERE tm.team.id = t.assignedTeam.id
+                                  AND tm.employee.id = :employeeId
+                                  AND tm.leftAt IS NULL
+                                  AND (tm.functionalRole = :teamLeadRole OR tm.functionalRole = :projectManagerRole)
+                            )
+                            OR EXISTS (
+                                SELECT pm.id
+                                FROM ProjectTeam pt
+                                JOIN TeamMember pm ON pm.team.id = pt.team.id
+                                WHERE pt.project.id = t.project.id
+                                  AND pm.employee.id = :employeeId
+                                  AND pm.leftAt IS NULL
+                                  AND pm.functionalRole = :projectManagerRole
+                            )
+                          )
+                    """
+    )
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    Page<Task> searchVisibleToEmployee(
+            @Param("employeeId") Long employeeId,
+            @Param("teamLeadRole") TeamFunctionalRole teamLeadRole,
+            @Param("projectManagerRole") TeamFunctionalRole projectManagerRole,
+            @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId,
             @Param("status") TaskStatus status,
             @Param("assigneeId") Long assigneeId,
             @Param("dueFrom") LocalDate dueFrom,
@@ -230,3 +334,4 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             @Param("fromDate") LocalDate fromDate,
             @Param("toDate") LocalDate toDate);
 }
+

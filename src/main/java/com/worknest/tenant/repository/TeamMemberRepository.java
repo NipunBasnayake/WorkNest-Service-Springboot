@@ -45,5 +45,12 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
             """)
     List<Object[]> countActiveMembersByTeamIds(@Param("teamIds") List<Long> teamIds);
 
+    @Query("""
+            SELECT tm.team.id, tm.team.name, COUNT(tm) FROM TeamMember tm
+            WHERE tm.leftAt IS NULL AND (:teamId IS NULL OR tm.team.id = :teamId)
+            GROUP BY tm.team.id, tm.team.name ORDER BY COUNT(tm) DESC
+            """)
+    List<Object[]> countActiveMembersForReport(@Param("teamId") Long teamId);
+
     void deleteByTeamId(Long teamId);
 }

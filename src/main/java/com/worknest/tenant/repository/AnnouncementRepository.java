@@ -8,8 +8,16 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 public interface AnnouncementRepository extends JpaRepository<Announcement, Long> {
+
+    @Query(value = """
+            SELECT DATE_FORMAT(a.created_at, '%Y-%m'), COUNT(*) FROM announcements a
+            WHERE a.created_at BETWEEN :fromDate AND :toDate
+            GROUP BY DATE_FORMAT(a.created_at, '%Y-%m') ORDER BY DATE_FORMAT(a.created_at, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countCreatedForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate);
 
     List<Announcement> findAllByOrderByCreatedAtDesc();
 

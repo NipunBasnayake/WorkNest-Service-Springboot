@@ -7,6 +7,11 @@ import java.util.List;
 
 public interface AnalyticsService {
 
+    BusinessIntelligenceReportDto getBusinessIntelligenceReport(
+            String tenantSlug, LocalDate fromDate, LocalDate toDate, String department,
+            Long teamId, Long employeeId, Long projectId, String taskStatus,
+            String recruitmentStatus, String attendancePeriod, String leaveType);
+
     List<TaskAssigneeSummaryDto> getTaskCountByAssignee();
 
     List<TaskProjectSummaryDto> getTaskCountByProject();

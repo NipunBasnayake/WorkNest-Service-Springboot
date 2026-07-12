@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
 
@@ -33,4 +34,13 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             @Param("readFilter") Boolean readFilter,
             @Param("type") NotificationType type,
             Pageable pageable);
+
+    @Query(value = """
+            SELECT DATE_FORMAT(n.created_at, '%Y-%m'), COUNT(*) FROM notifications n
+            WHERE n.created_at BETWEEN :fromDate AND :toDate
+            GROUP BY DATE_FORMAT(n.created_at, '%Y-%m') ORDER BY DATE_FORMAT(n.created_at, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countVolumeForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate);
+
+    long countByReadFalse();
 }

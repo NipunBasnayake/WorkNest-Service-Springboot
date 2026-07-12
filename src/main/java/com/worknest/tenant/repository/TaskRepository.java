@@ -11,9 +11,59 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
+    @Query("""
+            SELECT t.status, COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND (:status IS NULL OR t.status = :status)
+            GROUP BY t.status
+            """)
+    List<Object[]> countStatusForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
+
+    @Query("""
+            SELECT t.priority, COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND (:status IS NULL OR t.status = :status)
+            GROUP BY t.priority
+            """)
+    List<Object[]> countPriorityForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
+
+    @Query("""
+            SELECT COALESCE(t.assignedTeam.name, 'Unassigned'), COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND t.status <> com.worknest.tenant.enums.TaskStatus.DONE
+            GROUP BY COALESCE(t.assignedTeam.name, 'Unassigned') ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> countOpenWorkloadByTeam(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+
+    @Query(value = """
+            SELECT DATE_FORMAT(t.updated_at, '%Y-%m'), SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END), COUNT(*)
+            FROM tasks t WHERE t.updated_at BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project_id = :projectId) AND (:teamId IS NULL OR t.assigned_team_id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee_id = :employeeId)
+            GROUP BY DATE_FORMAT(t.updated_at, '%Y-%m') ORDER BY DATE_FORMAT(t.updated_at, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countCompletionTrend(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+
+    @Query("""
+            SELECT COUNT(t) FROM Task t WHERE t.status <> com.worknest.tenant.enums.TaskStatus.DONE AND t.dueDate < :today
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId)
+            """)
+    long countOverdueForReport(@Param("today") LocalDate today, @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
     @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findAllByOrderByCreatedAtDesc();
 

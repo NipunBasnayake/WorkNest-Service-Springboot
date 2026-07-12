@@ -8,6 +8,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +24,26 @@ public class AnalyticsController {
 
     public AnalyticsController(AnalyticsService analyticsService) {
         this.analyticsService = analyticsService;
+    }
+
+    @GetMapping("/business-intelligence")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<BusinessIntelligenceReportDto>> getBusinessIntelligenceReport(
+            @PathVariable String tenantSlug,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) String department,
+            @RequestParam(required = false) Long teamId,
+            @RequestParam(required = false) Long employeeId,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) String taskStatus,
+            @RequestParam(required = false) String recruitmentStatus,
+            @RequestParam(required = false) String attendancePeriod,
+            @RequestParam(required = false) String leaveType) {
+        var response = analyticsService.getBusinessIntelligenceReport(
+                tenantSlug, fromDate, toDate, department, teamId, employeeId, projectId,
+                taskStatus, recruitmentStatus, attendancePeriod, leaveType);
+        return ResponseEntity.ok(ApiResponse.success("Business intelligence report retrieved", response));
     }
 
     @GetMapping("/tasks/by-assignee")

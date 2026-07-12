@@ -6,6 +6,7 @@ import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.security.util.SecurityUtils;
+import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.tenant.dto.announcement.AnnouncementCreateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
@@ -98,6 +99,10 @@ class AnnouncementServiceImplTest {
         lenient().when(authorizationService.getCurrentTenantKeyOrThrow()).thenReturn("acme");
         lenient().when(notificationService.createSystemNotification(anyLong(), any(), any(), any(), any())).thenReturn(null);
         lenient().when(securityUtils.getCurrentUserEmailOrThrow()).thenReturn("current@worknest.test");
+        PlatformUserPrincipal principal = org.mockito.Mockito.mock(PlatformUserPrincipal.class);
+        lenient().when(principal.getId()).thenReturn(100L);
+        lenient().when(securityUtils.getCurrentPrincipalOrThrow()).thenReturn(principal);
+        lenient().when(securityUtils.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
     }
 
     @Test

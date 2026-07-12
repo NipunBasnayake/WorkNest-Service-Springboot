@@ -4,6 +4,7 @@ import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.attachment.AttachmentCreateRequestDto;
@@ -46,6 +47,7 @@ public class AttachmentServiceImpl implements AttachmentService {
     private final AuthorizationService authorizationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
+    private final FileStorageService fileStorageService;
 
     public AttachmentServiceImpl(
             AttachmentRepository attachmentRepository,
@@ -56,7 +58,8 @@ public class AttachmentServiceImpl implements AttachmentService {
             TeamMemberRepository teamMemberRepository,
             AuthorizationService authorizationService,
             TenantDtoMapper tenantDtoMapper,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            FileStorageService fileStorageService) {
         this.attachmentRepository = attachmentRepository;
         this.taskRepository = taskRepository;
         this.projectRepository = projectRepository;
@@ -66,6 +69,7 @@ public class AttachmentServiceImpl implements AttachmentService {
         this.authorizationService = authorizationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -149,6 +153,10 @@ public class AttachmentServiceImpl implements AttachmentService {
 
         String fileUrl = trimToNull(attachment.getFileUrl());
         if (fileUrl != null) {
+            if (fileStorageService.isLocalReference(fileUrl)) {
+                FileStorageService.StoredFileResource resource = fileStorageService.loadAsResource(fileUrl);
+                return new AttachmentDownloadResult(resource.resource(), attachment.getFileName(), resource.mimeType(), null);
+            }
             return new AttachmentDownloadResult(null, attachment.getFileName(), resolveMimeType(attachment), fileUrl);
         }
         throw new ResourceNotFoundException("Attachment file URL not found");
@@ -294,11 +302,7 @@ public class AttachmentServiceImpl implements AttachmentService {
     }
 
     private String normalizeFileUrl(String fileUrl) {
-        String normalized = trimToNull(fileUrl);
-        if (normalized == null) {
-            throw new BadRequestException("fileUrl is required");
-        }
-        return normalized;
+        return fileStorageService.normalizeStoredReference(fileUrl);
     }
 
     private String normalizeFileType(String fileType) {
@@ -324,7 +328,7 @@ public class AttachmentServiceImpl implements AttachmentService {
                 .entityType(attachment.getEntityType())
                 .entityId(attachment.getEntityId())
                 .fileName(attachment.getFileName())
-                .fileUrl(attachment.getFileUrl())
+                .fileUrl(fileStorageService.toPublicUrl(attachment.getFileUrl()))
                 .fileType(attachment.getFileType())
                 .mimeType(resolveMimeType(attachment))
                 .fileSize(attachment.getFileSize())

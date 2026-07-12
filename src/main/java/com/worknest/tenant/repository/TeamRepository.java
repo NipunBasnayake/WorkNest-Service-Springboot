@@ -14,6 +14,9 @@ import java.util.Optional;
 
 public interface TeamRepository extends JpaRepository<Team, Long> {
 
+    @Query("SELECT t.id, t.name FROM Team t ORDER BY t.name")
+    List<Object[]> findReportOptions();
+
     @Override
     @EntityGraph(attributePaths = {"manager"})
     List<Team> findAll();

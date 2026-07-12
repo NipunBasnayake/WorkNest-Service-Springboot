@@ -11,14 +11,70 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
+    @Query("""
+            SELECT t.status, COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND (:status IS NULL OR t.status = :status)
+            GROUP BY t.status
+            """)
+    List<Object[]> countStatusForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+    @Query("""
+            SELECT t.priority, COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND (:status IS NULL OR t.status = :status)
+            GROUP BY t.priority
+            """)
+    List<Object[]> countPriorityForReport(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
+
+    @Query("""
+            SELECT COALESCE(t.assignedTeam.name, 'Unassigned'), COUNT(t) FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND t.status <> com.worknest.tenant.enums.TaskStatus.DONE
+            GROUP BY COALESCE(t.assignedTeam.name, 'Unassigned') ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> countOpenWorkloadByTeam(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+
+    @Query(value = """
+            SELECT DATE_FORMAT(t.updated_at, '%Y-%m'), SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END), COUNT(*)
+            FROM tasks t WHERE t.updated_at BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project_id = :projectId) AND (:teamId IS NULL OR t.assigned_team_id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee_id = :employeeId)
+            GROUP BY DATE_FORMAT(t.updated_at, '%Y-%m') ORDER BY DATE_FORMAT(t.updated_at, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countCompletionTrend(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+
+    @Query("""
+            SELECT COUNT(t) FROM Task t WHERE t.status <> com.worknest.tenant.enums.TaskStatus.DONE AND t.dueDate < :today
+              AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId)
+            """)
+    long countOverdueForReport(@Param("today") LocalDate today, @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    List<Task> findAllByOrderByCreatedAtDesc();
+
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    List<Task> findByAssignedTeamIdOrderByCreatedAtDesc(Long assignedTeamId);
+
+
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByProjectIdOrderByCreatedAtDesc(Long projectId);
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByAssigneeIdOrderByCreatedAtDesc(Long assigneeId);
 
         @Query("""
@@ -41,13 +97,13 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                                                           )
                         ORDER BY t.createdAt DESC
                         """)
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
                 List<Task> findDistinctVisibleByEmployeeOrderByCreatedAtDesc(
                                 @Param("employeeId") Long employeeId,
                                 @Param("teamLeadRole") TeamFunctionalRole teamLeadRole,
                                 @Param("projectManagerRole") TeamFunctionalRole projectManagerRole);
 
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findByProjectIdAndStatusOrderByCreatedAtDesc(Long projectId, TaskStatus status);
 
     boolean existsByProjectIdAndAssigneeId(Long projectId, Long assigneeId);
@@ -90,6 +146,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             SELECT t
             FROM Task t
             WHERE (:projectId IS NULL OR t.project.id = :projectId)
+              AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
               AND (:status IS NULL OR t.status = :status)
               AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
               AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
@@ -100,9 +157,106 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                     OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
-                @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedTeam"})
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     Page<Task> search(
             @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId,
+            @Param("status") TaskStatus status,
+            @Param("assigneeId") Long assigneeId,
+            @Param("dueFrom") LocalDate dueFrom,
+            @Param("dueTo") LocalDate dueTo,
+            @Param("search") String search,
+            Pageable pageable);
+
+    @Query(
+            value = """
+                    SELECT t
+                    FROM Task t
+                    WHERE (:projectId IS NULL OR t.project.id = :projectId)
+                      AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+                      AND (:status IS NULL OR t.status = :status)
+                      AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
+                      AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
+                      AND (:dueTo IS NULL OR t.dueDate <= :dueTo)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                            OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                      AND (
+                            t.assignee.id = :employeeId
+                            OR (
+                                t.assignedTeam IS NOT NULL
+                                AND t.assignedTeam.manager IS NOT NULL
+                                AND t.assignedTeam.manager.id = :employeeId
+                            )
+                            OR EXISTS (
+                                SELECT tm.id
+                                FROM TeamMember tm
+                                WHERE tm.team.id = t.assignedTeam.id
+                                  AND tm.employee.id = :employeeId
+                                  AND tm.leftAt IS NULL
+                                  AND (tm.functionalRole = :teamLeadRole OR tm.functionalRole = :projectManagerRole)
+                            )
+                            OR EXISTS (
+                                SELECT pm.id
+                                FROM ProjectTeam pt
+                                JOIN TeamMember pm ON pm.team.id = pt.team.id
+                                WHERE pt.project.id = t.project.id
+                                  AND pm.employee.id = :employeeId
+                                  AND pm.leftAt IS NULL
+                                  AND pm.functionalRole = :projectManagerRole
+                            )
+                          )
+                    """,
+            countQuery = """
+                    SELECT COUNT(t)
+                    FROM Task t
+                    WHERE (:projectId IS NULL OR t.project.id = :projectId)
+                      AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+                      AND (:status IS NULL OR t.status = :status)
+                      AND (:assigneeId IS NULL OR t.assignee.id = :assigneeId)
+                      AND (:dueFrom IS NULL OR t.dueDate >= :dueFrom)
+                      AND (:dueTo IS NULL OR t.dueDate <= :dueTo)
+                      AND (
+                            :search IS NULL OR :search = ''
+                            OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                            OR LOWER(COALESCE(t.description, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                      AND (
+                            t.assignee.id = :employeeId
+                            OR (
+                                t.assignedTeam IS NOT NULL
+                                AND t.assignedTeam.manager IS NOT NULL
+                                AND t.assignedTeam.manager.id = :employeeId
+                            )
+                            OR EXISTS (
+                                SELECT tm.id
+                                FROM TeamMember tm
+                                WHERE tm.team.id = t.assignedTeam.id
+                                  AND tm.employee.id = :employeeId
+                                  AND tm.leftAt IS NULL
+                                  AND (tm.functionalRole = :teamLeadRole OR tm.functionalRole = :projectManagerRole)
+                            )
+                            OR EXISTS (
+                                SELECT pm.id
+                                FROM ProjectTeam pt
+                                JOIN TeamMember pm ON pm.team.id = pt.team.id
+                                WHERE pt.project.id = t.project.id
+                                  AND pm.employee.id = :employeeId
+                                  AND pm.leftAt IS NULL
+                                  AND pm.functionalRole = :projectManagerRole
+                            )
+                          )
+                    """
+    )
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
+    Page<Task> searchVisibleToEmployee(
+            @Param("employeeId") Long employeeId,
+            @Param("teamLeadRole") TeamFunctionalRole teamLeadRole,
+            @Param("projectManagerRole") TeamFunctionalRole projectManagerRole,
+            @Param("projectId") Long projectId,
+            @Param("teamId") Long teamId,
             @Param("status") TaskStatus status,
             @Param("assigneeId") Long assigneeId,
             @Param("dueFrom") LocalDate dueFrom,
@@ -217,6 +371,25 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             Pageable pageable);
 
     @Query("""
+            SELECT t.project.id, t.project.name, COUNT(t),
+                   SUM(CASE WHEN t.status = :doneStatus THEN 1 ELSE 0 END)
+            FROM Task t
+            GROUP BY t.project.id, t.project.name
+            ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> summarizeProjectProgress(@Param("doneStatus") TaskStatus doneStatus);
+
+    @Query("""
+            SELECT t.project.id, t.project.name, COUNT(t),
+                   SUM(CASE WHEN t.status = :doneStatus THEN 1 ELSE 0 END)
+            FROM Task t
+            WHERE t.project.id IN :projectIds
+            GROUP BY t.project.id, t.project.name
+            ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> summarizeProjectProgressForProjects(@Param("projectIds") List<Long> projectIds, @Param("doneStatus") TaskStatus doneStatus);
+
+    @Query("""
             SELECT t
             FROM Task t
             WHERE t.assignee IS NOT NULL
@@ -230,3 +403,4 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             @Param("fromDate") LocalDate fromDate,
             @Param("toDate") LocalDate toDate);
 }
+

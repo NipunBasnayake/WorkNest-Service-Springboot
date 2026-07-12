@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.List;
+import java.time.LocalDate;
 
 @Repository
 public interface EmployeeRepository extends JpaRepository<Employee, Long> {
@@ -46,6 +47,31 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
             ORDER BY COUNT(e) DESC
             """)
     List<Object[]> countByDesignation();
+
+    @Query("""
+            SELECT COALESCE(NULLIF(TRIM(e.department), ''), 'Unassigned'), COUNT(e)
+            FROM Employee e GROUP BY COALESCE(NULLIF(TRIM(e.department), ''), 'Unassigned')
+            ORDER BY COUNT(e) DESC
+            """)
+    List<Object[]> countByDepartment();
+
+    @Query("SELECT e.status, COUNT(e) FROM Employee e WHERE (:department IS NULL OR e.department = :department) GROUP BY e.status")
+    List<Object[]> countByStatusGroup(@Param("department") String department);
+
+    @Query(value = """
+            SELECT DATE_FORMAT(e.joined_date, '%Y-%m'), COUNT(*) FROM employees e
+            WHERE e.joined_date BETWEEN :fromDate AND :toDate
+              AND (:department IS NULL OR e.department = :department)
+            GROUP BY DATE_FORMAT(e.joined_date, '%Y-%m') ORDER BY DATE_FORMAT(e.joined_date, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countJoiningTrend(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
+            @Param("department") String department);
+
+    @Query("SELECT DISTINCT e.department FROM Employee e WHERE e.department IS NOT NULL AND TRIM(e.department) <> '' ORDER BY e.department")
+    List<String> findDistinctDepartments();
+
+    @Query("SELECT e.id, CONCAT(e.firstName, ' ', e.lastName) FROM Employee e ORDER BY e.firstName, e.lastName")
+    List<Object[]> findReportOptions();
 
     @Query("""
             SELECT e

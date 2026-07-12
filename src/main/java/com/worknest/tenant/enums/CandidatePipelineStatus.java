@@ -8,5 +8,6 @@ public enum CandidatePipelineStatus {
     HR_REVIEW,
     OFFERED,
     HIRED,
-    REJECTED
+    REJECTED,
+    WITHDRAWN
 }

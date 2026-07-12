@@ -9,6 +9,7 @@ import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.leave.LeaveApplyRequestDto;
 import com.worknest.tenant.dto.leave.LeaveDecisionRequestDto;
 import com.worknest.tenant.dto.leave.LeaveUpdateRequestDto;
+import com.worknest.tenant.dto.leave.LeaveResponseDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.LeaveRequest;
 import com.worknest.tenant.enums.LeaveStatus;
@@ -38,6 +39,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class LeaveRequestServiceImplTest {
@@ -81,10 +83,10 @@ class LeaveRequestServiceImplTest {
         );
 
         doNothing().when(authorizationService).requirePermission(any(Permission.class));
-        when(authorizationService.getCurrentEmployeeOrThrow()).thenAnswer(invocation -> null);
-        when(attachmentService.listAttachments(any(), anyLong())).thenReturn(List.of());
-        when(employeeRepository.findByRoleInAndStatus(anyList(), any())).thenReturn(List.of());
-        when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(authorizationService.getCurrentEmployeeOrThrow()).thenAnswer(invocation -> null);
+        lenient().when(attachmentService.listAttachments(any(), anyLong())).thenReturn(List.of());
+        lenient().when(employeeRepository.findByRoleInAndStatus(anyList(), any())).thenReturn(List.of());
+        lenient().when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -95,8 +97,8 @@ class LeaveRequestServiceImplTest {
 
         LeaveApplyRequestDto request = new LeaveApplyRequestDto();
         request.setLeaveType(LeaveType.ANNUAL);
-        request.setStartDate(LocalDate.of(2026, 4, 20));
-        request.setEndDate(LocalDate.of(2026, 4, 21));
+        request.setStartDate(LocalDate.now().plusDays(20));
+        request.setEndDate(LocalDate.now().plusDays(21));
         request.setReason("Vacation trip");
 
         LeaveRequest response = captureCreate(request);
@@ -113,8 +115,8 @@ class LeaveRequestServiceImplTest {
 
         LeaveApplyRequestDto request = new LeaveApplyRequestDto();
         request.setLeaveType(LeaveType.SICK);
-        request.setStartDate(LocalDate.of(2026, 4, 20));
-        request.setEndDate(LocalDate.of(2026, 4, 20));
+        request.setStartDate(LocalDate.now().plusDays(20));
+        request.setEndDate(LocalDate.now().plusDays(20));
         request.setReason("Medical appointment");
 
         LeaveRequest response = captureCreate(request);
@@ -134,7 +136,7 @@ class LeaveRequestServiceImplTest {
         LeaveDecisionRequestDto request = new LeaveDecisionRequestDto();
         request.setDecisionComment("Approved");
 
-        LeaveRequest response = leaveRequestService.approveLeave(1L, request);
+        LeaveResponseDto response = leaveRequestService.approveLeave(1L, request);
 
         Assertions.assertThat(response.getStatus()).isEqualTo(LeaveStatus.APPROVED);
         Assertions.assertThat(response.getApprover().getId()).isEqualTo(approver.getId());
@@ -153,7 +155,7 @@ class LeaveRequestServiceImplTest {
         LeaveDecisionRequestDto request = new LeaveDecisionRequestDto();
         request.setDecisionComment("Approved");
 
-        LeaveRequest response = leaveRequestService.approveLeave(2L, request);
+        LeaveResponseDto response = leaveRequestService.approveLeave(2L, request);
 
         Assertions.assertThat(response.getStatus()).isEqualTo(LeaveStatus.APPROVED);
         Assertions.assertThat(response.getApprover().getId()).isEqualTo(approver.getId());
@@ -170,7 +172,7 @@ class LeaveRequestServiceImplTest {
         LeaveDecisionRequestDto request = new LeaveDecisionRequestDto();
         request.setDecisionComment("Coverage unavailable");
 
-        LeaveRequest response = leaveRequestService.rejectLeave(3L, request);
+        LeaveResponseDto response = leaveRequestService.rejectLeave(3L, request);
 
         Assertions.assertThat(response.getStatus()).isEqualTo(LeaveStatus.REJECTED);
         Assertions.assertThat(response.getApprover().getId()).isEqualTo(approver.getId());
@@ -216,8 +218,8 @@ class LeaveRequestServiceImplTest {
 
         LeaveApplyRequestDto request = new LeaveApplyRequestDto();
         request.setLeaveType(LeaveType.ANNUAL);
-        request.setStartDate(LocalDate.of(2026, 4, 20));
-        request.setEndDate(LocalDate.of(2026, 4, 21));
+        request.setStartDate(LocalDate.now().plusDays(20));
+        request.setEndDate(LocalDate.now().plusDays(21));
         request.setReason("Vacation trip");
 
         Assertions.assertThatThrownBy(() -> leaveRequestService.applyLeave(request))

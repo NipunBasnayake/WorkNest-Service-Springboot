@@ -2,6 +2,7 @@ package com.worknest.tenant.service.impl;
 
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.multitenancy.context.TenantContextHolder;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
@@ -104,7 +105,12 @@ public class NotificationServiceImpl implements NotificationService {
         Notification saved = notificationRepository.save(notification);
         NotificationResponseDto response = toResponse(saved);
 
-        tenantRealtimePublisher.publishNotification(recipient.getEmail(), response);
+        String tenantKey = TenantContextHolder.getTenantKey();
+        if (tenantKey == null || tenantKey.isBlank()) {
+            tenantRealtimePublisher.publishNotification(recipient.getEmail(), response);
+        } else {
+            tenantRealtimePublisher.publishNotification(tenantKey, recipient.getEmail(), response);
+        }
         return response;
     }
 

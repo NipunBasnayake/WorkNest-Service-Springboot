@@ -23,10 +23,15 @@ public interface TaskService {
 
     List<TaskResponseDto> listMyTasks();
 
+    List<TaskResponseDto> listTeamTasks(Long teamId);
+
+    List<TaskResponseDto> listAllTasks();
+
     List<TaskResponseDto> listByProject(Long projectId);
 
     PagedResultDto<TaskResponseDto> listTasksPaged(
             Long projectId,
+            Long teamId,
             TaskStatus status,
             Long assigneeId,
             LocalDate dueFrom,
@@ -51,3 +56,6 @@ public interface TaskService {
 
     KanbanBoardResponseDto getKanbanBoard(Long projectId);
 }
+
+
+

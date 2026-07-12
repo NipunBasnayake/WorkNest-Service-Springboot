@@ -1,115 +1,823 @@
 package com.worknest.common.storage;
 
+import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.common.exception.ForbiddenOperationException;
+import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.master.entity.PlatformTenant;
+import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.multitenancy.context.TenantContextHolder;
+import com.worknest.security.model.PlatformUserPrincipal;
+import com.worknest.security.util.SecurityUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.UriUtils;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @Service
 public class FileStorageService {
 
-    private static final long MAX_FILE_SIZE_BYTES = 10L * 1024L * 1024L;
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "pdf");
+    private static final String INTERNAL_PREFIX = "wnfile://";
+    private static final String STORAGE_BUCKET = "worknest-local";
+    private static final String HMAC_ALGORITHM = "HmacSHA256";
+    private static final Set<String> ALLOWED_ROOT_DIRECTORIES = Set.of(
+            "workspace", "employees", "recruitment", "tasks", "announcements",
+            "leave", "chat", "documents", "images", "docs"
+    );
+    private static final Set<String> DANGEROUS_EXTENSIONS = Set.of(
+            "ade", "adp", "apk", "app", "bat", "bin", "cmd", "com", "cpl", "dll", "dmg", "elf",
+            "exe", "gadget", "hta", "ins", "iso", "jar", "js", "jse", "lib", "lnk", "msi", "msp",
+            "mst", "pif", "ps1", "scr", "sh", "sys", "vb", "vbe", "vbs", "war", "ws", "wsf"
+    );
 
-    private final Path frontendPublicUploadsPath;
+    private final StorageProperties storageProperties;
+    private final Path storageRootPath;
+    private final Path tenantsRootPath;
+    private final String signedUrlSecret;
+    private final SecurityUtils securityUtils;
+    private final MasterTenantLookupService masterTenantLookupService;
 
-    public record StoredFileResult(String url, String path, String name, String mimeType, long size) {
+    public record StoredFileResult(
+            String url,
+            String path,
+            String name,
+            String mimeType,
+            long size,
+            String bucket,
+            String uploadedAt) {
+    }
+
+    public record StoredFileResource(Resource resource, String fileName, String mimeType) {
+    }
+
+    private record ValidatedFile(
+            String id,
+            String originalName,
+            String extension,
+            String storedFileName,
+            String contentType,
+            byte[] bytes,
+            long size) {
+    }
+
+    private enum FileKind {
+        IMAGE,
+        DOCUMENT
     }
 
     public FileStorageService(
-            @Value("${app.storage.frontend-public-uploads-dir:../WorkNest-Client-ReactJs/public/uploads}")
-            String frontendPublicUploadsDir) {
-        // Temporary dev-only storage: backend writes directly into frontend public/uploads.
-        this.frontendPublicUploadsPath = Paths.get(frontendPublicUploadsDir).toAbsolutePath().normalize();
-        initializeDirectories();
+            StorageProperties storageProperties,
+            SecurityUtils securityUtils,
+            MasterTenantLookupService masterTenantLookupService,
+            @Value("${app.storage.signed-url-secret:${app.jwt.secret:worknest-dev-file-secret}}") String signedUrlSecret) {
+        this.storageProperties = storageProperties;
+        this.storageRootPath = storageProperties.rootPath();
+        this.tenantsRootPath = storageRootPath.resolve("tenants").normalize();
+        this.securityUtils = securityUtils;
+        this.masterTenantLookupService = masterTenantLookupService;
+        this.signedUrlSecret = signedUrlSecret == null || signedUrlSecret.isBlank()
+                ? "worknest-dev-file-secret"
+                : signedUrlSecret;
+        createDirectories();
+    }
+
+    public Path getTenantsRootPath() {
+        return tenantsRootPath;
     }
 
     public StoredFileResult store(MultipartFile file, String type) {
+        return toLegacyResult(store(file, StorageCategory.fromLegacyType(type)));
+    }
+
+    public StoredFileDto store(MultipartFile file, StorageCategory category, String... pathSegments) {
+        return store(resolveCurrentTenantSlug(), category, file, pathSegments);
+    }
+
+    public StoredFileDto store(String tenantSlug, StorageCategory category, MultipartFile file, String... pathSegments) {
+        StorageCategory resolvedCategory = requireCategory(category);
+        ValidatedFile validatedFile = validateFile(file, resolvedCategory);
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        createDirectories(normalizedTenantSlug);
+
+        List<String> relativeSegments = new ArrayList<>(resolvedCategory.directorySegments());
+        relativeSegments.addAll(normalizePathSegments(pathSegments));
+        relativeSegments.add(validatedFile.storedFileName());
+        String storedName = String.join("/", relativeSegments);
+
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        Path targetDirectory = tenantRoot.resolve(String.join("/", relativeSegments.subList(0, relativeSegments.size() - 1))).normalize();
+        Path targetPath = targetDirectory.resolve(validatedFile.storedFileName()).normalize();
+        ensurePathInside(targetPath, tenantRoot);
+
+        try {
+            Files.createDirectories(targetDirectory);
+            Files.write(targetPath, validatedFile.bytes());
+        } catch (IOException ex) {
+            throw new BadRequestException("Failed to store file", ex);
+        }
+
+        Instant uploadedAt = Instant.now();
+        return new StoredFileDto(
+                validatedFile.id(),
+                validatedFile.originalName(),
+                storedName,
+                buildPublicUrl(normalizedTenantSlug, storedName),
+                validatedFile.size(),
+                validatedFile.contentType(),
+                uploadedAt
+        );
+    }
+
+    public StoredFileDto replace(MultipartFile file, StorageCategory category, String existingStoredName, String... pathSegments) {
+        String tenantSlug = resolveCurrentTenantSlug();
+        return replace(tenantSlug, category, existingStoredName, file, pathSegments);
+    }
+
+    public StoredFileDto replace(String tenantSlug, StorageCategory category, String existingStoredName, MultipartFile file, String... pathSegments) {
+        StoredFileDto storedFile = store(tenantSlug, category, file, pathSegments);
+        if (trimToNull(existingStoredName) != null) {
+            delete(tenantSlug, existingStoredName);
+        }
+        return storedFile;
+    }
+
+    public void delete(String storedName) {
+        delete(resolveCurrentTenantSlug(), storedName);
+    }
+
+    public void delete(String tenantSlug, String storedName) {
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        String relativePath = normalizeStoredName(storedName);
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        Path filePath = tenantRoot.resolve(relativePath).normalize();
+        ensurePathInside(filePath, tenantRoot);
+        try {
+            Files.deleteIfExists(filePath);
+        } catch (IOException ex) {
+            throw new BadRequestException("Failed to delete file", ex);
+        }
+    }
+
+    public boolean exists(String storedName) {
+        return exists(resolveCurrentTenantSlug(), storedName);
+    }
+
+    public boolean exists(String tenantSlug, String storedName) {
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        String relativePath = normalizeStoredName(storedName);
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        Path filePath = tenantRoot.resolve(relativePath).normalize();
+        ensurePathInside(filePath, tenantRoot);
+        return Files.isRegularFile(filePath);
+    }
+
+    public StoredFileResource download(String storedName) {
+        return download(resolveCurrentTenantSlug(), storedName);
+    }
+
+    public StoredFileResource download(String tenantSlug, String storedName) {
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        String relativePath = normalizeStoredName(storedName);
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        Path filePath = tenantRoot.resolve(relativePath).normalize();
+        ensurePathInside(filePath, tenantRoot);
+        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+            throw new ResourceNotFoundException("File not found");
+        }
+
+        try {
+            Resource resource = new UrlResource(filePath.toUri());
+            if (!resource.exists() || !resource.isReadable()) {
+                throw new ResourceNotFoundException("File not found");
+            }
+            String fileName = filePath.getFileName().toString();
+            return new StoredFileResource(resource, fileName, detectContentTypeFromName(fileName));
+        } catch (MalformedURLException ex) {
+            throw new BadRequestException("Invalid file path", ex);
+        }
+    }
+
+    public String buildPublicUrl(String storedName) {
+        return buildPublicUrl(resolveCurrentTenantSlug(), storedName);
+    }
+
+    public String buildPublicUrl(String tenantSlug, String storedName) {
+        String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
+        String relativePath = normalizeStoredName(storedName);
+        return "/files/" + encodePathSegment(normalizedTenantSlug) + "/" + encodeRelativePath(relativePath);
+    }
+
+    public void validate(MultipartFile file, StorageCategory category) {
+        validateFile(file, requireCategory(category));
+    }
+
+    public void createDirectories() {
+        try {
+            Files.createDirectories(storageRootPath);
+            Files.createDirectories(tenantsRootPath);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to initialize upload directory", ex);
+        }
+    }
+
+    public void createDirectories(String tenantSlug) {
+        String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        try {
+            Files.createDirectories(tenantRoot);
+            for (StorageCategory category : StorageCategory.values()) {
+                Files.createDirectories(tenantRoot.resolve(String.join("/", category.directorySegments())).normalize());
+            }
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to initialize tenant upload directories", ex);
+        }
+    }
+
+    public void validateTenantFileAccess(String tenantSlug, String relativePath) {
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        PlatformUserPrincipal principal = securityUtils.getCurrentPrincipalOrThrow();
+        PlatformRole role = principal.getRole();
+        PlatformTenant tenant = findActiveTenantBySlug(normalizedTenantSlug);
+
+        if (!role.isPlatformAdmin()) {
+            String principalTenantKey = normalizeOptionalIdentifier(principal.getTenantKey());
+            String tenantKey = normalizeOptionalIdentifier(tenant.getTenantKey());
+            String tenantRecordSlug = normalizeOptionalIdentifier(tenant.getSlug());
+            if (principalTenantKey == null || (!principalTenantKey.equals(tenantKey) && !principalTenantKey.equals(tenantRecordSlug))) {
+                throw new ForbiddenOperationException("You are not allowed to access files for another tenant");
+            }
+        }
+
+        String normalizedPath = normalizeRelativePath(relativePath);
+        Path tenantRoot = tenantRoot(normalizedTenantSlug);
+        Path filePath = tenantRoot.resolve(normalizedPath).normalize();
+        ensurePathInside(filePath, tenantRoot);
+        if (!Files.isRegularFile(filePath)) {
+            throw new ResourceNotFoundException("File not found");
+        }
+    }
+
+    public String normalizeStoredReference(String fileUrl) {
+        String normalized = trimToNull(fileUrl);
+        if (normalized == null) {
+            throw new BadRequestException("fileUrl is required");
+        }
+        if (isLocalReference(normalized)) {
+            return INTERNAL_PREFIX + normalizeRelativePath(normalized.substring(INTERNAL_PREFIX.length()));
+        }
+        String parsedPublicReference = parsePublicFileUrl(normalized);
+        if (parsedPublicReference != null) {
+            return INTERNAL_PREFIX + parsedPublicReference;
+        }
+        if (normalized.startsWith("/uploads/")) {
+            return INTERNAL_PREFIX + normalizeRelativePath(normalized.substring("/uploads/".length()));
+        }
+        throw new BadRequestException("Only local WorkNest file references are supported");
+    }
+
+    public String toPublicUrl(String storedReference) {
+        String normalized = trimToNull(storedReference);
+        if (normalized == null) {
+            return null;
+        }
+        if (!isLocalReference(normalized)) {
+            return normalized;
+        }
+        return buildPublicUrl(resolveCurrentTenantSlug(), normalized);
+    }
+
+    public boolean isLocalReference(String value) {
+        return value != null && value.startsWith(INTERNAL_PREFIX);
+    }
+
+    public StoredFileResource loadAsResource(String storedReference) {
+        return download(resolveCurrentTenantSlug(), storedReference);
+    }
+
+    public StoredFileResource loadPublicResource(String tenantSlug, String folderName, String fileName, long expires, String signature) {
+        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        String relativePath = normalizeRelativePath(normalizePathSegment(folderName) + "/" + normalizePathSegment(fileName));
+        validateSignature(normalizedTenantSlug, relativePath, expires, signature);
+        return download(normalizedTenantSlug, relativePath);
+    }
+
+    private StoredFileResult toLegacyResult(StoredFileDto storedFile) {
+        return new StoredFileResult(
+                storedFile.url(),
+                INTERNAL_PREFIX + storedFile.storedName(),
+                fileNameFromStoredName(storedFile.storedName()),
+                storedFile.contentType(),
+                storedFile.size(),
+                STORAGE_BUCKET,
+                storedFile.uploadedAt().toString()
+        );
+    }
+
+    private ValidatedFile validateFile(MultipartFile file, StorageCategory category) {
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("File is required");
         }
 
-        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new BadRequestException("File size exceeds 10MB limit");
-        }
+        byte[] fileBytes = readFileBytes(file);
+        rejectExecutableSignature(fileBytes);
 
-        String originalName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "file" : file.getOriginalFilename());
+        String originalName = normalizeOriginalName(file.getOriginalFilename());
         String extension = extractExtension(originalName);
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new BadRequestException("Only jpg, jpeg, png, and pdf files are allowed");
+        if (DANGEROUS_EXTENSIONS.contains(extension)) {
+            throw new BadRequestException("Executable files are not allowed");
         }
 
-        String normalizedType = normalizeType(type);
-        if ("image".equals(normalizedType) && "pdf".equals(extension)) {
-            throw new BadRequestException("PDF files are not allowed for image type");
+        FileKind fileKind = resolveFileKind(extension);
+        if (fileKind == FileKind.IMAGE && !category.acceptsImage()) {
+            throw new BadRequestException("This storage category only accepts document files");
+        }
+        if (fileKind == FileKind.DOCUMENT && !category.acceptsDocument()) {
+            throw new BadRequestException("This storage category only accepts image files");
         }
 
-        String folderName = "image".equals(normalizedType) ? "images" : "docs";
-        Path targetDirectory = frontendPublicUploadsPath.resolve(folderName);
-
-        String filename = UUID.randomUUID() + "_" + stripPath(originalName);
-        Path targetPath = targetDirectory.resolve(filename).normalize();
-        if (!targetPath.startsWith(targetDirectory)) {
-            throw new BadRequestException("Invalid file path");
+        long maxSize = fileKind == FileKind.IMAGE ? storageProperties.maxImageSizeBytes() : storageProperties.maxDocumentSizeBytes();
+        if (fileBytes.length > maxSize) {
+            String sizeLabel = fileKind == FileKind.IMAGE ? "2MB" : "10MB";
+            throw new BadRequestException("File size exceeds " + sizeLabel + " limit");
         }
 
+        String contentType = detectContentType(extension, fileBytes);
+        String id = UUID.randomUUID().toString();
+        String storedFileName = id + "_" + sanitizeFilename(originalName, extension);
+        return new ValidatedFile(id, originalName, extension, storedFileName, contentType, fileBytes, fileBytes.length);
+    }
+
+    private byte[] readFileBytes(MultipartFile file) {
         try {
-            Files.createDirectories(targetDirectory);
-            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            return file.getBytes();
         } catch (IOException ex) {
-            throw new BadRequestException("Failed to store file");
+            throw new BadRequestException("Failed to read file", ex);
         }
-
-        String relativePath = folderName + "/" + filename;
-        String url = "/uploads/" + relativePath;
-
-        return new StoredFileResult(
-                url,
-                relativePath,
-                filename,
-                file.getContentType(),
-                file.getSize()
-        );
     }
 
-    private void initializeDirectories() {
+    private FileKind resolveFileKind(String extension) {
+        if (containsIgnoreCase(storageProperties.getAllowedImageTypes(), extension)) {
+            return FileKind.IMAGE;
+        }
+        if (containsIgnoreCase(storageProperties.getAllowedDocumentTypes(), extension)) {
+            return FileKind.DOCUMENT;
+        }
+        throw new BadRequestException("File type is not allowed");
+    }
+
+    private boolean containsIgnoreCase(List<String> values, String candidate) {
+        if (values == null || candidate == null) {
+            return false;
+        }
+        String normalizedCandidate = candidate.trim().toLowerCase(Locale.ROOT);
+        return values.stream()
+                .filter(value -> value != null)
+                .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                .anyMatch(normalizedCandidate::equals);
+    }
+
+    private String detectContentType(String extension, byte[] fileBytes) {
+        return switch (extension) {
+            case "jpg", "jpeg" -> {
+                validateJpeg(fileBytes);
+                yield "image/jpeg";
+            }
+            case "png" -> {
+                validatePng(fileBytes);
+                yield "image/png";
+            }
+            case "webp" -> {
+                validateWebp(fileBytes);
+                yield "image/webp";
+            }
+            case "pdf" -> {
+                validatePdf(fileBytes);
+                yield "application/pdf";
+            }
+            case "docx" -> {
+                validateZipContainer(fileBytes, "word/document.xml", "DOCX document");
+                yield "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            }
+            case "xlsx" -> {
+                validateZipContainer(fileBytes, "xl/workbook.xml", "XLSX spreadsheet");
+                yield "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            }
+            case "pptx" -> {
+                validateZipContainer(fileBytes, "ppt/presentation.xml", "PPTX presentation");
+                yield "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            }
+            case "zip" -> {
+                validateZipContainer(fileBytes, null, "ZIP archive");
+                yield "application/zip";
+            }
+            default -> throw new BadRequestException("File type is not allowed");
+        };
+    }
+
+    private String detectContentTypeFromName(String fileName) {
+        String extension = extractExtension(fileName);
+        return switch (extension) {
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "png" -> "image/png";
+            case "webp" -> "image/webp";
+            case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            case "zip" -> "application/zip";
+            default -> "application/octet-stream";
+        };
+    }
+
+    private void validateJpeg(byte[] fileBytes) {
+        if (fileBytes.length < 3
+                || (fileBytes[0] & 0xFF) != 0xFF
+                || (fileBytes[1] & 0xFF) != 0xD8
+                || (fileBytes[2] & 0xFF) != 0xFF) {
+            throw new BadRequestException("Uploaded file content does not match a JPEG image");
+        }
+    }
+
+    private void validatePng(byte[] fileBytes) {
+        byte[] signature = new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+        if (fileBytes.length < signature.length) {
+            throw new BadRequestException("Uploaded file content does not match a PNG image");
+        }
+        for (int i = 0; i < signature.length; i++) {
+            if (fileBytes[i] != signature[i]) {
+                throw new BadRequestException("Uploaded file content does not match a PNG image");
+            }
+        }
+    }
+
+    private void validateWebp(byte[] fileBytes) {
+        if (fileBytes.length < 12
+                || fileBytes[0] != 'R'
+                || fileBytes[1] != 'I'
+                || fileBytes[2] != 'F'
+                || fileBytes[3] != 'F'
+                || fileBytes[8] != 'W'
+                || fileBytes[9] != 'E'
+                || fileBytes[10] != 'B'
+                || fileBytes[11] != 'P') {
+            throw new BadRequestException("Uploaded file content does not match a WEBP image");
+        }
+    }
+
+    private void validatePdf(byte[] fileBytes) {
+        if (fileBytes.length < 5
+                || fileBytes[0] != '%'
+                || fileBytes[1] != 'P'
+                || fileBytes[2] != 'D'
+                || fileBytes[3] != 'F'
+                || fileBytes[4] != '-') {
+            throw new BadRequestException("Uploaded file content does not match a PDF document");
+        }
+    }
+
+    private void validateZipContainer(byte[] fileBytes, String requiredEntry, String label) {
+        if (fileBytes.length < 4 || fileBytes[0] != 'P' || fileBytes[1] != 'K') {
+            throw new BadRequestException("Uploaded file content does not match a " + label);
+        }
+
+        boolean hasContentTypes = false;
+        boolean hasRequiredEntry = requiredEntry == null;
+        int entryCount = 0;
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(fileBytes))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                entryCount++;
+                String entryName = entry.getName() == null ? "" : entry.getName().replace("\\", "/");
+                validateZipEntryName(entryName);
+                if ("[Content_Types].xml".equals(entryName)) {
+                    hasContentTypes = true;
+                }
+                if (entryName.equals(requiredEntry)) {
+                    hasRequiredEntry = true;
+                }
+            }
+        } catch (IOException ex) {
+            throw new BadRequestException("Uploaded file content does not match a " + label, ex);
+        }
+
+        if (entryCount == 0 || (requiredEntry != null && (!hasContentTypes || !hasRequiredEntry))) {
+            throw new BadRequestException("Uploaded file content does not match a " + label);
+        }
+    }
+
+    private void validateZipEntryName(String entryName) {
+        if (entryName.isBlank() || entryName.startsWith("/") || entryName.contains("../") || entryName.contains("..\\")) {
+            throw new BadRequestException("Archive contains an unsafe file path");
+        }
+        String extension = extractOptionalExtension(entryName);
+        if (extension != null && DANGEROUS_EXTENSIONS.contains(extension)) {
+            throw new BadRequestException("Archive contains an executable file");
+        }
+    }
+
+    private void rejectExecutableSignature(byte[] fileBytes) {
+        if (fileBytes.length >= 2 && fileBytes[0] == 'M' && fileBytes[1] == 'Z') {
+            throw new BadRequestException("Executable files are not allowed");
+        }
+        if (fileBytes.length >= 4
+                && (fileBytes[0] & 0xFF) == 0x7F
+                && fileBytes[1] == 'E'
+                && fileBytes[2] == 'L'
+                && fileBytes[3] == 'F') {
+            throw new BadRequestException("Executable files are not allowed");
+        }
+        if (fileBytes.length >= 4
+                && (((fileBytes[0] & 0xFF) == 0xFE && (fileBytes[1] & 0xFF) == 0xED && (fileBytes[2] & 0xFF) == 0xFA && (fileBytes[3] & 0xFF) == 0xCE)
+                || ((fileBytes[0] & 0xFF) == 0xCE && (fileBytes[1] & 0xFF) == 0xFA && (fileBytes[2] & 0xFF) == 0xED && (fileBytes[3] & 0xFF) == 0xFE))) {
+            throw new BadRequestException("Executable files are not allowed");
+        }
+    }
+
+    private String resolveCurrentTenantSlug() {
+        String tenantSlug = trimToNull(TenantContextHolder.getTenantSlug());
+        if (tenantSlug != null) {
+            return normalizeTenantSlug(tenantSlug);
+        }
+
+        String tenantKey = trimToNull(TenantContextHolder.getTenantKey());
+        if (tenantKey == null) {
+            tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
+        }
+
+        String normalizedTenantKey = normalizeTenantSlug(tenantKey);
+        return masterTenantLookupService.findByTenantKey(normalizedTenantKey)
+                .map(PlatformTenant::getSlug)
+                .map(this::normalizeTenantSlug)
+                .orElse(normalizedTenantKey);
+    }
+
+    private String requireActiveTenantSlug(String tenantSlug) {
+        String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
+        findActiveTenantBySlug(normalizedTenantSlug);
+        return normalizedTenantSlug;
+    }
+
+    private PlatformTenant findActiveTenantBySlug(String tenantSlug) {
+        PlatformTenant tenant = masterTenantLookupService.findBySlug(tenantSlug)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantSlug));
+        if (tenant.getStatus() != TenantStatus.ACTIVE || Boolean.FALSE.equals(tenant.getActive())) {
+            throw new ForbiddenOperationException("Tenant is not active for file access");
+        }
+        return tenant;
+    }
+
+    private Path tenantRoot(String tenantSlug) {
+        return tenantsRootPath.resolve(normalizeTenantSlug(tenantSlug)).normalize();
+    }
+
+    private StorageCategory requireCategory(StorageCategory category) {
+        if (category == null) {
+            throw new BadRequestException("Storage category is required");
+        }
+        return category;
+    }
+
+    private String normalizeStoredName(String storedName) {
+        String normalized = trimToNull(storedName);
+        if (normalized == null) {
+            throw new BadRequestException("storedName is required");
+        }
+        if (isLocalReference(normalized)) {
+            return normalizeRelativePath(normalized.substring(INTERNAL_PREFIX.length()));
+        }
+        String parsedPublicReference = parsePublicFileUrl(normalized);
+        if (parsedPublicReference != null) {
+            return parsedPublicReference;
+        }
+        return normalizeRelativePath(normalized);
+    }
+
+    private String parsePublicFileUrl(String value) {
+        String path = extractUriPath(value);
+        if (path.startsWith("/files/")) {
+            String remainder = path.substring("/files/".length());
+            int slashIndex = remainder.indexOf('/');
+            if (slashIndex <= 0 || slashIndex == remainder.length() - 1) {
+                throw new BadRequestException("Invalid file URL");
+            }
+            normalizeTenantSlug(remainder.substring(0, slashIndex));
+            return normalizeRelativePath(remainder.substring(slashIndex + 1));
+        }
+        if (path.startsWith("/api/public/")) {
+            String remainder = path.substring("/api/public/".length());
+            int filesIndex = remainder.indexOf("/files/");
+            if (filesIndex <= 0 || filesIndex + "/files/".length() >= remainder.length()) {
+                return null;
+            }
+            normalizeTenantSlug(remainder.substring(0, filesIndex));
+            return normalizeRelativePath(remainder.substring(filesIndex + "/files/".length()));
+        }
+        return null;
+    }
+
+    private String extractUriPath(String value) {
         try {
-            Files.createDirectories(frontendPublicUploadsPath.resolve("images"));
-            Files.createDirectories(frontendPublicUploadsPath.resolve("docs"));
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to initialize upload directories", ex);
+            URI uri = URI.create(value);
+            if (uri.getPath() != null) {
+                return uri.getPath();
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Treat as a local path below.
         }
+        return value;
     }
 
-    private String normalizeType(String type) {
-        String normalized = type == null ? "" : type.trim().toLowerCase(Locale.ROOT);
-        if (!"image".equals(normalized) && !"doc".equals(normalized)) {
-            throw new BadRequestException("Type must be 'image' or 'doc'");
+    private String normalizeRelativePath(String relativePath) {
+        String normalized = trimToNull(relativePath);
+        if (normalized == null) {
+            throw new BadRequestException("File path is required");
         }
-        return normalized;
+        normalized = normalized.replace("\\", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        int queryIndex = normalized.indexOf('?');
+        if (queryIndex >= 0) {
+            normalized = normalized.substring(0, queryIndex);
+        }
+        String[] rawSegments = normalized.split("/");
+        List<String> segments = new ArrayList<>();
+        for (String rawSegment : rawSegments) {
+            String segment = trimToNull(rawSegment);
+            if (segment == null || ".".equals(segment) || "..".equals(segment) || segment.contains("..")) {
+                throw new BadRequestException("Invalid file path");
+            }
+            segments.add(segment);
+        }
+        if (segments.size() < 2 || !ALLOWED_ROOT_DIRECTORIES.contains(segments.get(0))) {
+            throw new BadRequestException("Invalid storage folder");
+        }
+        return String.join("/", segments);
     }
 
-    private String extractExtension(String filename) {
-        int index = filename.lastIndexOf('.');
-        if (index < 0 || index == filename.length() - 1) {
-            throw new BadRequestException("File extension is required");
+    private List<String> normalizePathSegments(String... pathSegments) {
+        List<String> normalizedSegments = new ArrayList<>();
+        if (pathSegments == null) {
+            return normalizedSegments;
         }
-        return filename.substring(index + 1).toLowerCase(Locale.ROOT);
+        for (String pathSegment : pathSegments) {
+            String normalized = trimToNull(pathSegment);
+            if (normalized == null) {
+                continue;
+            }
+            normalizedSegments.add(normalizePathSegment(normalized));
+        }
+        return normalizedSegments;
+    }
+
+    private String normalizePathSegment(String pathSegment) {
+        String normalized = trimToNull(pathSegment);
+        if (normalized == null || normalized.contains("/") || normalized.contains("\\") || normalized.contains("..")) {
+            throw new BadRequestException("Invalid file path segment");
+        }
+        String sanitized = normalized.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (sanitized.isBlank() || ".".equals(sanitized) || "..".equals(sanitized)) {
+            throw new BadRequestException("Invalid file path segment");
+        }
+        return sanitized;
+    }
+
+    private String normalizeOriginalName(String originalFilename) {
+        String cleaned = StringUtils.cleanPath(originalFilename == null || originalFilename.isBlank() ? "file" : originalFilename);
+        String stripped = stripPath(cleaned);
+        return stripped.isBlank() ? "file" : stripped;
+    }
+
+    private String sanitizeFilename(String filename, String extension) {
+        String stripped = stripPath(filename);
+        String sanitized = stripped.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (sanitized.isBlank() || ".".equals(sanitized) || "..".equals(sanitized)) {
+            return "file." + extension;
+        }
+        if (!sanitized.toLowerCase(Locale.ROOT).endsWith("." + extension)) {
+            sanitized = sanitized + "." + extension;
+        }
+        return sanitized;
     }
 
     private String stripPath(String filename) {
         String normalized = filename.replace("\\", "/");
         int slashIndex = normalized.lastIndexOf('/');
         return slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
+    }
+
+    private String extractExtension(String filename) {
+        String extension = extractOptionalExtension(filename);
+        if (extension == null) {
+            throw new BadRequestException("File extension is required");
+        }
+        return extension;
+    }
+
+    private String extractOptionalExtension(String filename) {
+        if (filename == null) {
+            return null;
+        }
+        int index = filename.lastIndexOf('.');
+        if (index < 0 || index == filename.length() - 1) {
+            return null;
+        }
+        return filename.substring(index + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String fileNameFromStoredName(String storedName) {
+        String relativePath = normalizeRelativePath(storedName);
+        int slashIndex = relativePath.lastIndexOf('/');
+        return slashIndex >= 0 ? relativePath.substring(slashIndex + 1) : relativePath;
+    }
+
+    private String normalizeTenantSlug(String tenantSlug) {
+        String normalized = trimToNull(tenantSlug);
+        if (normalized == null) {
+            throw new BadRequestException("Tenant slug is required");
+        }
+        normalized = normalized.toLowerCase(Locale.ROOT);
+        if (!normalized.matches("[a-z0-9][a-z0-9-]{0,79}")) {
+            throw new BadRequestException("Invalid tenant slug");
+        }
+        return normalized;
+    }
+
+    private String normalizeOptionalIdentifier(String value) {
+        String normalized = trimToNull(value);
+        return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private void ensurePathInside(Path candidate, Path parent) {
+        if (!candidate.normalize().startsWith(parent.normalize())) {
+            throw new BadRequestException("Invalid file path");
+        }
+    }
+
+    private String encodeRelativePath(String relativePath) {
+        String normalized = normalizeRelativePath(relativePath);
+        String[] segments = normalized.split("/");
+        List<String> encodedSegments = new ArrayList<>();
+        for (String segment : segments) {
+            encodedSegments.add(encodePathSegment(segment));
+        }
+        return String.join("/", encodedSegments);
+    }
+
+    private String encodePathSegment(String value) {
+        return UriUtils.encodePathSegment(value, StandardCharsets.UTF_8);
+    }
+
+    private void validateSignature(String tenantSlug, String path, long expires, String signature) {
+        if (Instant.now().getEpochSecond() > expires) {
+            throw new ForbiddenOperationException("File link has expired");
+        }
+        String expected = sign(tenantSlug, path, expires);
+        if (signature == null || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8))) {
+            throw new ForbiddenOperationException("File link is invalid");
+        }
+    }
+
+    private String sign(String tenantSlug, String path, long expires) {
+        String payload = tenantSlug + "\n" + path + "\n" + expires;
+        try {
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(signedUrlSecret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
+            return HexFormat.of().formatHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to sign file URL", ex);
+        }
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

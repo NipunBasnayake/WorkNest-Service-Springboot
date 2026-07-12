@@ -100,7 +100,10 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResponseDto login(LoginRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public LoginResponseDto login(
+            LoginRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         PlatformUser user = platformUserService.findByEmailOrThrow(requestDto.getEmail());
         String clientIp = extractClientIpAddress(request);
         String userAgent = extractUserAgent(request);
@@ -131,13 +134,15 @@ public class AuthServiceImpl implements AuthService {
         PlatformTenant tenant = resolveTenantForUser(user);
         String accessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
         String csrfToken = generateSecureToken();
+        String refreshTokenValue = resolveRefreshTokenValue(refreshToken);
 
         platformUserService.updateLastLogin(user.getId());
-        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(refreshToken), csrfToken, computeCookieMaxAgeSeconds(refreshToken));
+        authCookieService.issueAuthCookies(response, refreshTokenValue, csrfToken, computeCookieMaxAgeSeconds(refreshToken));
 
         return LoginResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(accessToken)
+                .refreshToken(refreshTokenValue)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
                 .csrfToken(csrfToken)
                 .sessionId(refreshToken.getId())
@@ -147,10 +152,18 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public RefreshTokenResponseDto refreshAccessToken(RefreshTokenRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public RefreshTokenResponseDto refreshAccessToken(
+            RefreshTokenRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        authCookieService.validateCsrfToken(request);
-        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
+        if (requestRefreshToken == null) {
+            authCookieService.validateCsrfToken(request);
+        }
+        String refreshTokenValue = requestRefreshToken != null
+                ? requestRefreshToken
+                : authCookieService.resolveRefreshToken(request, null);
         RefreshToken currentToken = refreshTokenService.validateTokenForRefresh(refreshTokenValue);
         PlatformUser user = currentToken.getPlatformUser();
         String clientIp = extractClientIpAddress(request);
@@ -175,12 +188,14 @@ public class AuthServiceImpl implements AuthService {
         PlatformTenant tenant = resolveTenantForUser(user);
         String newAccessToken = tenant != null ? jwtService.generateAccessToken(user, tenant) : jwtService.generateAccessToken(user);
         String csrfToken = generateSecureToken();
+        String rotatedRefreshTokenValue = resolveRefreshTokenValue(rotatedToken);
 
-        authCookieService.issueAuthCookies(response, resolveRefreshTokenValue(rotatedToken), csrfToken, computeCookieMaxAgeSeconds(rotatedToken));
+        authCookieService.issueAuthCookies(response, rotatedRefreshTokenValue, csrfToken, computeCookieMaxAgeSeconds(rotatedToken));
 
         return RefreshTokenResponseDto.builder()
                 .tokenType("Bearer")
                 .accessToken(newAccessToken)
+                .refreshToken(rotatedRefreshTokenValue)
                 .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
                 .csrfToken(csrfToken)
                 .sessionId(rotatedToken.getId())
@@ -188,10 +203,18 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LogoutResponseDto logout(LogoutRequestDto requestDto, HttpServletRequest request, HttpServletResponse response) {
+    public LogoutResponseDto logout(
+            LogoutRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         String requestedTenantKey = resolveRequestedTenantKey(requestDto.getTenantKey());
-        authCookieService.validateCsrfToken(request);
-        String refreshTokenValue = authCookieService.resolveRefreshToken(request, requestDto.getRefreshToken());
+        String requestRefreshToken = trimToNull(requestDto.getRefreshToken());
+        if (requestRefreshToken == null) {
+            authCookieService.validateCsrfToken(request);
+        }
+        String refreshTokenValue = requestRefreshToken != null
+                ? requestRefreshToken
+                : authCookieService.resolveRefreshToken(request, null);
         RefreshToken token = refreshTokenService.validateToken(refreshTokenValue);
         PlatformUser tokenUser = token.getPlatformUser();
 
@@ -212,7 +235,8 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
-    public AuthSessionsResponseDto getActiveSessions(HttpServletRequest request) {
+    public AuthSessionsResponseDto getActiveSessions(
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");
@@ -232,7 +256,9 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthSessionRevocationResponseDto revokeSession(Long sessionId, HttpServletRequest request) {
+    public AuthSessionRevocationResponseDto revokeSession(
+            Long sessionId,
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");
@@ -253,7 +279,8 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthSessionRevocationResponseDto revokeOtherSessions(HttpServletRequest request) {
+    public AuthSessionRevocationResponseDto revokeOtherSessions(
+            HttpServletRequest request) {
         PlatformUserPrincipal principal = extractCurrentPrincipal();
         if (principal == null) {
             throw new ForbiddenOperationException("No authenticated user found");
@@ -445,14 +472,13 @@ public class AuthServiceImpl implements AuthService {
         if (requireRequestedTenantKey && normalizedRequestedTenant == null) {
             throw new ForbiddenOperationException("Tenant key is required for tenant-scoped users");
         }
-        if (normalizedRequestedTenant != null &&
-                !normalizedRequestedTenant.equalsIgnoreCase(userTenantKey)) {
-            throw new ForbiddenOperationException("Requested tenant does not match user tenant");
-        }
-
         PlatformTenant tenant = masterTenantLookupService.findByTenantKey(userTenantKey)
                 .orElseThrow(() -> new TenantNotFoundException(
                         "Tenant not found for user: " + userTenantKey));
+
+        if (normalizedRequestedTenant != null && !requestedTenantMatches(tenant, normalizedRequestedTenant)) {
+            throw new ForbiddenOperationException("Requested tenant does not match user tenant");
+        }
 
         if (tenant.getStatus() != TenantStatus.ACTIVE) {
             throw new ForbiddenOperationException("Tenant is not active: " + userTenantKey);
@@ -469,8 +495,12 @@ public class AuthServiceImpl implements AuthService {
 
         String tokenTenantKey = normalizeTenantKey(user.getTenantKey());
         String normalizedRequestedTenant = normalizeTenantKey(requestedTenantKey);
-        if (tokenTenantKey == null || normalizedRequestedTenant == null ||
-                !tokenTenantKey.equalsIgnoreCase(normalizedRequestedTenant)) {
+        if (tokenTenantKey == null || normalizedRequestedTenant == null) {
+            throw new ForbiddenOperationException("Refresh token tenant does not match the requested tenant");
+        }
+
+        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tokenTenantKey).orElse(null);
+        if (tenant == null || !requestedTenantMatches(tenant, normalizedRequestedTenant)) {
             throw new ForbiddenOperationException("Refresh token tenant does not match the requested tenant");
         }
     }
@@ -499,6 +529,14 @@ public class AuthServiceImpl implements AuthService {
         return normalized.isBlank() ? null : normalized;
     }
 
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
     private String resolveRequestedTenantKey(String tenantKeyFromPayload) {
         String payloadTenantKey = normalizeTenantKey(tenantKeyFromPayload);
         String headerTenantKey = extractTenantKeyFromHeader();
@@ -509,6 +547,20 @@ public class AuthServiceImpl implements AuthService {
         }
 
         return payloadTenantKey != null ? payloadTenantKey : headerTenantKey;
+    }
+
+    private boolean requestedTenantMatches(PlatformTenant tenant, String requestedTenant) {
+        if (tenant == null || requestedTenant == null) {
+            return false;
+        }
+
+        String normalizedRequestedTenant = normalizeTenantKey(requestedTenant);
+        String tenantKey = normalizeTenantKey(tenant.getTenantKey());
+        String tenantSlug = normalizeTenantKey(tenant.getSlug());
+
+        return normalizedRequestedTenant != null
+                && (normalizedRequestedTenant.equalsIgnoreCase(tenantKey)
+                || normalizedRequestedTenant.equalsIgnoreCase(tenantSlug));
     }
 
     private PlatformTenant resolveTenantForUser(PlatformUser user) {

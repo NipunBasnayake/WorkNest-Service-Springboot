@@ -348,6 +348,14 @@ public class TeamServiceImpl implements TeamService {
 
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<TeamAssignableMemberResponseDto> listAssignableMembers(Long teamId) {
+        return teamMemberRepository.findAssignableMembersByTeamId(teamId, UserStatus.ACTIVE)
+                .stream()
+                .map(this::toAssignableMemberResponse)
+                .toList();
+    }
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public PagedResultDto<TeamResponseDto> listTeamsPaged(
             Long managerId,
             String search,
@@ -439,6 +447,20 @@ public class TeamServiceImpl implements TeamService {
                 .functionalRole(teamMember.getFunctionalRole())
                 .joinedAt(teamMember.getJoinedAt())
                 .leftAt(teamMember.getLeftAt())
+                .build();
+    }
+
+    private TeamAssignableMemberResponseDto toAssignableMemberResponse(TeamMember teamMember) {
+        Employee employee = teamMember.getEmployee();
+        return TeamAssignableMemberResponseDto.builder()
+                .employeeId(employee.getId())
+                .fullName(buildFullName(employee))
+                .email(employee.getEmail())
+                .designation(employee.getDesignation())
+                .jobTitle(employee.getDesignation())
+                .avatar(null)
+                .teamRole(teamMember.getFunctionalRole())
+                .active(employee.getStatus() == UserStatus.ACTIVE)
                 .build();
     }
 

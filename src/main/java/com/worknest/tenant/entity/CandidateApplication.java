@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -34,6 +35,9 @@ public class CandidateApplication {
     @JoinColumn(name = "job_position_id", nullable = false)
     private JobPosition jobPosition;
 
+    @Column(name = "reference_number", length = 30, unique = true)
+    private String referenceNumber;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private CandidatePipelineStatus status;
@@ -43,6 +47,12 @@ public class CandidateApplication {
 
     @Column(name = "expected_salary")
     private BigDecimal expectedSalary;
+
+    @Column(name = "available_from")
+    private LocalDate availableFrom;
+
+    @Column(name = "source", length = 120)
+    private String source;
 
     @Column(name = "recruiter_notes", columnDefinition = "TEXT")
     private String recruiterNotes;

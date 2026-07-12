@@ -5,6 +5,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.security.util.SecurityUtils;
@@ -70,6 +71,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final SecurityUtils securityUtils;
     private final TenantDtoMapper tenantDtoMapper;
     private final AuditLogService auditLogService;
+    private final FileStorageService fileStorageService;
 
     public ProjectServiceImpl(
             ProjectRepository projectRepository,
@@ -82,7 +84,8 @@ public class ProjectServiceImpl implements ProjectService {
             AuthorizationService authorizationService,
             SecurityUtils securityUtils,
             TenantDtoMapper tenantDtoMapper,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            FileStorageService fileStorageService) {
         this.projectRepository = projectRepository;
         this.projectTeamRepository = projectTeamRepository;
         this.taskRepository = taskRepository;
@@ -94,6 +97,7 @@ public class ProjectServiceImpl implements ProjectService {
         this.securityUtils = securityUtils;
         this.tenantDtoMapper = tenantDtoMapper;
         this.auditLogService = auditLogService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -461,7 +465,7 @@ public class ProjectServiceImpl implements ProjectService {
                 .entityType(attachment.getEntityType())
                 .entityId(attachment.getEntityId())
                 .fileName(attachment.getFileName())
-                .fileUrl(attachment.getFileUrl())
+                .fileUrl(fileStorageService.toPublicUrl(attachment.getFileUrl()))
                 .fileType(attachment.getFileType())
                 .mimeType(attachment.getMimeType())
                 .fileSize(attachment.getFileSize())
@@ -561,7 +565,7 @@ public class ProjectServiceImpl implements ProjectService {
                 }
 
                 ProjectDocumentRequestDto dto = new ProjectDocumentRequestDto();
-                dto.setUrl(url);
+                dto.setUrl(fileStorageService.normalizeStoredReference(url));
                 dto.setName(trimToNull(document.getName()));
                 dto.setMimeType(trimToNull(document.getMimeType()));
                 dto.setSize(document.getSize());
@@ -577,7 +581,7 @@ public class ProjectServiceImpl implements ProjectService {
                 }
 
                 ProjectDocumentRequestDto dto = new ProjectDocumentRequestDto();
-                dto.setUrl(url);
+                dto.setUrl(fileStorageService.normalizeStoredReference(url));
                 normalized.add(dto);
             }
         }

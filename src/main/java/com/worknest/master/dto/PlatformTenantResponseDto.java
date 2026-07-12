@@ -17,6 +17,7 @@ public class PlatformTenantResponseDto {
     private String companyName;
     private String databaseName;
     private TenantStatus status;
+    private Boolean active;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

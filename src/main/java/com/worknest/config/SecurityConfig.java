@@ -72,7 +72,9 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .ignoringRequestMatchers(
+                                "/api/**",
                                 "/api/auth/login",
+                                "/api/auth/refresh",
                                 "/api/auth/register",
                                 "/api/auth/register-company",
                                 "/api/auth/forgot-password",
@@ -91,6 +93,7 @@ public class SecurityConfig {
                     authorize
                         .requestMatchers(
                                 "/api/auth/login",
+                                "/api/auth/refresh",
                                 "/api/auth/register",
                                 "/api/auth/register-company",
                                 "/api/auth/forgot-password",
@@ -110,10 +113,12 @@ public class SecurityConfig {
                     }
 
                     authorize
-                        .requestMatchers("/api/auth/logout", "/api/auth/refresh", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
+                        .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
                         .authenticated()
                         .requestMatchers("/api/platform/**")
                         .hasRole("PLATFORM_ADMIN")
+                        .requestMatchers("/files/**")
+                        .authenticated()
                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                         .permitAll()
                         .requestMatchers("/api/*/**")

@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.time.LocalDateTime;
 
 public interface ProjectRepository extends JpaRepository<Project, Long> {
 
@@ -53,6 +54,21 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             GROUP BY p.status
             """)
     List<Object[]> countByStatusGroup();
+
+    @Query("SELECT p.status, COUNT(p) FROM Project p WHERE (:projectId IS NULL OR p.id = :projectId) AND p.createdAt BETWEEN :fromDate AND :toDate GROUP BY p.status")
+    List<Object[]> countStatusForReport(@Param("projectId") Long projectId, @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDate") LocalDateTime toDate);
+
+    @Query(value = """
+            SELECT DATE_FORMAT(p.created_at, '%Y-%m'), COUNT(*) FROM projects p
+            WHERE p.created_at BETWEEN :fromDate AND :toDate AND (:projectId IS NULL OR p.id = :projectId)
+            GROUP BY DATE_FORMAT(p.created_at, '%Y-%m') ORDER BY DATE_FORMAT(p.created_at, '%Y-%m')
+            """, nativeQuery = true)
+    List<Object[]> countCreatedTrend(@Param("projectId") Long projectId, @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDate") LocalDateTime toDate);
+
+    @Query("SELECT p.id, p.name FROM Project p ORDER BY p.name")
+    List<Object[]> findReportOptions();
 
     @Query("""
             SELECT DISTINCT p

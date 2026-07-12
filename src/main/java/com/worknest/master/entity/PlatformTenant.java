@@ -55,6 +55,15 @@ public class PlatformTenant {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    public void changeStatus(TenantStatus nextStatus) {
+        if (nextStatus == null) {
+            throw new IllegalArgumentException("Tenant status is required");
+        }
+        this.status = nextStatus;
+        this.active = nextStatus == TenantStatus.ACTIVE;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -64,12 +73,8 @@ public class PlatformTenant {
         if (slug == null || slug.isBlank()) {
             throw new IllegalStateException("Tenant slug must be provided");
         }
-        if (status == null) {
-            status = TenantStatus.ACTIVE;
-        }
-        if (active == null) {
-            active = true;
-        }
+        if (status == null) status = TenantStatus.ACTIVE;
+        active = status == TenantStatus.ACTIVE;
     }
 
     @PreUpdate

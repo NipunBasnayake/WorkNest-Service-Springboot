@@ -16,5 +16,6 @@ public enum AuditActionType {
     SHORTLIST,
     SCHEDULE,
     SUBMIT_FEEDBACK,
-    LOGIN
+    LOGIN,
+    CANDIDATE_APPLIED
 }

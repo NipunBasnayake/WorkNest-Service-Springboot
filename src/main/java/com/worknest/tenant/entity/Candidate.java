@@ -33,6 +33,21 @@ public class Candidate {
     @Column(name = "phone", length = 30)
     private String phone;
 
+    @Column(name = "current_city", length = 120)
+    private String currentCity;
+
+    @Column(name = "country", length = 120)
+    private String country;
+
+    @Column(name = "linkedin_url", length = 500)
+    private String linkedinUrl;
+
+    @Column(name = "portfolio_url", length = 500)
+    private String portfolioUrl;
+
+    @Column(name = "current_company", length = 160)
+    private String currentCompany;
+
     @Column(name = "current_title", length = 160)
     private String currentTitle;
 

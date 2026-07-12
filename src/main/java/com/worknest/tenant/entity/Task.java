@@ -16,7 +16,8 @@ import java.time.LocalDateTime;
         indexes = {
                 @Index(name = "idx_tasks_project_status", columnList = "project_id,status"),
             @Index(name = "idx_tasks_assignee", columnList = "assignee_id"),
-            @Index(name = "idx_tasks_assigned_team", columnList = "assigned_team_id")
+            @Index(name = "idx_tasks_assigned_team", columnList = "assigned_team_id"),
+            @Index(name = "idx_tasks_assigned_by", columnList = "assigned_by_employee_id")
         }
 )
 @Getter
@@ -60,6 +61,10 @@ public class Task {
 
     @Column(name = "created_by_user_id")
     private Long createdByUserId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_by_employee_id")
+    private Employee assignedBy;
 
     @Column(name = "assigned_by_user_id")
     private Long assignedByUserId;

@@ -13,6 +13,7 @@ import com.worknest.tenant.repository.AttendanceRecordRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.service.AttendanceService;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -38,6 +39,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final EmailNotificationService emailNotificationService;
     private final SecurityUtils securityUtils;
     private final Clock clock;
+    @Autowired(required = false)
+    private TenantRealtimePublisher tenantRealtimePublisher;
 
     public AttendanceServiceImpl(
             AttendanceRecordRepository attendanceRecordRepository,
@@ -80,6 +83,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         record.setStatus(AttendanceStatus.INCOMPLETE);
 
         AttendanceRecord saved = attendanceRecordRepository.save(record);
+        publishAttendanceRealtime(saved);
         emailNotificationService.sendAttendanceConfirmationEmail(
                 employee.getEmail(),
                 buildFullName(employee),
@@ -118,6 +122,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         record.setStatus(resolveAttendanceStatus(record.getCheckIn(), record.getCheckOut()));
 
         AttendanceRecord saved = attendanceRecordRepository.save(record);
+        publishAttendanceRealtime(saved);
         emailNotificationService.sendAttendanceConfirmationEmail(
                 employee.getEmail(),
                 buildFullName(employee),
@@ -210,6 +215,12 @@ public class AttendanceServiceImpl implements AttendanceService {
             throw new BadRequestException("Employee is not active: " + employeeId);
         }
         return employee;
+    }
+
+    private void publishAttendanceRealtime(AttendanceRecord record) {
+        if (tenantRealtimePublisher != null) {
+            tenantRealtimePublisher.publishAttendanceUpdate(securityUtils.getCurrentTenantKeyOrThrow(), toAttendanceResponse(record));
+        }
     }
 
     private AttendanceStatus resolveAttendanceStatus(LocalDateTime checkIn, LocalDateTime checkOut) {

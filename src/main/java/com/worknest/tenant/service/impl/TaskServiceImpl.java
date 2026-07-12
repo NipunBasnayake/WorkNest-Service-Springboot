@@ -22,6 +22,7 @@ import com.worknest.tenant.dto.task.TaskStatusUpdateRequestDto;
 import com.worknest.tenant.dto.task.TaskUpdateRequestDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Project;
+import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Task;
 import com.worknest.tenant.entity.TaskComment;
 import com.worknest.tenant.entity.Team;
@@ -116,15 +117,14 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto createTask(TaskCreateRequestDto requestDto) {
-        authorizationService.requirePermission(Permission.CREATE_TASK);
         Project project = getProjectOrThrow(requestDto.getProjectId());
-        ensureProjectAllowsTaskCreation(project);
+        ensureProjectActiveForTaskMutation(project);
         Team assignedTeam = resolveAssignedTeamOrThrow(project.getId(), requestDto.getAssignedTeamId());
         enforceTaskCreationAccess(project, assignedTeam.getId());
 
         Long currentUserId = authorizationService.getCurrentUserIdOrThrow();
-        Employee creator = resolveCurrentEmployeeOrNull();
-        Employee assignee = resolveAssignedEmployee(assignedTeam, resolveRequestedAssignedEmployeeId(requestDto));
+        Employee reporter = resolveCurrentEmployeeOrThrow();
+        Employee assignee = resolveRequiredAssignedEmployee(assignedTeam, resolveRequestedAssignedEmployeeId(requestDto));
 
         validateDueDate(project, requestDto.getDueDate());
 
@@ -136,9 +136,9 @@ public class TaskServiceImpl implements TaskService {
         task.setPriority(requestDto.getPriority());
         task.setAssignee(assignee);
         task.setAssignedTeam(assignedTeam);
-        task.setCreatedBy(creator);
+        task.setCreatedBy(reporter);
         task.setCreatedByUserId(currentUserId);
-        task.setAssignedByUserId(currentUserId);
+        markAssignmentReporter(task, reporter, currentUserId);
         task.setDueDate(requestDto.getDueDate());
 
         Task saved = taskRepository.save(task);
@@ -147,7 +147,7 @@ public class TaskServiceImpl implements TaskService {
                 AuditActionType.CREATE,
                 AuditEntityType.TASK,
                 saved.getId(),
-                "{\"title\":\"" + escapeJson(saved.getTitle()) + "\"}"
+                "{\"title\":\"" + escapeJson(saved.getTitle()) + "\",\"assigneeId\":" + assignee.getId() + "}"
         );
         publishTaskRealtime(saved);
         return toTaskResponse(saved);
@@ -155,15 +155,19 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto updateTask(Long taskId, TaskUpdateRequestDto requestDto) {
-        authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureProjectActiveForTaskMutation(task.getProject());
         ensureTaskOpenForMutation(task, "editing task details");
+
         Long previousAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
         TaskStatus previousStatus = task.getStatus();
         String previousTitle = task.getTitle();
         String previousDescription = task.getDescription();
         LocalDate previousDueDate = task.getDueDate();
+
+        Employee reporter = resolveCurrentEmployeeOrThrow();
+        Long reporterUserId = authorizationService.getCurrentUserIdOrThrow();
 
         if (requestDto.getStatus() != null) {
             validateTaskTransition(task, requestDto.getStatus());
@@ -174,15 +178,19 @@ public class TaskServiceImpl implements TaskService {
         }
         if (requestDto.getAssignedTeamId() != null) {
             Team assignedTeam = resolveAssignedTeamOrThrow(task.getProject().getId(), requestDto.getAssignedTeamId());
+            enforceTaskCreationAccess(task.getProject(), assignedTeam.getId());
             task.setAssignedTeam(assignedTeam);
-            task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
+            markAssignmentReporter(task, reporter, reporterUserId);
         }
 
         Long requestedAssigneeId = resolveRequestedAssignedEmployeeId(requestDto);
         if (requestDto.getAssignedEmployeeId() != null || requestDto.getAssigneeId() != null) {
-            task.setAssignee(resolveAssignedEmployee(task.getAssignedTeam(), requestedAssigneeId));
-            task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
+            task.setAssignee(resolveRequiredAssignedEmployee(task.getAssignedTeam(), requestedAssigneeId));
+            markAssignmentReporter(task, reporter, reporterUserId);
         }
+
+        ensureTaskHasRequiredAssignee(task);
+        ensureAssignedEmployeeStillValid(task.getAssignedTeam(), task.getAssignee());
 
         task.setTitle(requestDto.getTitle().trim());
         task.setDescription(trimToNull(requestDto.getDescription()));
@@ -204,7 +212,7 @@ public class TaskServiceImpl implements TaskService {
                 AuditActionType.UPDATE,
                 AuditEntityType.TASK,
                 updated.getId(),
-                "{\"title\":\"" + escapeJson(updated.getTitle()) + "\"}"
+                "{\"title\":\"" + escapeJson(updated.getTitle()) + "\",\"assigneeId\":" + updated.getAssignee().getId() + "}"
         );
         publishTaskRealtime(updated);
         return toTaskResponse(updated);
@@ -214,6 +222,7 @@ public class TaskServiceImpl implements TaskService {
     public TaskResponseDto changeStatus(Long taskId, TaskStatusUpdateRequestDto requestDto) {
         authorizationService.requirePermission(Permission.UPDATE_TASK_STATUS);
         Task task = getTaskOrThrow(taskId);
+        ensureProjectActiveForTaskMutation(task.getProject());
         validateTaskTransition(task, requestDto.getStatus());
         task.setStatus(requestDto.getStatus());
         Task updated = taskRepository.save(task);
@@ -230,9 +239,9 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changePriority(Long taskId, TaskPriorityUpdateRequestDto requestDto) {
-        authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureProjectActiveForTaskMutation(task.getProject());
         ensureTaskOpenForMutation(task, "changing priority");
         task.setPriority(requestDto.getPriority());
         Task updated = taskRepository.save(task);
@@ -248,24 +257,24 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changeAssignee(Long taskId, TaskAssigneeUpdateRequestDto requestDto) {
-        authorizationService.requirePermission(Permission.ASSIGN_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskAssignmentAccess(task);
+        ensureProjectActiveForTaskMutation(task.getProject());
         ensureTaskOpenForMutation(task, "reassigning the task");
         Long assignedEmployeeId = resolveRequestedAssignedEmployeeId(requestDto);
-        if (assignedEmployeeId == null) {
-            throw new BadRequestException("Assigned employee is required");
-        }
-        Employee assignee = resolveAssignedEmployee(task.getAssignedTeam(), assignedEmployeeId);
+        Employee assignee = resolveRequiredAssignedEmployee(task.getAssignedTeam(), assignedEmployeeId);
+        Employee reporter = resolveCurrentEmployeeOrThrow();
+        Long reporterUserId = authorizationService.getCurrentUserIdOrThrow();
+
         task.setAssignee(assignee);
-        task.setAssignedByUserId(authorizationService.getCurrentUserIdOrThrow());
+        markAssignmentReporter(task, reporter, reporterUserId);
         Task updated = taskRepository.save(task);
         notifyTaskAssignment(updated);
         auditLogService.logAction(
                 AuditActionType.ASSIGN,
                 AuditEntityType.TASK,
                 updated.getId(),
-                "{\"assigneeId\":" + (assignee == null ? "null" : assignee.getId()) + "}"
+                "{\"assigneeId\":" + assignee.getId() + "}"
         );
         publishTaskRealtime(updated);
         return toTaskResponse(updated);
@@ -273,9 +282,9 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskResponseDto changeDueDate(Long taskId, TaskDueDateUpdateRequestDto requestDto) {
-        authorizationService.requirePermission(Permission.MANAGE_TASK);
         Task task = getTaskOrThrow(taskId);
         enforceTaskManagerAccess(task);
+        ensureProjectActiveForTaskMutation(task.getProject());
         ensureTaskOpenForMutation(task, "changing the due date");
         validateDueDate(task.getProject(), requestDto.getDueDate());
         task.setDueDate(requestDto.getDueDate());
@@ -295,11 +304,41 @@ public class TaskServiceImpl implements TaskService {
     public List<TaskResponseDto> listMyTasks() {
         authorizationService.requirePermission(Permission.VIEW_TASK);
         Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        return taskRepository.findDistinctVisibleByEmployeeOrderByCreatedAtDesc(
-                currentEmployeeId,
-                TeamFunctionalRole.TEAM_LEAD,
-                TeamFunctionalRole.PROJECT_MANAGER)
-            .stream()
+        return taskRepository.findByAssigneeIdOrderByCreatedAtDesc(currentEmployeeId)
+                .stream()
+                .map(this::toTaskResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<TaskResponseDto> listTeamTasks(Long teamId) {
+        authorizationService.requirePermission(Permission.VIEW_TASK);
+        getTeamOrThrow(teamId);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
+        if (!role.isTenantAdminEquivalent()
+                && !isTeamManagerOrLead(currentEmployeeId, teamId)
+                && !isProjectManagerForTeamProject(currentEmployeeId, teamId)) {
+            throw new ForbiddenOperationException("Only tenant admins, project managers, or team leads can view team tasks");
+        }
+
+        return taskRepository.findByAssignedTeamIdOrderByCreatedAtDesc(teamId)
+                .stream()
+                .filter(task -> canReadTask(task, role, currentEmployeeId))
+                .map(this::toTaskResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<TaskResponseDto> listAllTasks() {
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (!role.isTenantAdminEquivalent()) {
+            throw new ForbiddenOperationException("Only tenant admins can view all tasks");
+        }
+        return taskRepository.findAllByOrderByCreatedAtDesc()
+                .stream()
                 .map(this::toTaskResponse)
                 .toList();
     }
@@ -324,6 +363,7 @@ public class TaskServiceImpl implements TaskService {
     @Transactional(transactionManager = "transactionManager", readOnly = true)
     public PagedResultDto<TaskResponseDto> listTasksPaged(
             Long projectId,
+            Long teamId,
             TaskStatus status,
             Long assigneeId,
             LocalDate dueFrom,
@@ -335,27 +375,59 @@ public class TaskServiceImpl implements TaskService {
             String sortDir) {
         authorizationService.requirePermission(Permission.VIEW_TASK);
         validateDueDateRange(dueFrom, dueTo);
+        validateTaskSearchScope(projectId, teamId);
 
-        Long resolvedAssigneeId = resolveRequestedAssigneeForRead(assigneeId);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
+        Long resolvedAssigneeId = resolveAssigneeFilterForSearch(assigneeId, role, currentEmployeeId);
 
         int resolvedPage = Math.max(page, 0);
         int resolvedSize = Math.max(Math.min(size, 100), 1);
         String resolvedSortBy = isSortable(sortBy) ? sortBy : "createdAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        PageRequest pageable = PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy));
+        String normalizedSearch = trimToNull(search);
 
-        Page<Task> resultPage = taskRepository.search(
-                projectId,
-                status,
-                resolvedAssigneeId,
-                dueFrom,
-                dueTo,
-                trimToNull(search),
-                PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy))
-        );
+        Page<Task> resultPage;
+        if (isPrivilegedTaskReadRole(role)) {
+            resultPage = taskRepository.search(
+                    projectId,
+                    teamId,
+                    status,
+                    resolvedAssigneeId,
+                    dueFrom,
+                    dueTo,
+                    normalizedSearch,
+                    pageable
+            );
+        } else if (currentEmployeeId != null && hasTaskCoordinationScope(currentEmployeeId)) {
+            resultPage = taskRepository.searchVisibleToEmployee(
+                    currentEmployeeId,
+                    TeamFunctionalRole.TEAM_LEAD,
+                    TeamFunctionalRole.PROJECT_MANAGER,
+                    projectId,
+                    teamId,
+                    status,
+                    resolvedAssigneeId,
+                    dueFrom,
+                    dueTo,
+                    normalizedSearch,
+                    pageable
+            );
+        } else {
+            resultPage = taskRepository.search(
+                    projectId,
+                    teamId,
+                    status,
+                    resolvedAssigneeId,
+                    dueFrom,
+                    dueTo,
+                    normalizedSearch,
+                    pageable
+            );
+        }
 
-            PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-            Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
-            List<TaskResponseDto> items = resultPage.getContent().stream()
+        List<TaskResponseDto> items = resultPage.getContent().stream()
                 .filter(task -> canReadTask(task, role, currentEmployeeId))
                 .map(this::toTaskResponse)
                 .toList();
@@ -364,7 +436,7 @@ public class TaskServiceImpl implements TaskService {
                 .items(items)
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
-                .totalElements(isPrivilegedTaskReadRole(role) ? resultPage.getTotalElements() : items.size())
+                .totalElements(resultPage.getTotalElements())
                 .totalPages(resultPage.getTotalPages())
                 .build();
     }
@@ -379,7 +451,10 @@ public class TaskServiceImpl implements TaskService {
         }
 
         getActiveEmployeeOrThrow(resolvedAssigneeId);
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
         return taskRepository.findByAssigneeIdOrderByCreatedAtDesc(resolvedAssigneeId).stream()
+                .filter(task -> canReadTask(task, role, currentEmployeeId))
                 .map(this::toTaskResponse)
                 .toList();
     }
@@ -514,6 +589,10 @@ public class TaskServiceImpl implements TaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
     }
 
+    private Team getTeamOrThrow(Long teamId) {
+        return teamRepository.findById(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found with id: " + teamId));
+    }
     private Employee getActiveEmployeeOrThrow(Long employeeId) {
         Employee employee = employeeRepository.findById(employeeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + employeeId));
@@ -538,9 +617,9 @@ public class TaskServiceImpl implements TaskService {
         return assignedTeam;
     }
 
-    private Employee resolveAssignedEmployee(Team assignedTeam, Long assignedEmployeeId) {
+    private Employee resolveRequiredAssignedEmployee(Team assignedTeam, Long assignedEmployeeId) {
         if (assignedEmployeeId == null) {
-            return null;
+            throw new BadRequestException("Assigned employee is required");
         }
         if (assignedTeam == null) {
             throw new BadRequestException("Assigned team is required before assigning an employee");
@@ -551,6 +630,38 @@ public class TaskServiceImpl implements TaskService {
             throw new BadRequestException("Assigned employee must be an active member of the assigned team");
         }
         return assignee;
+    }
+
+    private void ensureTaskHasRequiredAssignee(Task task) {
+        if (task == null || task.getAssignedTeam() == null) {
+            throw new BadRequestException("Project, team, and assigned employee are required for every task");
+        }
+        if (task.getAssignee() == null) {
+            throw new BadRequestException("Assigned employee is required");
+        }
+        if (task.getCreatedBy() == null || task.getAssignedBy() == null) {
+            throw new BadRequestException("Reporter and creator are required for every task");
+        }
+    }
+
+    private void ensureAssignedEmployeeStillValid(Team assignedTeam, Employee assignee) {
+        if (assignedTeam == null) {
+            throw new BadRequestException("Assigned team is required");
+        }
+        if (assignee == null) {
+            throw new BadRequestException("Assigned employee is required");
+        }
+        if (assignee.getStatus() != UserStatus.ACTIVE) {
+            throw new BadRequestException("Assigned employee must be active");
+        }
+        if (!isEmployeeActiveInTeam(assignedTeam.getId(), assignee.getId())) {
+            throw new BadRequestException("Assigned employee must be an active member of the assigned team");
+        }
+    }
+
+    private void markAssignmentReporter(Task task, Employee reporter, Long reporterUserId) {
+        task.setAssignedBy(reporter);
+        task.setAssignedByUserId(reporterUserId);
     }
 
     private boolean isEmployeeActiveInTeam(Long teamId, Long employeeId) {
@@ -564,6 +675,39 @@ public class TaskServiceImpl implements TaskService {
         return teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, employeeId).isPresent();
     }
 
+    private boolean isProjectManagerForProject(Long employeeId, Long projectId) {
+        if (employeeId == null || projectId == null) {
+            return false;
+        }
+
+        return projectTeamRepository.findByProjectId(projectId).stream()
+                .map(ProjectTeam::getTeam)
+                .filter(team -> team != null && team.getId() != null)
+                .anyMatch(team -> teamMemberRepository
+                        .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employeeId)
+                        .map(teamMember -> teamMember.getFunctionalRole() == TeamFunctionalRole.PROJECT_MANAGER)
+                        .orElse(false));
+    }
+
+    private boolean isProjectManagerForTeamProject(Long employeeId, Long teamId) {
+        if (employeeId == null || teamId == null) {
+            return false;
+        }
+
+        return projectTeamRepository.findByTeamId(teamId).stream()
+                .map(ProjectTeam::getProject)
+                .filter(project -> project != null && project.getId() != null)
+                .anyMatch(project -> isProjectManagerForProject(employeeId, project.getId()));
+    }
+
+    private boolean isAssigneeExecutionStatusTransition(TaskStatus currentStatus, TaskStatus newStatus) {
+        return (currentStatus == TaskStatus.TODO && newStatus == TaskStatus.IN_PROGRESS)
+                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.TODO)
+                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.IN_REVIEW)
+                || (currentStatus == TaskStatus.IN_REVIEW && newStatus == TaskStatus.IN_PROGRESS);
+    }
+
+
     private Long resolveRequestedAssignedEmployeeId(TaskCreateRequestDto requestDto) {
         return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
     }
@@ -575,7 +719,6 @@ public class TaskServiceImpl implements TaskService {
     private Long resolveRequestedAssignedEmployeeId(TaskAssigneeUpdateRequestDto requestDto) {
         return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
     }
-
     private void validateDueDate(Project project, LocalDate dueDate) {
         if (dueDate == null) {
             return;
@@ -629,26 +772,16 @@ public class TaskServiceImpl implements TaskService {
             throw new ForbiddenOperationException("You are not allowed to update this task status");
         }
 
-        if (task.getAssignedTeam() == null || task.getAssignedTeam().getId() == null) {
-            if (!authorizationService.isTaskAssignee(task)) {
-                throw new ForbiddenOperationException("Only the assignee can update this task");
-            }
+        if (isProjectManagerForProject(currentEmployeeId, task.getProject().getId())) {
             return;
         }
 
-        Long assignedTeamId = task.getAssignedTeam().getId();
-        if (!isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
-            throw new ForbiddenOperationException("Only team leads or project managers can update team task status");
-        }
-
-        if ((currentStatus == TaskStatus.TODO && newStatus == TaskStatus.IN_PROGRESS)
-                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.TODO)
-                || (currentStatus == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.IN_REVIEW)
-                || (currentStatus == TaskStatus.IN_REVIEW && newStatus == TaskStatus.IN_PROGRESS)) {
+        if (task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId())
+                && isAssigneeExecutionStatusTransition(currentStatus, newStatus)) {
             return;
         }
 
-        throw new ForbiddenOperationException("Team leads and project managers can only move team tasks between TODO, IN_PROGRESS, and REVIEW");
+        throw new ForbiddenOperationException("You can update only your own assigned tasks or tasks in projects/teams you manage");
     }
 
     private void ensureTaskOpenForMutation(Task task, String action) {
@@ -664,18 +797,14 @@ public class TaskServiceImpl implements TaskService {
         }
 
         Long currentEmployeeId = resolveCurrentEmployeeIdOrNull();
-        if (currentEmployeeId == null || task.getAssignedTeam() == null || task.getAssignedTeam().getId() == null) {
-            throw new ForbiddenOperationException("Only tenant admins, project managers, or team leads can reopen completed tasks");
-        }
-
-        if (!isTeamManagerOrLead(currentEmployeeId, task.getAssignedTeam().getId())) {
-            throw new ForbiddenOperationException("Only tenant admins, project managers, or team leads can reopen completed tasks");
+        if (currentEmployeeId == null || !isProjectManagerForProject(currentEmployeeId, task.getProject().getId())) {
+            throw new ForbiddenOperationException("Only tenant admins or project managers can reopen completed tasks");
         }
     }
 
-    private void ensureProjectAllowsTaskCreation(Project project) {
-        if (project.getStatus() == ProjectStatus.COMPLETED || project.getStatus() == ProjectStatus.CANCELLED) {
-            throw new BadRequestException("Cannot create tasks for a project in status: " + project.getStatus());
+    private void ensureProjectActiveForTaskMutation(Project project) {
+        if (project == null || project.getStatus() != ProjectStatus.IN_PROGRESS) {
+            throw new BadRequestException("Project must be ACTIVE before tasks can be created or updated");
         }
     }
 
@@ -695,8 +824,8 @@ public class TaskServiceImpl implements TaskService {
                 .createdBy(tenantDtoMapper.toEmployeeSimple(task.getCreatedBy()))
                 .createdByEmployeeId(task.getCreatedBy() == null ? null : task.getCreatedBy().getId())
                 .createdByUserId(task.getCreatedByUserId())
-                .assignedBy(null)
-                .assignedByEmployeeId(null)
+                .assignedBy(tenantDtoMapper.toEmployeeSimple(task.getAssignedBy()))
+                .assignedByEmployeeId(task.getAssignedBy() == null ? null : task.getAssignedBy().getId())
                 .assignedByUserId(task.getAssignedByUserId())
                 .dueDate(task.getDueDate())
                 .createdAt(task.getCreatedAt())
@@ -758,7 +887,7 @@ public class TaskServiceImpl implements TaskService {
                 task.getDueDate(),
                 task.getPriority() == null ? null : task.getPriority().name(),
                 buildFullName(task.getAssignee()),
-                buildFullName(task.getCreatedBy())
+                buildFullName(task.getAssignedBy() == null ? task.getCreatedBy() : task.getAssignedBy())
         );
     }
 
@@ -845,7 +974,61 @@ public class TaskServiceImpl implements TaskService {
             return requestedAssigneeId;
         }
 
-        return resolveCurrentEmployeeIdOrThrow();
+        Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
+        if (requestedAssigneeId == null || requestedAssigneeId.equals(currentEmployeeId)) {
+            return currentEmployeeId;
+        }
+
+        if (hasTaskCoordinationScope(currentEmployeeId)) {
+            return requestedAssigneeId;
+        }
+
+        throw new ForbiddenOperationException("Employees can view only their own assigned tasks");
+    }
+
+    private Long resolveAssigneeFilterForSearch(
+            Long requestedAssigneeId,
+            PlatformRole role,
+            Long currentEmployeeId) {
+        if (isPrivilegedTaskReadRole(role)) {
+            return requestedAssigneeId;
+        }
+        if (currentEmployeeId == null) {
+            throw new ForbiddenOperationException("Current user does not have an employee profile");
+        }
+        if (hasTaskCoordinationScope(currentEmployeeId)) {
+            return requestedAssigneeId;
+        }
+        if (requestedAssigneeId == null || requestedAssigneeId.equals(currentEmployeeId)) {
+            return currentEmployeeId;
+        }
+        throw new ForbiddenOperationException("Employees can view only their own assigned tasks");
+    }
+
+    private void validateTaskSearchScope(Long projectId, Long teamId) {
+        if (projectId != null) {
+            getProjectOrThrow(projectId);
+        }
+        if (teamId != null) {
+            getTeamOrThrow(teamId);
+        }
+        if (projectId != null && teamId != null
+                && !projectTeamRepository.existsByProjectIdAndTeamId(projectId, teamId)) {
+            throw new BadRequestException("Team does not belong to the selected project");
+        }
+    }
+
+    private boolean hasTaskCoordinationScope(Long employeeId) {
+        if (employeeId == null) {
+            return false;
+        }
+        if (!teamRepository.findByManagerId(employeeId).isEmpty()) {
+            return true;
+        }
+        return teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(employeeId).stream()
+                .map(teamMember -> teamMember.getFunctionalRole())
+                .anyMatch(role -> role == TeamFunctionalRole.TEAM_LEAD
+                        || role == TeamFunctionalRole.PROJECT_MANAGER);
     }
 
     private void enforceTaskReadAccess(Task task) {
@@ -872,23 +1055,22 @@ public class TaskServiceImpl implements TaskService {
         if (task.getAssignee() != null && currentEmployeeId.equals(task.getAssignee().getId())) {
             return true;
         }
-        if (task.getCreatedBy() != null && currentEmployeeId.equals(task.getCreatedBy().getId())) {
+        if (task.getProject() != null && isProjectManagerForProject(currentEmployeeId, task.getProject().getId())) {
             return true;
         }
-        if (task.getAssignedTeam() == null) {
+        if (task.getAssignedTeam() == null || task.getAssignedTeam().getId() == null) {
             return false;
         }
 
-        Long assignedTeamId = task.getAssignedTeam().getId();
-        if (assignedTeamId == null) {
-            return false;
-        }
-
-        return isTeamManagerOrLead(currentEmployeeId, assignedTeamId);
+        return isTeamManagerOrLead(currentEmployeeId, task.getAssignedTeam().getId());
     }
 
     private boolean isPrivilegedTaskReadRole(PlatformRole role) {
-        return role != null && (role.isTenantAdminEquivalent() || role == PlatformRole.HR);
+        return role != null && role.isTenantAdminEquivalent();
+    }
+
+    private Employee resolveCurrentEmployeeOrThrow() {
+        return authorizationService.getCurrentEmployeeOrThrow();
     }
 
     private Long resolveCurrentEmployeeIdOrNull() {
@@ -901,38 +1083,53 @@ public class TaskServiceImpl implements TaskService {
     }
 
     private void enforceTaskCreationAccess(Project project, Long assignedTeamId) {
+        enforceTaskScopedWorkflowActor("create tasks");
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
         Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        if (!isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
-            throw new ForbiddenOperationException("Only project managers or team leads can create tasks for this assigned team");
+        if (isProjectManagerForProject(currentEmployeeId, project.getId())) {
+            return;
         }
-        if (!projectTeamRepository.existsByProjectIdAndTeamId(project.getId(), assignedTeamId)) {
-            throw new ForbiddenOperationException("You can only create tasks for teams assigned to this project");
+        if (isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
+            return;
         }
+        throw new ForbiddenOperationException("Only project managers or team leads can create tasks for this project team");
     }
 
     private void enforceTaskManagerAccess(Task task) {
+        enforceTaskScopedWorkflowActor("manage tasks");
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
         Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        Long assignedTeamId = task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId();
-        if (assignedTeamId == null || !isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
-            throw new ForbiddenOperationException("Only project managers or team leads can manage this task");
+        if (task.getProject() != null && isProjectManagerForProject(currentEmployeeId, task.getProject().getId())) {
+            return;
         }
+        throw new ForbiddenOperationException("Only tenant admins or project managers can edit or close this task");
     }
 
     private void enforceTaskAssignmentAccess(Task task) {
+        enforceTaskScopedWorkflowActor("assign tasks");
         if (authorizationService.isTenantAdminEquivalent()) {
             return;
         }
         Long currentEmployeeId = resolveCurrentEmployeeIdOrThrow();
-        Long assignedTeamId = task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId();
-        if (assignedTeamId == null || !isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
-            throw new ForbiddenOperationException("Only project managers or team leads can assign tasks");
+        if (task.getProject() != null && isProjectManagerForProject(currentEmployeeId, task.getProject().getId())) {
+            return;
         }
+        Long assignedTeamId = task.getAssignedTeam() == null ? null : task.getAssignedTeam().getId();
+        if (assignedTeamId != null && isTeamManagerOrLead(currentEmployeeId, assignedTeamId)) {
+            return;
+        }
+        throw new ForbiddenOperationException("Only project managers or team leads can assign tasks");
+    }
+    private void enforceTaskScopedWorkflowActor(String action) {
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (role.isTenantAdminEquivalent() || role == PlatformRole.MANAGER || role == PlatformRole.EMPLOYEE) {
+            return;
+        }
+        throw new ForbiddenOperationException("Only tenant admins, managers, or team leads can " + action);
     }
 
     private boolean isTeamManagerOrLead(Long employeeId, Long teamId) {
@@ -1026,3 +1223,6 @@ public class TaskServiceImpl implements TaskService {
         );
     }
 }
+
+
+

@@ -5,6 +5,7 @@ import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.DuplicateTenantKeyException;
+import com.worknest.common.util.SlugUtils;
 import com.worknest.master.event.TenantProvisioningRequestedEvent;
 import com.worknest.master.dto.TenantRegistrationRequestDto;
 import com.worknest.master.dto.TenantRegistrationResponseDto;
@@ -123,7 +124,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         tenant.setDbUrl(buildTenantDbUrl(databaseName));
         tenant.setDbUsername(masterDbUsername);
         tenant.setDbPassword(masterDbPassword);
-        tenant.setStatus(TenantStatus.PROVISIONING);
+        tenant.setStatus(TenantStatus.ACTIVE);
         return tenant;
     }
 
@@ -166,7 +167,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
     }
 
     private String normalizeTenantKey(String tenantKey) {
-        return tenantKey == null ? null : tenantKey.trim().toLowerCase();
+        return SlugUtils.slugify(tenantKey);
     }
 
     private String normalizeEmail(String email) {

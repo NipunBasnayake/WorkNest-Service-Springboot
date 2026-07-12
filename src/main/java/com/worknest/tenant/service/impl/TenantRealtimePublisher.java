@@ -21,8 +21,25 @@ public class TenantRealtimePublisher {
         messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/announcements", payload);
     }
 
+    public void publishNotification(String tenantKey, String recipientEmail, NotificationResponseDto payload) {
+        messagingTemplate.convertAndSendToUser(recipientEmail, "/queue/notifications", payload);
+        messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/notifications", payload);
+    }
+
     public void publishNotification(String recipientEmail, NotificationResponseDto payload) {
         messagingTemplate.convertAndSendToUser(recipientEmail, "/queue/notifications", payload);
+    }
+
+    public void publishAttendanceUpdate(String tenantKey, Object payload) {
+        messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/attendance", payload);
+    }
+
+    public void publishLeaveUpdate(String tenantKey, Object payload) {
+        messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/leave", payload);
+    }
+
+    public void publishRecruitmentUpdate(String tenantKey, Object payload) {
+        messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/recruitment", payload);
     }
 
     public void publishHrMessage(String tenantKey, Long conversationId, HrMessageResponseDto payload) {

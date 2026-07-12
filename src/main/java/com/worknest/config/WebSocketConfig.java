@@ -36,11 +36,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .toList();
     }
 
-    /**
-     * Spring-managed task scheduler for the STOMP broker heartbeat.
-     * Managed by Spring's lifecycle so it is gracefully shut down on context close,
-     * preventing stale executor threads and the recurring start/stop pattern.
-     */
     @Bean(destroyMethod = "shutdown")
     public ThreadPoolTaskScheduler brokerTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
@@ -51,11 +46,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         return scheduler;
     }
 
-    /**
-     * Spring-managed executor for the clientInboundChannel.
-     * A larger pool + caller-runs policy prevents ExecutorSubscribableChannel
-     * rejections when DB lookups inside the STOMP interceptor block temporarily.
-     */
     @Bean(destroyMethod = "shutdown")
     public ThreadPoolTaskExecutor wsClientInboundExecutor() {
         ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
@@ -72,9 +62,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         return exec;
     }
 
-    /**
-     * Spring-managed executor for the clientOutboundChannel.
-     */
     @Bean(destroyMethod = "shutdown")
     public ThreadPoolTaskExecutor wsClientOutboundExecutor() {
         ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();

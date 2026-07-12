@@ -29,6 +29,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -47,6 +48,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final EmailNotificationService emailNotificationService;
+    @Autowired(required = false)
+    private TenantRealtimePublisher tenantRealtimePublisher;
 
     public LeaveRequestServiceImpl(
             LeaveRequestRepository leaveRequestRepository,
@@ -83,6 +86,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setReason(trimToNull(requestDto.getReason()));
 
         LeaveRequest saved = leaveRequestRepository.save(leaveRequest);
+        publishLeaveRealtime(saved);
         syncAttachments(saved.getId(), requestDto.getAttachments());
         notifyApproversAboutRequest(saved);
         auditLogService.logAction(
@@ -117,6 +121,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setReason(trimToNull(requestDto.getReason()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+        publishLeaveRealtime(updated);
         syncAttachments(updated.getId(), requestDto.getAttachments());
         auditLogService.logAction(
                 AuditActionType.UPDATE,
@@ -236,6 +241,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+        publishLeaveRealtime(updated);
         notificationService.createSystemNotification(
                 leaveRequest.getEmployee().getId(),
                 NotificationType.LEAVE_APPROVED,
@@ -279,6 +285,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setDecisionComment(trimToNull(requestDto.getDecisionComment()));
 
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+        publishLeaveRealtime(updated);
         notificationService.createSystemNotification(
                 leaveRequest.getEmployee().getId(),
                 NotificationType.LEAVE_REJECTED,
@@ -318,6 +325,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         leaveRequest.setStatus(LeaveStatus.CANCELLED);
         leaveRequest.setDecidedAt(LocalDateTime.now());
         LeaveRequest updated = leaveRequestRepository.save(leaveRequest);
+        publishLeaveRealtime(updated);
 
         notificationService.createSystemNotification(
             currentEmployee.getId(),
@@ -349,10 +357,10 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         authorizationService.requirePermission(Permission.VIEW_LEAVE);
         LeaveRequest leaveRequest = getLeaveRequestOrThrow(leaveRequestId);
         PlatformRole currentRole = authorizationService.getCurrentRoleOrThrow();
-        if (currentRole == PlatformRole.EMPLOYEE) {
+        if (!currentRole.isTenantAdminEquivalent() && !currentRole.isHrEquivalent()) {
             Employee currentEmployee = getCurrentEmployeeOrThrow();
             if (!leaveRequest.getEmployee().getId().equals(currentEmployee.getId())) {
-                throw new ForbiddenOperationException("Employees can only view their own leave requests");
+                throw new ForbiddenOperationException("You can only view your own leave requests");
             }
         }
         return toLeaveResponse(leaveRequest, true);
@@ -395,6 +403,12 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         );
         if (hasOverlap) {
             throw new BadRequestException("Leave request overlaps with an existing pending or approved leave");
+        }
+    }
+
+    private void publishLeaveRealtime(LeaveRequest leaveRequest) {
+        if (tenantRealtimePublisher != null) {
+            tenantRealtimePublisher.publishLeaveUpdate(authorizationService.getCurrentTenantKeyOrThrow(), toLeaveResponse(leaveRequest, false));
         }
     }
 

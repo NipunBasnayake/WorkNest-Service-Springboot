@@ -59,13 +59,7 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
 
             String tenantSlug = resolveTenantSlugFromRequest(requestUri);
             log.debug("[TENANT] Resolved slug={}", tenantSlug);
-            String headerTenantSlug = normalizeTenantSlug(request.getHeader(tenantHeaderName));
-
-            if (tenantSlug != null && headerTenantSlug != null && !tenantSlug.equalsIgnoreCase(headerTenantSlug)) {
-                sendErrorResponse(response, HttpStatus.FORBIDDEN,
-                        "Tenant slug mismatch between URL and header", TENANT_SPOOF_ERROR, requestUri);
-                return;
-            }
+            String headerTenant = normalizeTenantSlug(request.getHeader(tenantHeaderName));
 
             if (tenantSlug == null) {
                 if (isTenantApi(requestUri) || isPublicCareerApi(requestUri)) {
@@ -85,6 +79,12 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
                 return;
             }
 
+            if (headerTenant != null && !tenantHeaderMatches(tenant, headerTenant)) {
+                sendErrorResponse(response, HttpStatus.FORBIDDEN,
+                        "Tenant mismatch between URL and header", TENANT_SPOOF_ERROR, requestUri);
+                return;
+            }
+
             if (tenant.getStatus() != TenantStatus.ACTIVE || Boolean.FALSE.equals(tenant.getActive())) {
                 sendErrorResponse(response, HttpStatus.FORBIDDEN,
                         "Tenant is not active: " + tenantSlug, "TENANT_INACTIVE", requestUri);
@@ -92,11 +92,14 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
             }
 
             TenantContextHolder.setTenantSlug(tenant.getSlug());
-            MDC.put("tenantId", tenant.getSlug());
+            TenantContextHolder.setTenantKey(tenant.getTenantKey());
+            MDC.put("tenantId", tenant.getTenantKey());
+            MDC.put("tenantSlug", tenant.getSlug());
             filterChain.doFilter(request, response);
         } finally {
             TenantContextHolder.clear();
             MDC.remove("tenantId");
+            MDC.remove("tenantSlug");
             MDC.remove("traceId");
         }
     }
@@ -153,6 +156,15 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
         }
         String normalized = tenantSlug.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean tenantHeaderMatches(PlatformTenant tenant, String headerTenant) {
+        String normalizedHeader = normalizeTenantSlug(headerTenant);
+        String tenantKey = normalizeTenantSlug(tenant.getTenantKey());
+        String tenantSlug = normalizeTenantSlug(tenant.getSlug());
+        return normalizedHeader != null
+                && (normalizedHeader.equalsIgnoreCase(tenantKey)
+                || normalizedHeader.equalsIgnoreCase(tenantSlug));
     }
 
     private void sendErrorResponse(HttpServletResponse response, HttpStatus status,

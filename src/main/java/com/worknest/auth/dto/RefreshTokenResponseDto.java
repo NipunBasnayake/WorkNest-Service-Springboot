@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 public class RefreshTokenResponseDto {
     private String tokenType;
     private String accessToken;
+    private String refreshToken;
     private LocalDateTime accessTokenExpiresAt;
     private String csrfToken;
     private Long sessionId;

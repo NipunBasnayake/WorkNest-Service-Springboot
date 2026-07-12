@@ -6,6 +6,7 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.util.SlugUtils;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
@@ -24,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -60,6 +62,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final FileStorageService fileStorageService;
     private final EmailNotificationService emailNotificationService;
     private final SecureRandom secureRandom;
+    @Autowired(required = false)
+    private TenantRealtimePublisher tenantRealtimePublisher;
 
     public RecruitmentServiceImpl(
             JobPositionRepository jobPositionRepository,
@@ -101,8 +105,27 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public JobPositionResponseDto createJobPosition(JobPositionCreateRequestDto requestDto) {
         requireManagePermission();
         JobPosition position = new JobPosition();
-        applyJobPosition(position, requestDto.getTitle(), requestDto.getDepartment(), requestDto.getDescription(), requestDto.getEmploymentType(), requestDto.getLocation(), requestDto.getOpenings(), requestDto.getStatus(), requestDto.getPublished());
+        applyJobPosition(
+                position,
+                requestDto.getTitle(),
+                requestDto.getDepartment(),
+                requestDto.getSummary(),
+                requestDto.getDescription(),
+                requestDto.getResponsibilities(),
+                requestDto.getRequirements(),
+                requestDto.getBenefits(),
+                requestDto.getEmploymentType(),
+                requestDto.getLocation(),
+                requestDto.getExperience(),
+                requestDto.getSalary(),
+                requestDto.getOpenings(),
+                requestDto.getStatus(),
+                requestDto.getPublished(),
+                requestDto.getVisibleToExternalApplicants(),
+                requestDto.getExpiresAt());
+        ensureJobSlug(position);
         JobPosition saved = jobPositionRepository.save(position);
+        publishRecruitmentRealtime("JOB_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.JOB_POSITION, saved.getId(), jsonField("title", saved.getTitle()));
         return toJobPositionResponse(saved);
     }
@@ -111,8 +134,27 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public JobPositionResponseDto updateJobPosition(Long jobPositionId, JobPositionUpdateRequestDto requestDto) {
         requireManagePermission();
         JobPosition position = getJobPositionOrThrow(jobPositionId);
-        applyJobPosition(position, requestDto.getTitle(), requestDto.getDepartment(), requestDto.getDescription(), requestDto.getEmploymentType(), requestDto.getLocation(), requestDto.getOpenings(), requestDto.getStatus(), requestDto.getPublished());
+        applyJobPosition(
+                position,
+                requestDto.getTitle(),
+                requestDto.getDepartment(),
+                requestDto.getSummary(),
+                requestDto.getDescription(),
+                requestDto.getResponsibilities(),
+                requestDto.getRequirements(),
+                requestDto.getBenefits(),
+                requestDto.getEmploymentType(),
+                requestDto.getLocation(),
+                requestDto.getExperience(),
+                requestDto.getSalary(),
+                requestDto.getOpenings(),
+                requestDto.getStatus(),
+                requestDto.getPublished(),
+                requestDto.getVisibleToExternalApplicants(),
+                requestDto.getExpiresAt());
+        ensureJobSlug(position);
         JobPosition updated = jobPositionRepository.save(position);
+        publishRecruitmentRealtime("JOB_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.JOB_POSITION, updated.getId(), jsonField("title", updated.getTitle()));
         return toJobPositionResponse(updated);
     }
@@ -199,7 +241,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         Candidate candidate = getCandidateOrThrow(candidateId);
         FileStorageService.StoredFileResult storedFileResult = fileStorageService.store(resumeFile, "doc");
         candidate.setResumeFileName(storedFileResult.name());
-        candidate.setResumeFileUrl(storedFileResult.url());
+        candidate.setResumeFileUrl(storedFileResult.path());
         candidate.setResumeMimeType(storedFileResult.mimeType());
         candidate.setResumeFileSizeBytes(storedFileResult.size());
         Candidate updated = candidateRepository.save(candidate);
@@ -250,6 +292,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         application.setStatus(requestedStatus);
         application.setCreatedBy(authorizationService.getCurrentEmployeeOrNull());
         CandidateApplication saved = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("APPLICATION_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.CANDIDATE_APPLICATION, saved.getId(), jsonField("candidateId", String.valueOf(candidate.getId())));
         notifyCandidateStatus(saved);
         return toApplicationResponse(saved);
@@ -261,6 +304,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         CandidateApplication application = getApplicationOrThrow(applicationId);
         applyApplicationUpdates(application, requestDto);
         CandidateApplication updated = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("APPLICATION_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.CANDIDATE_APPLICATION, updated.getId(), jsonField("status", updated.getStatus().name()));
         notifyCandidateStatus(updated);
         return toApplicationResponse(updated);
@@ -300,6 +344,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
         }
         CandidateApplication updatedApplication = candidateApplicationRepository.save(application);
+        publishRecruitmentRealtime("CANDIDATE_HIRED", updatedApplication.getId());
 
         notificationService.createSystemNotification(
                 createdEmployee.getId(),
@@ -406,6 +451,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setMeetingLink(trimToNull(requestDto.getMeetingLink()));
         interview.setNotes(trimToNull(requestDto.getNotes()));
         Interview saved = interviewRepository.save(interview);
+        publishRecruitmentRealtime("INTERVIEW_SCHEDULED", saved.getId());
         auditLogService.logAction(AuditActionType.SCHEDULE, AuditEntityType.INTERVIEW, saved.getId(), jsonField("applicationId", String.valueOf(application.getId())));
         emailNotificationService.sendInterviewScheduledEmail(
             application.getCandidate().getEmail(),
@@ -432,6 +478,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setNotes(trimToNull(requestDto.getNotes()));
         interview.setStatus(InterviewStatus.RESCHEDULED);
         Interview updated = interviewRepository.save(interview);
+        publishRecruitmentRealtime("INTERVIEW_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.INTERVIEW, updated.getId(), jsonField("scheduledAt", updated.getScheduledAt().toString()));
         emailNotificationService.sendInterviewScheduledEmail(
             interview.getApplication().getCandidate().getEmail(),
@@ -497,6 +544,15 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .build();
     }
 
+    private void publishRecruitmentRealtime(String eventType, Long entityId) {
+        if (tenantRealtimePublisher != null) {
+            tenantRealtimePublisher.publishRecruitmentUpdate(
+                    authorizationService.getCurrentTenantKeyOrThrow(),
+                    java.util.Map.of("eventType", eventType, "entityId", entityId)
+            );
+        }
+    }
+
     private void requireViewPermission() {
         authorizationService.requirePermission(Permission.VIEW_RECRUITMENT);
     }
@@ -529,15 +585,63 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return employeeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
     }
 
-    private void applyJobPosition(JobPosition position, String title, String department, String description, EmploymentType employmentType, String location, Integer openings, JobPositionStatus status, Boolean published) {
+    private void applyJobPosition(
+            JobPosition position,
+            String title,
+            String department,
+            String summary,
+            String description,
+            String responsibilities,
+            String requirements,
+            String benefits,
+            EmploymentType employmentType,
+            String location,
+            String experience,
+            String salary,
+            Integer openings,
+            JobPositionStatus status,
+            Boolean published,
+            Boolean visibleToExternalApplicants,
+            LocalDateTime expiresAt) {
         position.setTitle(title.trim());
         position.setDepartment(trimToNull(department));
+        position.setSummary(trimToNull(summary));
         position.setDescription(trimToNull(description));
+        position.setResponsibilities(trimToNull(responsibilities));
+        position.setRequirements(trimToNull(requirements));
+        position.setBenefits(trimToNull(benefits));
         position.setEmploymentType(employmentType);
         position.setLocation(trimToNull(location));
+        position.setExperience(trimToNull(experience));
+        position.setSalary(trimToNull(salary));
         position.setOpenings(openings);
         position.setStatus(status == null ? JobPositionStatus.OPEN : status);
         position.setPublished(Boolean.TRUE.equals(published));
+        if (visibleToExternalApplicants != null) {
+            position.setVisibleToExternalApplicants(visibleToExternalApplicants);
+        } else if (position.getVisibleToExternalApplicants() == null) {
+            position.setVisibleToExternalApplicants(true);
+        }
+        position.setExpiresAt(expiresAt);
+    }
+
+    private void ensureJobSlug(JobPosition position) {
+        if (trimToNull(position.getSlug()) != null) {
+            return;
+        }
+
+        String baseSlug = SlugUtils.slugify(position.getTitle());
+        if (baseSlug == null) {
+            baseSlug = "job-position";
+        }
+
+        String candidate = baseSlug;
+        int suffix = 2;
+        while (jobPositionRepository.existsBySlug(candidate)) {
+            candidate = baseSlug + "-" + suffix;
+            suffix++;
+        }
+        position.setSlug(candidate);
     }
 
     private void applyCandidate(Candidate candidate, String fullName, String email, String phone, String currentTitle, Integer yearsOfExperience, String source, String summary) {
@@ -781,7 +885,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .source(candidate.getSource())
                 .summary(candidate.getSummary())
                 .resumeFileName(candidate.getResumeFileName())
-                .resumeFileUrl(candidate.getResumeFileUrl())
+                .resumeFileUrl(fileStorageService.toPublicUrl(candidate.getResumeFileUrl()))
                 .resumeMimeType(candidate.getResumeMimeType())
                 .resumeFileSizeBytes(candidate.getResumeFileSizeBytes())
                 .createdAt(candidate.getCreatedAt())
@@ -793,13 +897,22 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return JobPositionResponseDto.builder()
                 .id(position.getId())
                 .title(position.getTitle())
+                .slug(position.getSlug())
                 .department(position.getDepartment())
+                .summary(position.getSummary())
                 .description(position.getDescription())
+                .responsibilities(position.getResponsibilities())
+                .requirements(position.getRequirements())
+                .benefits(position.getBenefits())
                 .employmentType(position.getEmploymentType())
                 .location(position.getLocation())
+                .experience(position.getExperience())
+                .salary(position.getSalary())
                 .openings(position.getOpenings())
                 .status(position.getStatus())
                 .published(position.isPublished())
+                .visibleToExternalApplicants(position.getVisibleToExternalApplicants())
+                .expiresAt(position.getExpiresAt())
                 .applicationCount(candidateApplicationRepository.countByJobPositionId(position.getId()))
                 .createdAt(position.getCreatedAt())
                 .updatedAt(position.getUpdatedAt())

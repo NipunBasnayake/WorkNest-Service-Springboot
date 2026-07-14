@@ -4,7 +4,9 @@ import com.worknest.common.api.ApiResponse;
 import com.worknest.master.dto.PlatformTenantResponseDto;
 import com.worknest.master.dto.PlatformTenantUpdateRequestDto;
 import com.worknest.master.dto.TenantStatusUpdateRequestDto;
+import com.worknest.master.dto.PlatformTenantAdminActionResponseDto;
 import com.worknest.master.service.PlatformTenantService;
+import com.worknest.master.service.PlatformTenantAdminService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +23,7 @@ import java.util.List;
 public class PlatformTenantController {
 
     private final PlatformTenantService platformTenantService;
+    private final PlatformTenantAdminService platformTenantAdminService;
 
     @GetMapping
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
@@ -61,9 +64,35 @@ public class PlatformTenantController {
     @DeleteMapping("/{tenantKey}")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteTenant(@PathVariable("tenantKey") String tenantKey) {
-        log.info("Request received to suspend tenant {}", tenantKey);
+        log.info("Request received to archive tenant {}", tenantKey);
         platformTenantService.deleteTenant(tenantKey);
-        return ResponseEntity.ok(ApiResponse.success("Tenant suspended successfully"));
+        return ResponseEntity.ok(ApiResponse.success("Tenant archived successfully"));
+    }
+
+    @PostMapping("/{tenantKey}/admin/reset-password")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<PlatformTenantAdminActionResponseDto>> resetTenantAdminPassword(
+            @PathVariable("tenantKey") String tenantKey) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Tenant administrator password reset and emailed successfully",
+                platformTenantAdminService.resetPassword(tenantKey)));
+    }
+
+    @PostMapping("/{tenantKey}/admin/unlock")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<PlatformTenantAdminActionResponseDto>> unlockTenantAdmin(
+            @PathVariable("tenantKey") String tenantKey) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Tenant administrator account unlocked successfully",
+                platformTenantAdminService.unlock(tenantKey)));
+    }
+
+    @PostMapping("/{tenantKey}/admin/resend-welcome")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<PlatformTenantAdminActionResponseDto>> resendTenantAdminWelcome(
+            @PathVariable("tenantKey") String tenantKey) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Tenant administrator welcome credentials emailed successfully",
+                platformTenantAdminService.resendWelcome(tenantKey)));
     }
 }
-

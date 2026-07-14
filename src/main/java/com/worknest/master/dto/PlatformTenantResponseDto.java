@@ -18,6 +18,15 @@ public class PlatformTenantResponseDto {
     private String databaseName;
     private TenantStatus status;
     private Boolean active;
+    private String adminName;
+    private String adminEmail;
+    private Long employeeCount;
+    private Long projectCount;
+    private Long teamCount;
+    private Long taskCount;
+    private LocalDateTime lastLoginAt;
+    private LocalDateTime lastActivityAt;
+    private Boolean usageAvailable;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

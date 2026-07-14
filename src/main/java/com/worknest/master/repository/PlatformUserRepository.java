@@ -15,6 +15,8 @@ public interface PlatformUserRepository extends JpaRepository<PlatformUser, Long
 
     Optional<PlatformUser> findFirstByTenantKeyIgnoreCaseAndRoleIn(String tenantKey, List<PlatformRole> roles);
 
+    List<PlatformUser> findByTenantKeyIgnoreCase(String tenantKey);
+
     Optional<PlatformUser> findByPasswordResetTokenHash(String tokenHash);
 
     boolean existsByEmailIgnoreCase(String email);

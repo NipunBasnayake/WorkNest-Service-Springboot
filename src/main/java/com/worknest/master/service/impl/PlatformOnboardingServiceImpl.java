@@ -124,7 +124,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         tenant.setDbUrl(buildTenantDbUrl(databaseName));
         tenant.setDbUsername(masterDbUsername);
         tenant.setDbPassword(masterDbPassword);
-        tenant.setStatus(TenantStatus.ACTIVE);
+        tenant.setStatus(TenantStatus.PROVISIONING);
         return tenant;
     }
 

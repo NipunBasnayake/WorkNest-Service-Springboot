@@ -8,6 +8,7 @@ import com.worknest.master.entity.PlatformTenantStatusAudit;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.repository.PlatformTenantStatusAuditRepository;
 import com.worknest.security.util.SecurityUtils;
+import com.worknest.master.service.PlatformTenantMetricsService;
 import com.worknest.tenant.context.MasterTenantContextRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,13 +49,17 @@ class PlatformTenantServiceImplTest {
         when(tenantRepository.findByTenantKey("acme")).thenReturn(Optional.of(tenant));
         when(tenantRepository.saveAndFlush(any(PlatformTenant.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(auditRepository.saveAndFlush(any(PlatformTenantStatusAudit.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        PlatformTenantMetricsService metricsService = mock(PlatformTenantMetricsService.class);
+        when(metricsService.collect(any())).thenReturn(new PlatformTenantMetricsService.TenantMetrics(
+                "Tenant Admin", "admin@acme.test", 4, 2, 1, 7, null, null, true));
 
         service = new PlatformTenantServiceImpl(
                 tenantRepository,
                 new ModelMapper(),
                 new MasterTenantContextRunner("master"),
                 auditRepository,
-                securityUtils
+                securityUtils,
+                metricsService
         );
     }
 
@@ -97,6 +102,25 @@ class PlatformTenantServiceImplTest {
         assertThrows(BadRequestException.class,
                 () -> service.updateTenantStatus("acme", TenantStatus.PROVISIONING));
         verifyNoInteractions(auditRepository);
+    }
+
+    @Test
+    void rejectsLifecycleTransitionsThatDoNotMatchTheWorkflow() {
+        assertThrows(BadRequestException.class,
+                () -> service.updateTenantStatus("acme", TenantStatus.REJECTED));
+        verify(tenantRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(auditRepository);
+    }
+
+    @Test
+    void archivesWithoutDeletingTenantDataAndCanRestoreAccess() {
+        PlatformTenantResponseDto archived = service.updateTenantStatus("acme", TenantStatus.ARCHIVED);
+        assertEquals(TenantStatus.ARCHIVED, archived.getStatus());
+        assertFalse(tenant.getActive());
+
+        PlatformTenantResponseDto restored = service.updateTenantStatus("acme", TenantStatus.ACTIVE);
+        assertEquals(TenantStatus.ACTIVE, restored.getStatus());
+        assertTrue(tenant.getActive());
     }
 
     @Test

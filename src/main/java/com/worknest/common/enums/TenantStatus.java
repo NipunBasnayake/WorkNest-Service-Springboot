@@ -4,5 +4,7 @@ public enum TenantStatus {
     PROVISIONING,
     ACTIVE,
     INACTIVE,
-    SUSPENDED
+    SUSPENDED,
+    ARCHIVED,
+    REJECTED
 }

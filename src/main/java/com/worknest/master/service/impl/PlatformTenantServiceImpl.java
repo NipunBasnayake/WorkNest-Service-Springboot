@@ -10,11 +10,13 @@ import com.worknest.master.entity.PlatformTenantStatusAudit;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.repository.PlatformTenantStatusAuditRepository;
 import com.worknest.master.service.PlatformTenantService;
+import com.worknest.master.service.PlatformTenantMetricsService;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.context.MasterTenantContextRunner;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -30,20 +32,27 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
     private final MasterTenantContextRunner masterTenantContextRunner;
     private final PlatformTenantStatusAuditRepository statusAuditRepository;
     private final SecurityUtils securityUtils;
+    private final PlatformTenantMetricsService tenantMetricsService;
     private static final EnumSet<TenantStatus> ADMIN_MANAGED_STATUSES = EnumSet.of(
-            TenantStatus.ACTIVE, TenantStatus.INACTIVE, TenantStatus.SUSPENDED);
+            TenantStatus.ACTIVE,
+            TenantStatus.INACTIVE,
+            TenantStatus.SUSPENDED,
+            TenantStatus.ARCHIVED,
+            TenantStatus.REJECTED);
 
     public PlatformTenantServiceImpl(
             PlatformTenantRepository tenantRepository,
             ModelMapper modelMapper,
             MasterTenantContextRunner masterTenantContextRunner,
             PlatformTenantStatusAuditRepository statusAuditRepository,
-            SecurityUtils securityUtils) {
+            SecurityUtils securityUtils,
+            PlatformTenantMetricsService tenantMetricsService) {
         this.tenantRepository = tenantRepository;
         this.modelMapper = modelMapper;
         this.masterTenantContextRunner = masterTenantContextRunner;
         this.statusAuditRepository = statusAuditRepository;
         this.securityUtils = securityUtils;
+        this.tenantMetricsService = tenantMetricsService;
     }
 
     @Override
@@ -74,6 +83,7 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
     }
 
     @Override
+    @CacheEvict(cacheNames = "platformOperations", allEntries = true)
     @Transactional(transactionManager = "masterTransactionManager")
     public PlatformTenantResponseDto updateTenant(String tenantKey, PlatformTenantUpdateRequestDto requestDto) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
@@ -96,6 +106,7 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
 
     @Override
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @CacheEvict(cacheNames = "platformOperations", allEntries = true)
     @Transactional(transactionManager = "masterTransactionManager")
     public PlatformTenantResponseDto updateTenantStatus(String tenantKey, TenantStatus status) {
         String normalizedTenantKey = normalizeTenantKey(tenantKey);
@@ -106,7 +117,7 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
             throw new BadRequestException("Tenant status is required");
         }
         if (!ADMIN_MANAGED_STATUSES.contains(status)) {
-            throw new BadRequestException("Tenant status must be ACTIVE, INACTIVE, or SUSPENDED");
+            throw new BadRequestException("Unsupported tenant lifecycle status");
         }
 
         return masterTenantContextRunner.runInMasterContext(() -> {
@@ -116,6 +127,10 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
             TenantStatus previousStatus = tenant.getStatus();
             if (previousStatus == status) {
                 return mapToResponseDto(tenant);
+            }
+            if (!isAllowedTransition(previousStatus, status)) {
+                throw new BadRequestException(
+                        "Tenant lifecycle cannot change from " + previousStatus + " to " + status);
             }
             tenant.changeStatus(status);
             PlatformTenant updated = tenantRepository.saveAndFlush(tenant);
@@ -127,9 +142,10 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
     }
 
     @Override
+    @CacheEvict(cacheNames = "platformOperations", allEntries = true)
     @Transactional(transactionManager = "masterTransactionManager")
     public void deleteTenant(String tenantKey) {
-        updateTenantStatus(tenantKey, TenantStatus.SUSPENDED);
+        updateTenantStatus(tenantKey, TenantStatus.ARCHIVED);
     }
 
     @Override
@@ -142,7 +158,18 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
     }
 
     private PlatformTenantResponseDto mapToResponseDto(PlatformTenant tenant) {
-        return modelMapper.map(tenant, PlatformTenantResponseDto.class);
+        PlatformTenantResponseDto response = modelMapper.map(tenant, PlatformTenantResponseDto.class);
+        PlatformTenantMetricsService.TenantMetrics metrics = tenantMetricsService.collect(tenant);
+        response.setAdminName(metrics.adminName());
+        response.setAdminEmail(metrics.adminEmail());
+        response.setEmployeeCount(metrics.employeeCount());
+        response.setProjectCount(metrics.projectCount());
+        response.setTeamCount(metrics.teamCount());
+        response.setTaskCount(metrics.taskCount());
+        response.setLastLoginAt(metrics.lastLoginAt());
+        response.setLastActivityAt(metrics.lastActivityAt());
+        response.setUsageAvailable(metrics.usageAvailable());
+        return response;
     }
 
     private String normalizeTenantKey(String tenantKey) {
@@ -151,5 +178,16 @@ public class PlatformTenantServiceImpl implements PlatformTenantService {
         }
         String normalized = tenantKey.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean isAllowedTransition(TenantStatus current, TenantStatus next) {
+        if (current == null || next == null) return false;
+        return switch (current) {
+            case PROVISIONING -> next == TenantStatus.ACTIVE || next == TenantStatus.REJECTED;
+            case ACTIVE -> next == TenantStatus.INACTIVE || next == TenantStatus.SUSPENDED || next == TenantStatus.ARCHIVED;
+            case INACTIVE -> next == TenantStatus.ACTIVE || next == TenantStatus.SUSPENDED || next == TenantStatus.ARCHIVED;
+            case SUSPENDED -> next == TenantStatus.ACTIVE || next == TenantStatus.INACTIVE || next == TenantStatus.ARCHIVED;
+            case ARCHIVED, REJECTED -> next == TenantStatus.ACTIVE;
+        };
     }
 }

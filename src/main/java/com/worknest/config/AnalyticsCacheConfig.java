@@ -17,5 +17,7 @@ public class AnalyticsCacheConfig {
     public void expireBusinessIntelligenceSnapshots() {
         var cache = cacheManager.getCache("businessIntelligence");
         if (cache != null) cache.clear();
+        var platformCache = cacheManager.getCache("platformOperations");
+        if (platformCache != null) platformCache.clear();
     }
 }

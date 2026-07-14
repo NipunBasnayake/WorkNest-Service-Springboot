@@ -59,13 +59,13 @@ public class TenantProvisioningListener {
                 tenantSchemaService.ensureTenantSchema(tenant);
                 tenantAdminEmployeeMirrorService.ensureTenantAdminEmployeeMirror(tenant.getTenantKey());
 
-                tenant.setStatus(TenantStatus.ACTIVE);
+                tenant.changeStatus(TenantStatus.ACTIVE);
                 platformTenantRepository.save(tenant);
                 log.info("Tenant provisioning completed successfully for {}", tenant.getTenantKey());
             } catch (Exception ex) {
-                tenant.setStatus(TenantStatus.ACTIVE);
+                tenant.changeStatus(TenantStatus.INACTIVE);
                 platformTenantRepository.save(tenant);
-                log.error("Tenant provisioning failed for {}. Tenant remains active for repair/retry.",
+                log.error("Tenant provisioning failed for {}. Tenant was marked inactive for repair/retry.",
                         tenant.getTenantKey(), ex);
             }
         });

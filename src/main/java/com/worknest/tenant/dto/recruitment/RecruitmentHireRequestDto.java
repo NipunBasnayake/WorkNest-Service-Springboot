@@ -4,7 +4,6 @@ import com.worknest.common.enums.PlatformRole;
 import com.worknest.tenant.enums.TeamFunctionalRole;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
-import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -28,7 +27,6 @@ public class RecruitmentHireRequestDto {
     @Size(max = 120, message = "Department must not exceed 120 characters")
     private String department;
 
-    @PastOrPresent(message = "Joined date cannot be in the future")
     private LocalDate joinedDate;
 
     @Size(min = 8, max = 100, message = "Temporary password must be between 8 and 100 characters")

@@ -7,7 +7,8 @@ import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.util.SlugUtils;
-import com.worknest.notification.email.EmailNotificationService;
+import com.worknest.master.entity.PlatformTenant;
+import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
@@ -21,11 +22,13 @@ import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.EmployeeService;
 import com.worknest.tenant.service.NotificationService;
 import com.worknest.tenant.service.RecruitmentService;
+import com.worknest.tenant.service.RecruitmentEmailTemplateService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -35,7 +38,6 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -51,6 +53,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final CandidateApplicationRepository candidateApplicationRepository;
     private final InterviewRepository interviewRepository;
     private final InterviewFeedbackRepository interviewFeedbackRepository;
+    private final RecruitmentApplicationEventRepository applicationEventRepository;
     private final EmployeeRepository employeeRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -60,10 +63,13 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final NotificationService notificationService;
     private final TenantDtoMapper tenantDtoMapper;
     private final FileStorageService fileStorageService;
-    private final EmailNotificationService emailNotificationService;
+    private final RecruitmentEmailTemplateService recruitmentEmailTemplateService;
+    private final MasterTenantLookupService masterTenantLookupService;
     private final SecureRandom secureRandom;
     @Autowired(required = false)
     private TenantRealtimePublisher tenantRealtimePublisher;
+    @Value("${app.public-web-base-url:http://localhost:5173}")
+    private String publicWebBaseUrl;
 
     public RecruitmentServiceImpl(
             JobPositionRepository jobPositionRepository,
@@ -72,6 +78,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             CandidateApplicationRepository candidateApplicationRepository,
             InterviewRepository interviewRepository,
             InterviewFeedbackRepository interviewFeedbackRepository,
+            RecruitmentApplicationEventRepository applicationEventRepository,
             EmployeeRepository employeeRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
@@ -81,13 +88,15 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             NotificationService notificationService,
             TenantDtoMapper tenantDtoMapper,
             FileStorageService fileStorageService,
-            EmailNotificationService emailNotificationService) {
+            RecruitmentEmailTemplateService recruitmentEmailTemplateService,
+            MasterTenantLookupService masterTenantLookupService) {
         this.jobPositionRepository = jobPositionRepository;
         this.candidateRepository = candidateRepository;
         this.candidateCommentRepository = candidateCommentRepository;
         this.candidateApplicationRepository = candidateApplicationRepository;
         this.interviewRepository = interviewRepository;
         this.interviewFeedbackRepository = interviewFeedbackRepository;
+        this.applicationEventRepository = applicationEventRepository;
         this.employeeRepository = employeeRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
@@ -97,7 +106,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         this.notificationService = notificationService;
         this.tenantDtoMapper = tenantDtoMapper;
         this.fileStorageService = fileStorageService;
-        this.emailNotificationService = emailNotificationService;
+        this.recruitmentEmailTemplateService = recruitmentEmailTemplateService;
+        this.masterTenantLookupService = masterTenantLookupService;
         this.secureRandom = new SecureRandom();
     }
 
@@ -124,6 +134,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 requestDto.getVisibleToExternalApplicants(),
                 requestDto.getExpiresAt());
         ensureJobSlug(position);
+        if (position.isPublished()) {
+            validateJobCanBePublished(position);
+            position.setPublishedAt(LocalDateTime.now());
+        }
         JobPosition saved = jobPositionRepository.save(position);
         publishRecruitmentRealtime("JOB_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.JOB_POSITION, saved.getId(), jsonField("title", saved.getTitle()));
@@ -134,6 +148,13 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public JobPositionResponseDto updateJobPosition(Long jobPositionId, JobPositionUpdateRequestDto requestDto) {
         requireManagePermission();
         JobPosition position = getJobPositionOrThrow(jobPositionId);
+        boolean wasPublished = position.isPublished();
+        String existingSummary = position.getSummary();
+        String existingResponsibilities = position.getResponsibilities();
+        String existingRequirements = position.getRequirements();
+        String existingBenefits = position.getBenefits();
+        String existingExperience = position.getExperience();
+        String existingSalary = position.getSalary();
         applyJobPosition(
                 position,
                 requestDto.getTitle(),
@@ -152,11 +173,86 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 requestDto.getPublished(),
                 requestDto.getVisibleToExternalApplicants(),
                 requestDto.getExpiresAt());
+        if (requestDto.getSummary() == null) position.setSummary(existingSummary);
+        if (requestDto.getResponsibilities() == null) position.setResponsibilities(existingResponsibilities);
+        if (requestDto.getRequirements() == null) position.setRequirements(existingRequirements);
+        if (requestDto.getBenefits() == null) position.setBenefits(existingBenefits);
+        if (requestDto.getExperience() == null) position.setExperience(existingExperience);
+        if (requestDto.getSalary() == null) position.setSalary(existingSalary);
         ensureJobSlug(position);
+        if (!wasPublished && position.isPublished()) {
+            validateJobCanBePublished(position);
+            position.setPublishedAt(LocalDateTime.now());
+        }
         JobPosition updated = jobPositionRepository.save(position);
         publishRecruitmentRealtime("JOB_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.JOB_POSITION, updated.getId(), jsonField("title", updated.getTitle()));
         return toJobPositionResponse(updated);
+    }
+
+    @Override
+    public JobPositionResponseDto publishJobPosition(Long jobPositionId) {
+        requireManagePermission();
+        JobPosition position = getJobPositionOrThrow(jobPositionId);
+        position.setStatus(JobPositionStatus.OPEN);
+        position.setVisibleToExternalApplicants(true);
+        validateJobCanBePublished(position);
+        position.setPublished(true);
+        position.setPublishedAt(LocalDateTime.now());
+        return saveJobAction(position, "JOB_PUBLISHED", "published");
+    }
+
+    @Override
+    public JobPositionResponseDto unpublishJobPosition(Long jobPositionId) {
+        requireManagePermission();
+        JobPosition position = getJobPositionOrThrow(jobPositionId);
+        position.setPublished(false);
+        return saveJobAction(position, "JOB_UNPUBLISHED", "unpublished");
+    }
+
+    @Override
+    public JobPositionResponseDto closeJobPosition(Long jobPositionId) {
+        requireManagePermission();
+        JobPosition position = getJobPositionOrThrow(jobPositionId);
+        position.setStatus(JobPositionStatus.CLOSED);
+        position.setPublished(false);
+        return saveJobAction(position, "JOB_CLOSED", "closed");
+    }
+
+    @Override
+    public JobPositionResponseDto reopenJobPosition(Long jobPositionId) {
+        requireManagePermission();
+        JobPosition position = getJobPositionOrThrow(jobPositionId);
+        position.setStatus(JobPositionStatus.OPEN);
+        return saveJobAction(position, "JOB_REOPENED", "reopened");
+    }
+
+    @Override
+    public JobPositionResponseDto duplicateJobPosition(Long jobPositionId) {
+        requireManagePermission();
+        JobPosition source = getJobPositionOrThrow(jobPositionId);
+        JobPosition duplicate = new JobPosition();
+        duplicate.setTitle("Copy of " + source.getTitle());
+        duplicate.setDepartment(source.getDepartment());
+        duplicate.setSummary(source.getSummary());
+        duplicate.setDescription(source.getDescription());
+        duplicate.setResponsibilities(source.getResponsibilities());
+        duplicate.setRequirements(source.getRequirements());
+        duplicate.setBenefits(source.getBenefits());
+        duplicate.setEmploymentType(source.getEmploymentType());
+        duplicate.setLocation(source.getLocation());
+        duplicate.setExperience(source.getExperience());
+        duplicate.setSalary(source.getSalary());
+        duplicate.setOpenings(source.getOpenings());
+        duplicate.setStatus(JobPositionStatus.OPEN);
+        duplicate.setPublished(false);
+        duplicate.setVisibleToExternalApplicants(true);
+        duplicate.setExpiresAt(source.getExpiresAt());
+        ensureJobSlug(duplicate);
+        JobPosition saved = jobPositionRepository.save(duplicate);
+        publishRecruitmentRealtime("JOB_DUPLICATED", saved.getId());
+        auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.JOB_POSITION, saved.getId(), jsonField("duplicatedFrom", String.valueOf(source.getId())));
+        return toJobPositionResponse(saved);
     }
 
     @Override
@@ -174,8 +270,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         int resolvedSize = Math.max(Math.min(size, 100), 1);
         String resolvedSortBy = isJobSortable(sortBy) ? sortBy : "createdAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        Page<JobPosition> resultPage = jobPositionRepository.findByTitleContainingIgnoreCaseOrDepartmentContainingIgnoreCase(
-                trimToEmpty(search), trimToEmpty(search), PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy)));
+        Page<JobPosition> resultPage = jobPositionRepository.searchActive(
+                trimToEmpty(search), PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy)));
         return toPagedResult(resultPage.map(this::toJobPositionResponse));
     }
 
@@ -183,7 +279,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public void deleteJobPosition(Long jobPositionId) {
         requireManagePermission();
         JobPosition position = getJobPositionOrThrow(jobPositionId);
-        jobPositionRepository.delete(position);
+        position.setDeleted(true);
+        position.setPublished(false);
+        position.setStatus(JobPositionStatus.CLOSED);
+        jobPositionRepository.save(position);
         auditLogService.logAction(AuditActionType.DELETE, AuditEntityType.JOB_POSITION, jobPositionId, jsonField("title", position.getTitle()));
     }
 
@@ -292,9 +391,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         application.setStatus(requestedStatus);
         application.setCreatedBy(authorizationService.getCurrentEmployeeOrNull());
         CandidateApplication saved = candidateApplicationRepository.save(application);
+        addApplicationEvent(saved, "APPLIED", "Application created", "Application added by HR");
         publishRecruitmentRealtime("APPLICATION_CREATED", saved.getId());
         auditLogService.logAction(AuditActionType.CREATE, AuditEntityType.CANDIDATE_APPLICATION, saved.getId(), jsonField("candidateId", String.valueOf(candidate.getId())));
-        notifyCandidateStatus(saved);
         return toApplicationResponse(saved);
     }
 
@@ -302,17 +401,90 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public CandidateApplicationResponseDto updateApplication(Long applicationId, CandidateApplicationUpdateRequestDto requestDto) {
         requireManagePermission();
         CandidateApplication application = getApplicationOrThrow(applicationId);
+        CandidatePipelineStatus previousStatus = application.getStatus();
         applyApplicationUpdates(application, requestDto);
         CandidateApplication updated = candidateApplicationRepository.save(application);
+        if (previousStatus != updated.getStatus()) {
+            addApplicationEvent(updated, "STAGE_CHANGED", "Moved to " + toDisplayStage(updated.getStatus()),
+                    "Previous stage: " + toDisplayStage(previousStatus));
+        }
         publishRecruitmentRealtime("APPLICATION_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.CANDIDATE_APPLICATION, updated.getId(), jsonField("status", updated.getStatus().name()));
-        notifyCandidateStatus(updated);
         return toApplicationResponse(updated);
     }
 
     @Override
     public CandidateApplicationResponseDto updateApplicationStatus(Long applicationId, CandidateApplicationUpdateRequestDto requestDto) {
         return updateApplication(applicationId, requestDto);
+    }
+
+    @Override
+    public CandidateCommentResponseDto addApplicationNote(Long applicationId, RecruitmentApplicationNoteRequestDto requestDto) {
+        requireManagePermission();
+        CandidateApplication application = getApplicationOrThrow(applicationId);
+        ensureApplicationEditable(application);
+        CandidateComment note = new CandidateComment();
+        note.setCandidate(application.getCandidate());
+        note.setApplication(application);
+        note.setMessage(requestDto.getMessage().trim());
+        note.setAuthor(authorizationService.getCurrentEmployeeOrNull());
+        CandidateComment saved = candidateCommentRepository.save(note);
+        addApplicationEvent(application, "NOTE_ADDED", "Internal note added", null);
+        return toCandidateCommentResponse(saved);
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<CandidateCommentResponseDto> listApplicationNotes(Long applicationId) {
+        requireViewPermission();
+        getApplicationOrThrow(applicationId);
+        return candidateCommentRepository.findByApplicationIdOrderByCreatedAtDesc(applicationId).stream()
+                .map(this::toCandidateCommentResponse).toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<RecruitmentApplicationEventResponseDto> listApplicationTimeline(Long applicationId) {
+        requireViewPermission();
+        CandidateApplication application = getApplicationOrThrow(applicationId);
+        List<RecruitmentApplicationEventResponseDto> events = applicationEventRepository
+                .findByApplicationIdOrderByOccurredAtDesc(applicationId).stream()
+                .map(this::toApplicationEventResponse).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        if (events.isEmpty()) {
+            events.add(RecruitmentApplicationEventResponseDto.builder()
+                    .id(0L).eventType("APPLIED").title("Application received")
+                    .detail(application.getReferenceNumber()).occurredAt(application.getAppliedAt()).build());
+        }
+        return events;
+    }
+
+    @Override
+    public RecruitmentEmailLogResponseDto sendApplicationEmail(Long applicationId, RecruitmentSendEmailRequestDto requestDto) {
+        requireManagePermission();
+        CandidateApplication application = getApplicationOrThrow(applicationId);
+        Interview interview = interviewRepository.findByApplicationIdOrderByScheduledAtDesc(applicationId).stream().findFirst().orElse(null);
+        TenantBrand tenant = resolveTenantBrand();
+        RecruitmentEmailLogResponseDto sent = recruitmentEmailTemplateService.send(
+                application, requestDto.getTemplateType(), tenant.companyName(), tenant.careersLink(), interview);
+        addApplicationEvent(application, "EMAIL_SENT", "Email queued", toLabel(requestDto.getTemplateType().name()));
+        return sent;
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<RecruitmentEmailLogResponseDto> listApplicationEmails(Long applicationId) {
+        requireViewPermission();
+        getApplicationOrThrow(applicationId);
+        return recruitmentEmailTemplateService.listApplicationEmails(applicationId);
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<InterviewResponseDto> listApplicationInterviews(Long applicationId) {
+        requireViewPermission();
+        getApplicationOrThrow(applicationId);
+        return interviewRepository.findByApplicationIdOrderByScheduledAtDesc(applicationId).stream()
+                .map(this::toInterviewResponse).toList();
     }
 
     @Override
@@ -328,8 +500,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         }
 
         String requestedPassword = trimToNull(requestDto.getTemporaryPassword());
-        boolean generatedPassword = requestedPassword == null;
-        String temporaryPassword = generatedPassword ? generateTemporaryPassword() : requestedPassword;
+        String temporaryPassword = requestedPassword == null ? generateTemporaryPassword() : requestedPassword;
 
         EmployeeCreateRequestDto employeeRequest = buildEmployeeCreateRequest(application, requestDto, temporaryPassword);
         EmployeeResponseDto employeeResponse = employeeService.createEmployee(employeeRequest);
@@ -340,10 +511,21 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
         application.setStatus(CandidatePipelineStatus.HIRED);
         application.setHiredAt(LocalDateTime.now());
+        application.setHiredEmployee(createdEmployee);
         if (trimToNull(requestDto.getRecruiterNotes()) != null) {
             application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
         }
         CandidateApplication updatedApplication = candidateApplicationRepository.save(application);
+        addApplicationEvent(updatedApplication, "HIRED", "Converted to employee",
+                "Employee code: " + createdEmployee.getEmployeeCode());
+        JobPosition hiredJob = updatedApplication.getJobPosition();
+        long hiresForJob = candidateApplicationRepository.countByJobPositionIdAndStatus(
+                hiredJob.getId(), CandidatePipelineStatus.HIRED);
+        if (hiresForJob >= hiredJob.getOpenings()) {
+            hiredJob.setStatus(JobPositionStatus.CLOSED);
+            hiredJob.setPublished(false);
+            jobPositionRepository.save(hiredJob);
+        }
         publishRecruitmentRealtime("CANDIDATE_HIRED", updatedApplication.getId());
 
         notificationService.createSystemNotification(
@@ -353,7 +535,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 AuditEntityType.EMPLOYEE.name(),
                 createdEmployee.getId()
         );
-        notifyCandidateStatus(updatedApplication);
+        TenantBrand tenant = resolveTenantBrand();
+        recruitmentEmailTemplateService.send(updatedApplication, RecruitmentEmailTemplateType.WELCOME_EMPLOYEE,
+                tenant.companyName(), tenant.careersLink(), null);
         auditLogService.logAction(
                 AuditActionType.UPDATE,
                 AuditEntityType.CANDIDATE_APPLICATION,
@@ -367,7 +551,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .teamId(assignedTeam == null ? null : assignedTeam.getId())
                 .teamName(assignedTeam == null ? null : assignedTeam.getName())
                 .accountProvisioned(employeeResponse.isAccountProvisioned())
-                .temporaryPassword(generatedPassword ? temporaryPassword : null)
                 .build();
     }
 
@@ -386,31 +569,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         int resolvedSize = Math.max(Math.min(size, 100), 1);
         String resolvedSortBy = isApplicationSortable(sortBy) ? sortBy : "appliedAt";
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        List<CandidateApplication> all = candidateApplicationRepository.findAll(Sort.by(direction, resolvedSortBy));
-        List<CandidateApplication> filtered = all.stream()
-                .filter(application -> status == null || application.getStatus() == status)
-                .filter(application -> jobPositionId == null || Objects.equals(application.getJobPosition().getId(), jobPositionId))
-                .filter(application -> {
-                    String query = trimToEmpty(search).toLowerCase();
-                    if (query.isBlank()) {
-                        return true;
-                    }
-                    return contains(application.getCandidate().getFullName(), query)
-                            || contains(application.getCandidate().getEmail(), query)
-                            || contains(application.getJobPosition().getTitle(), query)
-                            || contains(application.getStatus().name(), query);
-                })
-                .toList();
-        int fromIndex = Math.min(resolvedPage * resolvedSize, filtered.size());
-        int toIndex = Math.min(fromIndex + resolvedSize, filtered.size());
-        List<CandidateApplicationResponseDto> items = filtered.subList(fromIndex, toIndex).stream().map(this::toApplicationResponse).toList();
-        return PagedResultDto.<CandidateApplicationResponseDto>builder()
-                .items(items)
-                .page(resolvedPage)
-                .size(resolvedSize)
-                .totalElements(filtered.size())
-                .totalPages((int) Math.ceil(filtered.size() / (double) resolvedSize))
-                .build();
+        Page<CandidateApplication> resultPage = candidateApplicationRepository.searchApplications(
+                trimToEmpty(search), status, jobPositionId,
+                PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy)));
+        return toPagedResult(resultPage.map(this::toApplicationResponse));
     }
 
     @Override
@@ -421,9 +583,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 ? candidateApplicationRepository.findAll(Sort.by(Sort.Direction.DESC, "updatedAt"))
                 : candidateApplicationRepository.findByJobPositionIdOrderByAppliedAtDesc(jobPositionId);
         List<RecruitmentPipelineColumnDto> columns = new ArrayList<>();
-        for (CandidatePipelineStatus stage : CandidatePipelineStatus.values()) {
+        for (CandidatePipelineStatus stage : simpleStages()) {
             List<CandidateApplicationResponseDto> stageItems = applications.stream()
-                    .filter(application -> application.getStatus() == stage)
+                    .filter(application -> canonicalStage(application.getStatus()) == stage)
                     .map(this::toApplicationResponse)
                     .toList();
             columns.add(RecruitmentPipelineColumnDto.builder()
@@ -440,7 +602,18 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public InterviewResponseDto scheduleInterview(InterviewScheduleRequestDto requestDto) {
         requireSchedulePermission();
         CandidateApplication application = getApplicationOrThrow(requestDto.getApplicationId());
-        Employee interviewer = getEmployeeOrThrow(requestDto.getInterviewerEmployeeId());
+        ensureApplicationEditable(application);
+        CandidatePipelineStatus interviewStage = canonicalStage(application.getStatus());
+        if (interviewStage != CandidatePipelineStatus.SHORTLISTED && interviewStage != CandidatePipelineStatus.INTERVIEW) {
+            throw new BadRequestException("Application must be shortlisted before scheduling an interview");
+        }
+        validateInterviewDetails(requestDto);
+        Employee interviewer = requestDto.getInterviewerEmployeeId() == null
+                ? authorizationService.getCurrentEmployeeOrNull()
+                : getEmployeeOrThrow(requestDto.getInterviewerEmployeeId());
+        if (interviewer == null) {
+            throw new BadRequestException("An interviewer is required to schedule an interview");
+        }
         Interview interview = new Interview();
         interview.setApplication(application);
         interview.setInterviewer(interviewer);
@@ -451,17 +624,22 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setMeetingLink(trimToNull(requestDto.getMeetingLink()));
         interview.setNotes(trimToNull(requestDto.getNotes()));
         Interview saved = interviewRepository.save(interview);
+        if (application.getStatus() == CandidatePipelineStatus.SHORTLISTED
+                || application.getStatus() == CandidatePipelineStatus.APPLIED
+                || application.getStatus() == CandidatePipelineStatus.SCREENING) {
+            CandidatePipelineStatus oldStatus = application.getStatus();
+            application.setStatus(CandidatePipelineStatus.INTERVIEW);
+            candidateApplicationRepository.save(application);
+            addApplicationEvent(application, "STAGE_CHANGED", "Moved to Interview",
+                    "Previous stage: " + toDisplayStage(oldStatus));
+        }
+        addApplicationEvent(application, "INTERVIEW_SCHEDULED", "Interview scheduled",
+                saved.getScheduledAt().toString());
         publishRecruitmentRealtime("INTERVIEW_SCHEDULED", saved.getId());
         auditLogService.logAction(AuditActionType.SCHEDULE, AuditEntityType.INTERVIEW, saved.getId(), jsonField("applicationId", String.valueOf(application.getId())));
-        emailNotificationService.sendInterviewScheduledEmail(
-            application.getCandidate().getEmail(),
-            application.getCandidate().getFullName(),
-            application.getCandidate().getFullName(),
-            application.getJobPosition().getTitle(),
-            saved.getScheduledAt(),
-            saved.getMode().name(),
-            interviewer.getFirstName() + " " + interviewer.getLastName()
-        );
+        TenantBrand tenant = resolveTenantBrand();
+        recruitmentEmailTemplateService.send(application, RecruitmentEmailTemplateType.INTERVIEW_INVITATION,
+                tenant.companyName(), tenant.careersLink(), saved);
         return toInterviewResponse(saved);
     }
 
@@ -469,7 +647,11 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public InterviewResponseDto updateInterview(Long interviewId, InterviewScheduleRequestDto requestDto) {
         requireSchedulePermission();
         Interview interview = getInterviewOrThrow(interviewId);
-        Employee interviewer = getEmployeeOrThrow(requestDto.getInterviewerEmployeeId());
+        ensureApplicationEditable(interview.getApplication());
+        validateInterviewDetails(requestDto);
+        Employee interviewer = requestDto.getInterviewerEmployeeId() == null
+                ? interview.getInterviewer()
+                : getEmployeeOrThrow(requestDto.getInterviewerEmployeeId());
         interview.setInterviewer(interviewer);
         interview.setMode(requestDto.getMode());
         interview.setScheduledAt(requestDto.getScheduledAt());
@@ -478,17 +660,13 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         interview.setNotes(trimToNull(requestDto.getNotes()));
         interview.setStatus(InterviewStatus.RESCHEDULED);
         Interview updated = interviewRepository.save(interview);
+        addApplicationEvent(interview.getApplication(), "INTERVIEW_RESCHEDULED", "Interview rescheduled",
+                updated.getScheduledAt().toString());
         publishRecruitmentRealtime("INTERVIEW_UPDATED", updated.getId());
         auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.INTERVIEW, updated.getId(), jsonField("scheduledAt", updated.getScheduledAt().toString()));
-        emailNotificationService.sendInterviewScheduledEmail(
-            interview.getApplication().getCandidate().getEmail(),
-            interview.getApplication().getCandidate().getFullName(),
-            interview.getApplication().getCandidate().getFullName(),
-            interview.getApplication().getJobPosition().getTitle(),
-            updated.getScheduledAt(),
-            updated.getMode().name(),
-            interviewer.getFirstName() + " " + interviewer.getLastName()
-        );
+        TenantBrand tenant = resolveTenantBrand();
+        recruitmentEmailTemplateService.send(interview.getApplication(), RecruitmentEmailTemplateType.INTERVIEW_RESCHEDULED,
+                tenant.companyName(), tenant.careersLink(), updated);
         return toInterviewResponse(updated);
     }
 
@@ -523,25 +701,58 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public RecruitmentDashboardDto getDashboard() {
         requireViewPermission();
         List<CandidateApplication> allApplications = candidateApplicationRepository.findAll();
-        long openJobs = jobPositionRepository.countByStatus(JobPositionStatus.OPEN);
+        long openJobs = jobPositionRepository.countByStatusAndDeletedFalse(JobPositionStatus.OPEN);
         List<RecruitmentStageCountDto> stageCounts = new ArrayList<>();
-        for (CandidatePipelineStatus stage : CandidatePipelineStatus.values()) {
-            stageCounts.add(RecruitmentStageCountDto.builder().stage(stage).count(candidateApplicationRepository.countByStatus(stage)).build());
+        for (CandidatePipelineStatus stage : simpleStages()) {
+            long count = allApplications.stream().filter(application -> canonicalStage(application.getStatus()) == stage).count();
+            stageCounts.add(RecruitmentStageCountDto.builder().stage(stage).count(count).build());
         }
         List<RecruitmentJobCountDto> jobCounts = jobPositionRepository.findAll().stream()
                 .map(position -> RecruitmentJobCountDto.builder().jobPositionId(position.getId()).title(position.getTitle()).count(candidateApplicationRepository.countByJobPositionId(position.getId())).build())
                 .toList();
         long hiredCandidates = stageCounts.stream().filter(item -> item.getStage() == CandidatePipelineStatus.HIRED).mapToLong(RecruitmentStageCountDto::getCount).sum();
-        long upcomingInterviews = interviewRepository.findByScheduledAtBetweenOrderByScheduledAtAsc(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(14)).size();
+        List<InterviewStatus> activeInterviewStatuses = List.of(InterviewStatus.SCHEDULED, InterviewStatus.RESCHEDULED);
+        List<Interview> upcomingInterviewItems = interviewRepository
+                .findTop8ByStatusInAndScheduledAtAfterOrderByScheduledAtAsc(activeInterviewStatuses, LocalDateTime.now());
+        long upcomingInterviews = interviewRepository.countByStatusInAndScheduledAtAfter(activeInterviewStatuses, LocalDateTime.now());
+        long shortlisted = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.SHORTLISTED).count();
+        long offers = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.OFFERED).count();
+        long rejected = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.REJECTED).count();
         return RecruitmentDashboardDto.builder()
                 .openJobs(openJobs)
+                .applicationsReceived(allApplications.size())
+                .shortlisted(shortlisted)
+                .interviewScheduled(upcomingInterviews)
+                .offersSent(offers)
+                .rejected(rejected)
                 .totalCandidates(candidateRepository.count())
-                .activeApplications(allApplications.size())
+                .activeApplications(allApplications.stream().filter(a -> canonicalStage(a.getStatus()) != CandidatePipelineStatus.HIRED
+                        && canonicalStage(a.getStatus()) != CandidatePipelineStatus.REJECTED).count())
                 .hiredCandidates(hiredCandidates)
                 .upcomingInterviews(upcomingInterviews)
                 .stageCounts(stageCounts)
                 .jobCounts(jobCounts)
+                .recentApplications(candidateApplicationRepository.findTop8ByOrderByAppliedAtDesc().stream().map(this::toApplicationResponse).toList())
+                .upcomingInterviewItems(upcomingInterviewItems.stream().map(this::toInterviewResponse).toList())
+                .recentlyPublishedJobs(jobPositionRepository.findTop5ByPublishedTrueAndDeletedFalseOrderByPublishedAtDesc().stream().map(this::toJobPositionResponse).toList())
                 .build();
+    }
+
+    @Override
+    public List<RecruitmentEmailTemplateResponseDto> listEmailTemplates() {
+        requireViewPermission();
+        return recruitmentEmailTemplateService.listTemplates();
+    }
+
+    @Override
+    public RecruitmentEmailTemplateResponseDto updateEmailTemplate(
+            RecruitmentEmailTemplateType type,
+            RecruitmentEmailTemplateUpdateRequestDto requestDto) {
+        requireManagePermission();
+        RecruitmentEmailTemplateResponseDto updated = recruitmentEmailTemplateService.updateTemplate(type, requestDto);
+        auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.RECRUITMENT_EMAIL_TEMPLATE, updated.getId(),
+                jsonField("emailTemplate", type.name()));
+        return updated;
     }
 
     private void publishRecruitmentRealtime(String eventType, Long entityId) {
@@ -566,7 +777,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private JobPosition getJobPositionOrThrow(Long id) {
-        return jobPositionRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Job position not found with id: " + id));
+        JobPosition position = jobPositionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Job position not found with id: " + id));
+        if (Boolean.TRUE.equals(position.getDeleted())) {
+            throw new ResourceNotFoundException("Job position not found with id: " + id);
+        }
+        return position;
     }
 
     private Candidate getCandidateOrThrow(Long id) {
@@ -625,6 +841,29 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         position.setExpiresAt(expiresAt);
     }
 
+    private JobPositionResponseDto saveJobAction(JobPosition position, String realtimeEvent, String auditAction) {
+        JobPosition saved = jobPositionRepository.save(position);
+        publishRecruitmentRealtime(realtimeEvent, saved.getId());
+        auditLogService.logAction(AuditActionType.UPDATE, AuditEntityType.JOB_POSITION, saved.getId(),
+                jsonField("action", auditAction));
+        return toJobPositionResponse(saved);
+    }
+
+    private void validateJobCanBePublished(JobPosition position) {
+        if (trimToNull(position.getDepartment()) == null) {
+            throw new BadRequestException("Department is required before publishing a job opening");
+        }
+        if (trimToNull(position.getDescription()) == null) {
+            throw new BadRequestException("A markdown job description is required before publishing");
+        }
+        if (position.getExpiresAt() != null && !position.getExpiresAt().isAfter(LocalDateTime.now())) {
+            throw new BadRequestException("Application deadline must be in the future");
+        }
+        if (position.getStatus() == JobPositionStatus.CLOSED) {
+            throw new BadRequestException("Reopen the job opening before publishing it");
+        }
+    }
+
     private void ensureJobSlug(JobPosition position) {
         if (trimToNull(position.getSlug()) != null) {
             return;
@@ -655,22 +894,127 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private void applyApplicationUpdates(CandidateApplication application, CandidateApplicationUpdateRequestDto requestDto) {
-        if (application.getStatus() == CandidatePipelineStatus.HIRED) {
-            throw new BadRequestException("Hired applications are locked after employee creation");
-        }
-        if (requestDto.getStatus() == CandidatePipelineStatus.HIRED) {
+        ensureApplicationEditable(application);
+        CandidatePipelineStatus nextStatus = requestDto.getStatus();
+        if (nextStatus == CandidatePipelineStatus.HIRED) {
             throw new BadRequestException("Use the hire workflow to create the employee account and mark this application as hired");
         }
-        application.setStatus(requestDto.getStatus());
-        application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
-        application.setRejectedReason(trimToNull(requestDto.getRejectedReason()));
-        application.setExpectedSalary(requestDto.getExpectedSalary());
-        if (requestDto.getStatus() == CandidatePipelineStatus.OFFERED) {
+        validateSimpleTransition(application.getStatus(), nextStatus);
+        application.setStatus(nextStatus);
+        if (requestDto.getRecruiterNotes() != null) {
+            application.setRecruiterNotes(trimToNull(requestDto.getRecruiterNotes()));
+        }
+        if (requestDto.getExpectedSalary() != null) {
+            application.setExpectedSalary(requestDto.getExpectedSalary());
+        }
+        if (nextStatus == CandidatePipelineStatus.REJECTED) {
+            String reason = trimToNull(requestDto.getRejectedReason());
+            if (reason == null) {
+                throw new BadRequestException("A rejection reason is required");
+            }
+            application.setRejectedReason(reason);
+        } else if (requestDto.getRejectedReason() != null) {
+            application.setRejectedReason(trimToNull(requestDto.getRejectedReason()));
+        }
+        if (nextStatus == CandidatePipelineStatus.OFFERED && application.getOfferedAt() == null) {
             application.setOfferedAt(LocalDateTime.now());
         }
-        if (requestDto.getStatus() == CandidatePipelineStatus.HIRED) {
-            application.setHiredAt(LocalDateTime.now());
+    }
+
+    private void ensureApplicationEditable(CandidateApplication application) {
+        if (application.getStatus() == CandidatePipelineStatus.HIRED || application.getHiredEmployee() != null) {
+            throw new BadRequestException("Hired applications are read-only after employee conversion");
         }
+    }
+
+    private void validateSimpleTransition(CandidatePipelineStatus current, CandidatePipelineStatus next) {
+        CandidatePipelineStatus from = canonicalStage(current);
+        CandidatePipelineStatus to = canonicalStage(next);
+        if (!simpleStages().contains(to)) {
+            throw new BadRequestException("Only Applied, Shortlisted, Interview, Offer, Hired, and Rejected stages are supported");
+        }
+        if (from == to) return;
+        boolean allowed = switch (from) {
+            case APPLIED -> to == CandidatePipelineStatus.SHORTLISTED || to == CandidatePipelineStatus.REJECTED;
+            case SHORTLISTED -> to == CandidatePipelineStatus.APPLIED || to == CandidatePipelineStatus.INTERVIEW || to == CandidatePipelineStatus.REJECTED;
+            case INTERVIEW -> to == CandidatePipelineStatus.SHORTLISTED || to == CandidatePipelineStatus.OFFERED || to == CandidatePipelineStatus.REJECTED;
+            case OFFERED -> to == CandidatePipelineStatus.INTERVIEW || to == CandidatePipelineStatus.REJECTED;
+            default -> false;
+        };
+        if (!allowed) {
+            throw new BadRequestException("Application cannot move from " + toDisplayStage(from) + " to " + toDisplayStage(to));
+        }
+    }
+
+    private List<CandidatePipelineStatus> simpleStages() {
+        return List.of(
+                CandidatePipelineStatus.APPLIED,
+                CandidatePipelineStatus.SHORTLISTED,
+                CandidatePipelineStatus.INTERVIEW,
+                CandidatePipelineStatus.OFFERED,
+                CandidatePipelineStatus.HIRED,
+                CandidatePipelineStatus.REJECTED);
+    }
+
+    private CandidatePipelineStatus canonicalStage(CandidatePipelineStatus status) {
+        if (status == null) return CandidatePipelineStatus.APPLIED;
+        return switch (status) {
+            case SCREENING -> CandidatePipelineStatus.SHORTLISTED;
+            case TECHNICAL, HR_REVIEW -> CandidatePipelineStatus.INTERVIEW;
+            case WITHDRAWN -> CandidatePipelineStatus.REJECTED;
+            default -> status;
+        };
+    }
+
+    private String toDisplayStage(CandidatePipelineStatus status) {
+        CandidatePipelineStatus canonical = canonicalStage(status);
+        return canonical == CandidatePipelineStatus.OFFERED ? "Offer" : toLabel(canonical.name());
+    }
+
+    private void validateInterviewDetails(InterviewScheduleRequestDto requestDto) {
+        if (requestDto.getScheduledAt() == null || !requestDto.getScheduledAt().isAfter(LocalDateTime.now())) {
+            throw new BadRequestException("Interview date and time must be in the future");
+        }
+        if (requestDto.getMode() == InterviewMode.REMOTE && trimToNull(requestDto.getMeetingLink()) == null) {
+            throw new BadRequestException("Meeting link is required for an online interview");
+        }
+        if (requestDto.getMode() == InterviewMode.ONSITE && trimToNull(requestDto.getLocation()) == null) {
+            throw new BadRequestException("Location is required for a physical interview");
+        }
+    }
+
+    private void addApplicationEvent(
+            CandidateApplication application,
+            String eventType,
+            String title,
+            String detail) {
+        RecruitmentApplicationEvent event = new RecruitmentApplicationEvent();
+        event.setApplication(application);
+        event.setEventType(eventType);
+        event.setTitle(title);
+        event.setDetail(trimToNull(detail));
+        event.setActor(authorizationService.getCurrentEmployeeOrNull());
+        applicationEventRepository.save(event);
+    }
+
+    private RecruitmentApplicationEventResponseDto toApplicationEventResponse(RecruitmentApplicationEvent event) {
+        return RecruitmentApplicationEventResponseDto.builder()
+                .id(event.getId())
+                .eventType(event.getEventType())
+                .title(event.getTitle())
+                .detail(event.getDetail())
+                .actor(tenantDtoMapper.toEmployeeSimple(event.getActor()))
+                .occurredAt(event.getOccurredAt())
+                .build();
+    }
+
+    private TenantBrand resolveTenantBrand() {
+        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
+        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tenantKey).orElse(null);
+        String slug = tenant == null ? tenantKey : tenant.getSlug();
+        String name = tenant == null ? tenantKey : tenant.getCompanyName();
+        String base = publicWebBaseUrl == null ? "" : publicWebBaseUrl.replaceAll("/+$", "");
+        return new TenantBrand(name, base + "/" + slug + "/careers");
     }
 
     private void validateApplicationCanBeHired(CandidateApplication application) {
@@ -680,8 +1024,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         if (application.getStatus() == CandidatePipelineStatus.REJECTED) {
             throw new BadRequestException("Rejected applications cannot be hired without first reopening the recruitment decision");
         }
-        if (!canHireFromStatus(application.getStatus())) {
-            throw new BadRequestException("Application must reach interview, technical, HR review, or offer stage before hiring");
+        if (canonicalStage(application.getStatus()) != CandidatePipelineStatus.OFFERED) {
+            throw new BadRequestException("Application must reach the offer stage before it can be converted to an employee");
         }
         if (!interviewRepository.existsByApplicationId(application.getId())) {
             throw new BadRequestException("At least one interview must be scheduled before hiring a candidate");
@@ -692,13 +1036,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 application.getId())) {
             throw new BadRequestException("Candidate is already hired through another application");
         }
-    }
-
-    private boolean canHireFromStatus(CandidatePipelineStatus status) {
-        return status == CandidatePipelineStatus.INTERVIEW
-                || status == CandidatePipelineStatus.TECHNICAL
-                || status == CandidatePipelineStatus.HR_REVIEW
-                || status == CandidatePipelineStatus.OFFERED;
     }
 
     private EmployeeCreateRequestDto buildEmployeeCreateRequest(
@@ -754,8 +1091,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     private PlatformRole resolveHireRole(PlatformRole role) {
         PlatformRole resolvedRole = role == null ? PlatformRole.EMPLOYEE : role;
-        if (!resolvedRole.isTenantBusinessRole() || resolvedRole == PlatformRole.PLATFORM_ADMIN) {
-            throw new BadRequestException("Only tenant business roles can be assigned when hiring a candidate");
+        if (resolvedRole != PlatformRole.EMPLOYEE && resolvedRole != PlatformRole.MANAGER) {
+            throw new BadRequestException("Recruitment conversion can assign only Employee or Manager roles");
         }
         return resolvedRole;
     }
@@ -795,31 +1132,17 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return password.toString();
     }
 
-    private void notifyCandidateStatus(CandidateApplication application) {
-        try {
-            String updatedBy = authorizationService.getCurrentEmployeeOrNull() == null
-                    ? "WorkNest"
-                    : authorizationService.getCurrentEmployeeOrNull().getFirstName() + " " + authorizationService.getCurrentEmployeeOrNull().getLastName();
-            emailNotificationService.sendCandidateStatusUpdateEmail(
-                    application.getCandidate().getEmail(),
-                    application.getCandidate().getFullName(),
-                    application.getCandidate().getFullName(),
-                    application.getJobPosition().getTitle(),
-                    application.getStatus().name(),
-                    updatedBy
-            );
-        } catch (Exception ignored) {
-        }
-    }
-
     private CandidateApplicationResponseDto toApplicationResponse(CandidateApplication application) {
         return CandidateApplicationResponseDto.builder()
                 .id(application.getId())
+                .referenceNumber(application.getReferenceNumber())
                 .candidate(toCandidateResponse(application.getCandidate()))
                 .jobPosition(toJobPositionResponse(application.getJobPosition()))
                 .status(application.getStatus())
                 .coverLetter(application.getCoverLetter())
                 .expectedSalary(application.getExpectedSalary())
+                .availableFrom(application.getAvailableFrom())
+                .source(application.getSource())
                 .recruiterNotes(application.getRecruiterNotes())
                 .rejectedReason(application.getRejectedReason())
                 .createdBy(tenantDtoMapper.toEmployeeSimple(application.getCreatedBy()))
@@ -827,6 +1150,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .updatedAt(application.getUpdatedAt())
                 .offeredAt(application.getOfferedAt())
                 .hiredAt(application.getHiredAt())
+                .hiredEmployeeId(application.getHiredEmployee() == null ? null : application.getHiredEmployee().getId())
+                .version(application.getVersion())
                 .build();
     }
 
@@ -880,6 +1205,11 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .fullName(candidate.getFullName())
                 .email(candidate.getEmail())
                 .phone(candidate.getPhone())
+                .currentCity(candidate.getCurrentCity())
+                .country(candidate.getCountry())
+                .linkedinUrl(candidate.getLinkedinUrl())
+                .portfolioUrl(candidate.getPortfolioUrl())
+                .currentCompany(candidate.getCurrentCompany())
                 .currentTitle(candidate.getCurrentTitle())
                 .yearsOfExperience(candidate.getYearsOfExperience())
                 .source(candidate.getSource())
@@ -913,6 +1243,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .published(position.isPublished())
                 .visibleToExternalApplicants(position.getVisibleToExternalApplicants())
                 .expiresAt(position.getExpiresAt())
+                .publishedAt(position.getPublishedAt())
                 .applicationCount(candidateApplicationRepository.countByJobPositionId(position.getId()))
                 .createdAt(position.getCreatedAt())
                 .updatedAt(position.getUpdatedAt())
@@ -945,10 +1276,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return value == null ? "" : value.trim();
     }
 
-    private boolean contains(String value, String query) {
-        return value != null && value.toLowerCase().contains(query);
-    }
-
     private String jsonField(String key, String value) {
         return "{\"" + key + "\":\"" + escapeJson(value) + "\"}";
     }
@@ -973,6 +1300,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private String toLabel(String name) {
-        return name.toLowerCase().replace('_', ' ');
+        String value = name.toLowerCase().replace('_', ' ');
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
+
+    private record TenantBrand(String companyName, String careersLink) {}
 }

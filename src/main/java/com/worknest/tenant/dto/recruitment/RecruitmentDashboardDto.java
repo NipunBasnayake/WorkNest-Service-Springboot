@@ -11,10 +11,18 @@ import java.util.List;
 @Builder
 public class RecruitmentDashboardDto {
     private long openJobs;
+    private long applicationsReceived;
+    private long shortlisted;
+    private long interviewScheduled;
+    private long offersSent;
+    private long rejected;
     private long totalCandidates;
     private long activeApplications;
     private long hiredCandidates;
     private long upcomingInterviews;
     private List<RecruitmentStageCountDto> stageCounts;
     private List<RecruitmentJobCountDto> jobCounts;
+    private List<CandidateApplicationResponseDto> recentApplications;
+    private List<InterviewResponseDto> upcomingInterviewItems;
+    private List<JobPositionResponseDto> recentlyPublishedJobs;
 }

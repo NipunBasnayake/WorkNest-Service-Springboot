@@ -17,25 +17,29 @@ import com.worknest.tenant.entity.Candidate;
 import com.worknest.tenant.entity.CandidateApplication;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.JobPosition;
+import com.worknest.tenant.entity.RecruitmentApplicationEvent;
 import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.CandidatePipelineStatus;
 import com.worknest.tenant.enums.NotificationType;
+import com.worknest.tenant.enums.RecruitmentEmailTemplateType;
 import com.worknest.tenant.repository.CandidateApplicationRepository;
 import com.worknest.tenant.repository.CandidateRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.JobPositionRepository;
+import com.worknest.tenant.repository.RecruitmentApplicationEventRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
+import com.worknest.tenant.service.RecruitmentEmailTemplateService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -49,8 +53,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     private static final List<PlatformRole> RECIPIENT_ROLES = List.of(
             PlatformRole.TENANT_ADMIN,
             PlatformRole.ADMIN,
-            PlatformRole.HR,
-            PlatformRole.MANAGER
+            PlatformRole.HR
     );
 
     private final CandidateRepository candidateRepository;
@@ -61,6 +64,10 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final MasterTenantLookupService masterTenantLookupService;
+    private final RecruitmentEmailTemplateService recruitmentEmailTemplateService;
+    private final RecruitmentApplicationEventRepository applicationEventRepository;
+    @Value("${app.public-web-base-url:http://localhost:5173}")
+    private String publicWebBaseUrl;
 
     public PublicCandidateApplicationServiceImpl(
             CandidateRepository candidateRepository,
@@ -70,7 +77,9 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
             FileStorageService fileStorageService,
             NotificationService notificationService,
             AuditLogService auditLogService,
-            MasterTenantLookupService masterTenantLookupService) {
+            MasterTenantLookupService masterTenantLookupService,
+            RecruitmentEmailTemplateService recruitmentEmailTemplateService,
+            RecruitmentApplicationEventRepository applicationEventRepository) {
         this.candidateRepository = candidateRepository;
         this.candidateApplicationRepository = candidateApplicationRepository;
         this.jobPositionRepository = jobPositionRepository;
@@ -79,6 +88,8 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.masterTenantLookupService = masterTenantLookupService;
+        this.recruitmentEmailTemplateService = recruitmentEmailTemplateService;
+        this.applicationEventRepository = applicationEventRepository;
     }
 
     @Override
@@ -112,11 +123,18 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         application.setSource(PUBLIC_SOURCE);
 
         CandidateApplication savedApplication = candidateApplicationRepository.saveAndFlush(application);
-        savedApplication.setReferenceNumber(generateReferenceNumber(savedApplication.getId(), savedApplication.getAppliedAt()));
+        savedApplication.setReferenceNumber(generateReferenceNumber());
         CandidateApplication finalizedApplication = candidateApplicationRepository.save(savedApplication);
 
+        recordApplicationReceived(finalizedApplication);
         notifyRecruitmentOwners(finalizedApplication);
         auditCandidateApplied(finalizedApplication);
+        recruitmentEmailTemplateService.send(
+                finalizedApplication,
+                RecruitmentEmailTemplateType.APPLICATION_RECEIVED,
+                company.getCompanyName(),
+                buildCareersLink(company.getTenantSlug()),
+                null);
 
         return PublicApplicationResponseDto.builder()
                 .referenceNumber(finalizedApplication.getReferenceNumber())
@@ -124,7 +142,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                 .jobSlug(jobPosition.getSlug())
                 .company(company)
                 .submittedDate(finalizedApplication.getAppliedAt())
-                .message("We'll contact you if your profile matches.")
+                .message("Your application has been received. A confirmation email is on its way.")
                 .build();
     }
 
@@ -235,10 +253,22 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                 .build();
     }
 
-    private String generateReferenceNumber(Long applicationId, LocalDateTime appliedAt) {
-        int year = (appliedAt == null ? LocalDate.now() : appliedAt.toLocalDate()).getYear();
-        long idPart = applicationId == null ? 0L : applicationId;
-        return "APP-" + year + "-" + String.format("%06d", idPart);
+    private String generateReferenceNumber() {
+        return "APP-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase(Locale.ROOT);
+    }
+
+    private void recordApplicationReceived(CandidateApplication application) {
+        RecruitmentApplicationEvent event = new RecruitmentApplicationEvent();
+        event.setApplication(application);
+        event.setEventType("APPLIED");
+        event.setTitle("Application received");
+        event.setDetail("Submitted through the public careers page");
+        applicationEventRepository.save(event);
+    }
+
+    private String buildCareersLink(String tenantSlug) {
+        String base = publicWebBaseUrl == null ? "" : publicWebBaseUrl.replaceAll("/+$", "");
+        return base + "/" + tenantSlug + "/careers";
     }
 
     private String normalizeReferenceNumber(String value) {

@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Setter
@@ -26,4 +27,5 @@ public class PublicCareerJobDetailDto {
     private String benefits;
     private LocalDateTime postedDate;
     private LocalDateTime expiry;
+    private List<PublicCareerJobSummaryDto> relatedJobs;
 }

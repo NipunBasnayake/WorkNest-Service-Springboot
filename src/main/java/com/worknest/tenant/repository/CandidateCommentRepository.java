@@ -8,4 +8,6 @@ import java.util.List;
 public interface CandidateCommentRepository extends JpaRepository<CandidateComment, Long> {
 
     List<CandidateComment> findByCandidateIdOrderByCreatedAtDesc(Long candidateId);
+
+    List<CandidateComment> findByApplicationIdOrderByCreatedAtDesc(Long applicationId);
 }

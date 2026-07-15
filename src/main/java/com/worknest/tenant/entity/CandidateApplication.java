@@ -76,6 +76,14 @@ public class CandidateApplication {
     @Column(name = "hired_at")
     private LocalDateTime hiredAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "hired_employee_id")
+    private Employee hiredEmployee;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
+
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();

@@ -27,6 +27,8 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
 
     long countByStatus(CandidatePipelineStatus status);
 
+    long countByStatusIn(Collection<CandidatePipelineStatus> statuses);
+
     long countByJobPositionId(Long jobPositionId);
 
     boolean existsByCandidateIdAndJobPositionId(Long candidateId, Long jobPositionId);
@@ -39,6 +41,26 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
             Collection<CandidatePipelineStatus> statuses);
 
     boolean existsByCandidateIdAndStatusAndIdNot(Long candidateId, CandidatePipelineStatus status, Long id);
+
+    long countByJobPositionIdAndStatus(Long jobPositionId, CandidatePipelineStatus status);
+
+    List<CandidateApplication> findTop8ByOrderByAppliedAtDesc();
+
+    @Query("""
+            SELECT ca FROM CandidateApplication ca
+            JOIN ca.candidate c
+            JOIN ca.jobPosition j
+            WHERE (:status IS NULL OR ca.status = :status)
+              AND (:jobPositionId IS NULL OR j.id = :jobPositionId)
+              AND (:search = '' OR LOWER(c.fullName) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR LOWER(j.title) LIKE LOWER(CONCAT('%', :search, '%')))
+            """)
+    Page<CandidateApplication> searchApplications(
+            @Param("search") String search,
+            @Param("status") CandidatePipelineStatus status,
+            @Param("jobPositionId") Long jobPositionId,
+            Pageable pageable);
 
     @Query("""
             SELECT ca.status, COUNT(ca) FROM CandidateApplication ca

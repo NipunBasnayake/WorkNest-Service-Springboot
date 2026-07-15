@@ -19,7 +19,19 @@ public interface JobPositionRepository extends JpaRepository<JobPosition, Long> 
             String department,
             Pageable pageable);
 
+    @Query("""
+            SELECT j FROM JobPosition j
+            WHERE COALESCE(j.deleted, false) = false
+              AND (:search = '' OR LOWER(j.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR LOWER(COALESCE(j.department, '')) LIKE LOWER(CONCAT('%', :search, '%')))
+            """)
+    Page<JobPosition> searchActive(@Param("search") String search, Pageable pageable);
+
     long countByStatus(JobPositionStatus status);
+
+    long countByStatusAndDeletedFalse(JobPositionStatus status);
+
+    List<JobPosition> findTop5ByPublishedTrueAndDeletedFalseOrderByPublishedAtDesc();
 
     default List<JobPosition> findPublishedJobs() {
         return findPublishedJobs(JobPositionStatus.OPEN, LocalDateTime.now());

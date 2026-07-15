@@ -15,7 +15,6 @@ public class InterviewScheduleRequestDto {
     @NotNull(message = "Application ID is required")
     private Long applicationId;
 
-    @NotNull(message = "Interviewer employee ID is required")
     private Long interviewerEmployeeId;
 
     @NotNull(message = "Interview scheduled time is required")

@@ -30,6 +30,7 @@ public class JobPositionResponseDto {
     private boolean published;
     private Boolean visibleToExternalApplicants;
     private LocalDateTime expiresAt;
+    private LocalDateTime publishedAt;
     private long applicationCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

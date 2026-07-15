@@ -83,6 +83,9 @@ public class JobPosition {
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
+    @Column(name = "published_at")
+    private LocalDateTime publishedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

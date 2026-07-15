@@ -12,6 +12,11 @@ public interface RecruitmentService {
 
     JobPositionResponseDto createJobPosition(JobPositionCreateRequestDto requestDto);
     JobPositionResponseDto updateJobPosition(Long jobPositionId, JobPositionUpdateRequestDto requestDto);
+    JobPositionResponseDto publishJobPosition(Long jobPositionId);
+    JobPositionResponseDto unpublishJobPosition(Long jobPositionId);
+    JobPositionResponseDto closeJobPosition(Long jobPositionId);
+    JobPositionResponseDto reopenJobPosition(Long jobPositionId);
+    JobPositionResponseDto duplicateJobPosition(Long jobPositionId);
     JobPositionResponseDto getJobPositionById(Long jobPositionId);
     PagedResultDto<JobPositionResponseDto> listJobPositions(String search, int page, int size, String sortBy, String sortDir);
     void deleteJobPosition(Long jobPositionId);
@@ -31,6 +36,12 @@ public interface RecruitmentService {
     CandidateApplicationResponseDto getApplicationById(Long applicationId);
     PagedResultDto<CandidateApplicationResponseDto> listApplications(String search, CandidatePipelineStatus status, Long jobPositionId, int page, int size, String sortBy, String sortDir);
     RecruitmentPipelineResponseDto getPipeline(Long jobPositionId);
+    CandidateCommentResponseDto addApplicationNote(Long applicationId, RecruitmentApplicationNoteRequestDto requestDto);
+    List<CandidateCommentResponseDto> listApplicationNotes(Long applicationId);
+    List<RecruitmentApplicationEventResponseDto> listApplicationTimeline(Long applicationId);
+    RecruitmentEmailLogResponseDto sendApplicationEmail(Long applicationId, RecruitmentSendEmailRequestDto requestDto);
+    List<RecruitmentEmailLogResponseDto> listApplicationEmails(Long applicationId);
+    List<InterviewResponseDto> listApplicationInterviews(Long applicationId);
 
     InterviewResponseDto scheduleInterview(InterviewScheduleRequestDto requestDto);
     InterviewResponseDto updateInterview(Long interviewId, InterviewScheduleRequestDto requestDto);
@@ -38,4 +49,8 @@ public interface RecruitmentService {
     List<InterviewResponseDto> listUpcomingInterviews(LocalDateTime from, LocalDateTime to);
 
     RecruitmentDashboardDto getDashboard();
+    List<RecruitmentEmailTemplateResponseDto> listEmailTemplates();
+    RecruitmentEmailTemplateResponseDto updateEmailTemplate(
+            com.worknest.tenant.enums.RecruitmentEmailTemplateType type,
+            RecruitmentEmailTemplateUpdateRequestDto requestDto);
 }

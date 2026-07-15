@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 @Table(
         name = "candidate_comments",
         indexes = {
-                @Index(name = "idx_candidate_comments_candidate", columnList = "candidate_id")
+                @Index(name = "idx_candidate_comments_candidate", columnList = "candidate_id"),
+                @Index(name = "idx_candidate_comments_application", columnList = "application_id")
         }
 )
 @Getter
@@ -26,6 +27,10 @@ public class CandidateComment {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "candidate_id", nullable = false)
     private Candidate candidate;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "application_id")
+    private CandidateApplication application;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "author_employee_id")

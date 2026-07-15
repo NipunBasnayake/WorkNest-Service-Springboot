@@ -14,5 +14,4 @@ public class RecruitmentHireResponseDto {
     private Long teamId;
     private String teamName;
     private boolean accountProvisioned;
-    private String temporaryPassword;
 }

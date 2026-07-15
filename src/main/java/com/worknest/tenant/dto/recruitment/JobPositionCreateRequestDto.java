@@ -25,7 +25,7 @@ public class JobPositionCreateRequestDto {
     @Size(max = 500, message = "Summary must not exceed 500 characters")
     private String summary;
 
-    @Size(max = 5000, message = "Description must not exceed 5000 characters")
+    @Size(max = 30000, message = "Description must not exceed 30000 characters")
     private String description;
 
     @Size(max = 8000, message = "Responsibilities must not exceed 8000 characters")

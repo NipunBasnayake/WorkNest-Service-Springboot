@@ -43,6 +43,37 @@ public class RecruitmentController {
         return ResponseEntity.ok(ApiResponse.success("Job position updated successfully", recruitmentService.updateJobPosition(id, requestDto)));
     }
 
+    @PostMapping("/jobs/{id:\\d+}/publish")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<JobPositionResponseDto>> publishJob(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Job opening published successfully", recruitmentService.publishJobPosition(id)));
+    }
+
+    @PostMapping("/jobs/{id:\\d+}/unpublish")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<JobPositionResponseDto>> unpublishJob(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Job opening unpublished successfully", recruitmentService.unpublishJobPosition(id)));
+    }
+
+    @PostMapping("/jobs/{id:\\d+}/close")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<JobPositionResponseDto>> closeJob(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Job opening closed successfully", recruitmentService.closeJobPosition(id)));
+    }
+
+    @PostMapping("/jobs/{id:\\d+}/reopen")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<JobPositionResponseDto>> reopenJob(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Job opening reopened successfully", recruitmentService.reopenJobPosition(id)));
+    }
+
+    @PostMapping("/jobs/{id:\\d+}/duplicate")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<JobPositionResponseDto>> duplicateJob(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Job opening duplicated as a draft", recruitmentService.duplicateJobPosition(id)));
+    }
+
     @GetMapping("/jobs/{id:\\d+}")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<JobPositionResponseDto>> getJob(@PathVariable("id") @Positive Long id) {
@@ -147,6 +178,48 @@ public class RecruitmentController {
         return ResponseEntity.ok(ApiResponse.success("Application retrieved successfully", recruitmentService.getApplicationById(id)));
     }
 
+    @PostMapping("/applications/{id:\\d+}/notes")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<CandidateCommentResponseDto>> addApplicationNote(
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody RecruitmentApplicationNoteRequestDto requestDto) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Application note added successfully", recruitmentService.addApplicationNote(id, requestDto)));
+    }
+
+    @GetMapping("/applications/{id:\\d+}/notes")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<CandidateCommentResponseDto>>> listApplicationNotes(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Application notes retrieved successfully", recruitmentService.listApplicationNotes(id)));
+    }
+
+    @GetMapping("/applications/{id:\\d+}/timeline")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<RecruitmentApplicationEventResponseDto>>> listApplicationTimeline(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Application timeline retrieved successfully", recruitmentService.listApplicationTimeline(id)));
+    }
+
+    @PostMapping("/applications/{id:\\d+}/emails")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<RecruitmentEmailLogResponseDto>> sendApplicationEmail(
+            @PathVariable("id") @Positive Long id,
+            @Valid @RequestBody RecruitmentSendEmailRequestDto requestDto) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.success("Candidate email queued successfully", recruitmentService.sendApplicationEmail(id, requestDto)));
+    }
+
+    @GetMapping("/applications/{id:\\d+}/emails")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<RecruitmentEmailLogResponseDto>>> listApplicationEmails(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Candidate emails retrieved successfully", recruitmentService.listApplicationEmails(id)));
+    }
+
+    @GetMapping("/applications/{id:\\d+}/interviews")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<InterviewResponseDto>>> listApplicationInterviews(@PathVariable("id") @Positive Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Application interviews retrieved successfully", recruitmentService.listApplicationInterviews(id)));
+    }
+
     @GetMapping("/applications")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<PagedResultDto<CandidateApplicationResponseDto>>> listApplications(
@@ -196,5 +269,19 @@ public class RecruitmentController {
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<RecruitmentDashboardDto>> getDashboard() {
         return ResponseEntity.ok(ApiResponse.success("Recruitment dashboard retrieved successfully", recruitmentService.getDashboard()));
+    }
+
+    @GetMapping("/email-templates")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<RecruitmentEmailTemplateResponseDto>>> listEmailTemplates() {
+        return ResponseEntity.ok(ApiResponse.success("Recruitment email templates retrieved successfully", recruitmentService.listEmailTemplates()));
+    }
+
+    @PutMapping("/email-templates/{type}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<RecruitmentEmailTemplateResponseDto>> updateEmailTemplate(
+            @PathVariable("type") com.worknest.tenant.enums.RecruitmentEmailTemplateType type,
+            @Valid @RequestBody RecruitmentEmailTemplateUpdateRequestDto requestDto) {
+        return ResponseEntity.ok(ApiResponse.success("Recruitment email template updated successfully", recruitmentService.updateEmailTemplate(type, requestDto)));
     }
 }

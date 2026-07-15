@@ -14,6 +14,11 @@ public class CandidateResponseDto {
     private String fullName;
     private String email;
     private String phone;
+    private String currentCity;
+    private String country;
+    private String linkedinUrl;
+    private String portfolioUrl;
+    private String currentCompany;
     private String currentTitle;
     private Integer yearsOfExperience;
     private String source;

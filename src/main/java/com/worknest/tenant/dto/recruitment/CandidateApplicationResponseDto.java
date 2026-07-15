@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Getter
@@ -14,11 +15,14 @@ import java.time.LocalDateTime;
 @Builder
 public class CandidateApplicationResponseDto {
     private Long id;
+    private String referenceNumber;
     private CandidateResponseDto candidate;
     private JobPositionResponseDto jobPosition;
     private CandidatePipelineStatus status;
     private String coverLetter;
     private BigDecimal expectedSalary;
+    private LocalDate availableFrom;
+    private String source;
     private String recruiterNotes;
     private String rejectedReason;
     private EmployeeSimpleDto createdBy;
@@ -26,4 +30,6 @@ public class CandidateApplicationResponseDto {
     private LocalDateTime updatedAt;
     private LocalDateTime offeredAt;
     private LocalDateTime hiredAt;
+    private Long hiredEmployeeId;
+    private Long version;
 }

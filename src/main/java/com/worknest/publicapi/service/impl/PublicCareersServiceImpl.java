@@ -78,7 +78,7 @@ public class PublicCareersServiceImpl implements PublicCareersService {
                 .experience(position.getExperience())
                 .salary(position.getSalary())
                 .summary(firstNonBlank(position.getSummary(), summarize(position.getDescription())))
-                .postedDate(position.getCreatedAt())
+                .postedDate(position.getPublishedAt() == null ? position.getCreatedAt() : position.getPublishedAt())
                 .expiry(position.getExpiresAt())
                 .build();
     }
@@ -98,8 +98,16 @@ public class PublicCareersServiceImpl implements PublicCareersService {
                 .responsibilities(position.getResponsibilities())
                 .requirements(position.getRequirements())
                 .benefits(position.getBenefits())
-                .postedDate(position.getCreatedAt())
+                .postedDate(position.getPublishedAt() == null ? position.getCreatedAt() : position.getPublishedAt())
                 .expiry(position.getExpiresAt())
+                .relatedJobs(jobPositionRepository.findPublishedJobs().stream()
+                        .filter(item -> !item.getId().equals(position.getId()))
+                        .sorted((left, right) -> Boolean.compare(
+                                java.util.Objects.equals(right.getDepartment(), position.getDepartment()),
+                                java.util.Objects.equals(left.getDepartment(), position.getDepartment())))
+                        .limit(3)
+                        .map(this::toSummaryDto)
+                        .toList())
                 .build();
     }
 

@@ -6,9 +6,12 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
+import com.worknest.common.storage.StoredFileDto;
 import com.worknest.common.util.SlugUtils;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.multitenancy.context.TenantContextHolder;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.PagedResultDto;
@@ -30,6 +33,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
@@ -42,6 +47,8 @@ import java.util.List;
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class RecruitmentServiceImpl implements RecruitmentService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RecruitmentServiceImpl.class);
 
     private static final int TEMP_PASSWORD_LENGTH = 12;
     private static final String TEMP_PASSWORD_CHARSET =
@@ -338,14 +345,43 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public CandidateResponseDto uploadCandidateResume(Long candidateId, MultipartFile resumeFile) {
         requireManagePermission();
         Candidate candidate = getCandidateOrThrow(candidateId);
-        FileStorageService.StoredFileResult storedFileResult = fileStorageService.store(resumeFile, "doc");
-        candidate.setResumeFileName(storedFileResult.name());
-        candidate.setResumeFileUrl(storedFileResult.path());
-        candidate.setResumeMimeType(storedFileResult.mimeType());
-        candidate.setResumeFileSizeBytes(storedFileResult.size());
+        String previousResume = candidate.getResumeFileUrl();
+        StoredFileDto storedFile = fileStorageService.store(resumeFile, StorageCategory.CANDIDATE_RESUME);
+        String newReference = "wnfileid://" + storedFile.id();
+        registerResumeCleanup(newReference, previousResume);
+        candidate.setResumeFileName(storedFile.originalName());
+        candidate.setResumeFileUrl(newReference);
+        candidate.setResumeMimeType(storedFile.contentType());
+        candidate.setResumeFileSizeBytes(storedFile.size());
         Candidate updated = candidateRepository.save(candidate);
+        fileStorageService.link(newReference, "CANDIDATE", updated.getId(), StorageCategory.CANDIDATE_RESUME);
         auditLogService.logAction(AuditActionType.UPLOAD, AuditEntityType.CANDIDATE, updated.getId(), jsonField("resume", updated.getResumeFileName()));
         return toCandidateResponse(updated);
+    }
+
+    private void registerResumeCleanup(String newReference, String previousReference) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+        String tenantSlug = TenantContextHolder.getTenantSlug();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    if (fileStorageService.isLocalReference(previousReference)) {
+                        deleteResumeSafely(tenantSlug, previousReference);
+                    }
+                } else {
+                    deleteResumeSafely(tenantSlug, newReference);
+                }
+            }
+        });
+    }
+
+    private void deleteResumeSafely(String tenantSlug, String reference) {
+        try {
+            fileStorageService.delete(tenantSlug, reference);
+        } catch (RuntimeException exception) {
+            log.warn("Unable to clean up recruitment resume {} for tenant {}", reference, tenantSlug, exception);
+        }
     }
 
     @Override
@@ -694,48 +730,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         LocalDateTime start = from == null ? LocalDateTime.now().minusDays(1) : from;
         LocalDateTime end = to == null ? LocalDateTime.now().plusDays(30) : to;
         return interviewRepository.findByScheduledAtBetweenOrderByScheduledAtAsc(start, end).stream().map(this::toInterviewResponse).toList();
-    }
-
-    @Override
-    @Transactional(transactionManager = "transactionManager", readOnly = true)
-    public RecruitmentDashboardDto getDashboard() {
-        requireViewPermission();
-        List<CandidateApplication> allApplications = candidateApplicationRepository.findAll();
-        long openJobs = jobPositionRepository.countByStatusAndDeletedFalse(JobPositionStatus.OPEN);
-        List<RecruitmentStageCountDto> stageCounts = new ArrayList<>();
-        for (CandidatePipelineStatus stage : simpleStages()) {
-            long count = allApplications.stream().filter(application -> canonicalStage(application.getStatus()) == stage).count();
-            stageCounts.add(RecruitmentStageCountDto.builder().stage(stage).count(count).build());
-        }
-        List<RecruitmentJobCountDto> jobCounts = jobPositionRepository.findAll().stream()
-                .map(position -> RecruitmentJobCountDto.builder().jobPositionId(position.getId()).title(position.getTitle()).count(candidateApplicationRepository.countByJobPositionId(position.getId())).build())
-                .toList();
-        long hiredCandidates = stageCounts.stream().filter(item -> item.getStage() == CandidatePipelineStatus.HIRED).mapToLong(RecruitmentStageCountDto::getCount).sum();
-        List<InterviewStatus> activeInterviewStatuses = List.of(InterviewStatus.SCHEDULED, InterviewStatus.RESCHEDULED);
-        List<Interview> upcomingInterviewItems = interviewRepository
-                .findTop8ByStatusInAndScheduledAtAfterOrderByScheduledAtAsc(activeInterviewStatuses, LocalDateTime.now());
-        long upcomingInterviews = interviewRepository.countByStatusInAndScheduledAtAfter(activeInterviewStatuses, LocalDateTime.now());
-        long shortlisted = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.SHORTLISTED).count();
-        long offers = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.OFFERED).count();
-        long rejected = allApplications.stream().filter(a -> canonicalStage(a.getStatus()) == CandidatePipelineStatus.REJECTED).count();
-        return RecruitmentDashboardDto.builder()
-                .openJobs(openJobs)
-                .applicationsReceived(allApplications.size())
-                .shortlisted(shortlisted)
-                .interviewScheduled(upcomingInterviews)
-                .offersSent(offers)
-                .rejected(rejected)
-                .totalCandidates(candidateRepository.count())
-                .activeApplications(allApplications.stream().filter(a -> canonicalStage(a.getStatus()) != CandidatePipelineStatus.HIRED
-                        && canonicalStage(a.getStatus()) != CandidatePipelineStatus.REJECTED).count())
-                .hiredCandidates(hiredCandidates)
-                .upcomingInterviews(upcomingInterviews)
-                .stageCounts(stageCounts)
-                .jobCounts(jobCounts)
-                .recentApplications(candidateApplicationRepository.findTop8ByOrderByAppliedAtDesc().stream().map(this::toApplicationResponse).toList())
-                .upcomingInterviewItems(upcomingInterviewItems.stream().map(this::toInterviewResponse).toList())
-                .recentlyPublishedJobs(jobPositionRepository.findTop5ByPublishedTrueAndDeletedFalseOrderByPublishedAtDesc().stream().map(this::toJobPositionResponse).toList())
-                .build();
     }
 
     @Override

@@ -3,8 +3,11 @@ package com.worknest.publicapi.service.impl;
 import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.common.exception.DuplicateApplicationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
+import com.worknest.common.storage.StoredFileDto;
 import com.worknest.common.util.SlugUtils;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
@@ -12,6 +15,7 @@ import com.worknest.publicapi.dto.PublicApplicationRequestDto;
 import com.worknest.publicapi.dto.PublicApplicationResponseDto;
 import com.worknest.publicapi.dto.PublicApplicationStatusDto;
 import com.worknest.publicapi.dto.PublicCompanyDto;
+import com.worknest.publicapi.event.PublicApplicationSubmittedEvent;
 import com.worknest.publicapi.service.PublicCandidateApplicationService;
 import com.worknest.tenant.entity.Candidate;
 import com.worknest.tenant.entity.CandidateApplication;
@@ -22,7 +26,6 @@ import com.worknest.tenant.enums.AuditActionType;
 import com.worknest.tenant.enums.AuditEntityType;
 import com.worknest.tenant.enums.CandidatePipelineStatus;
 import com.worknest.tenant.enums.NotificationType;
-import com.worknest.tenant.enums.RecruitmentEmailTemplateType;
 import com.worknest.tenant.repository.CandidateApplicationRepository;
 import com.worknest.tenant.repository.CandidateRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
@@ -30,10 +33,12 @@ import com.worknest.tenant.repository.JobPositionRepository;
 import com.worknest.tenant.repository.RecruitmentApplicationEventRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
-import com.worknest.tenant.service.RecruitmentEmailTemplateService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -44,6 +49,8 @@ import java.util.UUID;
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class PublicCandidateApplicationServiceImpl implements PublicCandidateApplicationService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PublicCandidateApplicationServiceImpl.class);
 
     private static final String PUBLIC_SOURCE = "Public Careers";
     private static final List<CandidatePipelineStatus> REAPPLY_ALLOWED_STATUSES = List.of(
@@ -64,8 +71,8 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final MasterTenantLookupService masterTenantLookupService;
-    private final RecruitmentEmailTemplateService recruitmentEmailTemplateService;
     private final RecruitmentApplicationEventRepository applicationEventRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
     @Value("${app.public-web-base-url:http://localhost:5173}")
     private String publicWebBaseUrl;
 
@@ -78,8 +85,8 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
             NotificationService notificationService,
             AuditLogService auditLogService,
             MasterTenantLookupService masterTenantLookupService,
-            RecruitmentEmailTemplateService recruitmentEmailTemplateService,
-            RecruitmentApplicationEventRepository applicationEventRepository) {
+            RecruitmentApplicationEventRepository applicationEventRepository,
+            ApplicationEventPublisher applicationEventPublisher) {
         this.candidateRepository = candidateRepository;
         this.candidateApplicationRepository = candidateApplicationRepository;
         this.jobPositionRepository = jobPositionRepository;
@@ -88,13 +95,14 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.masterTenantLookupService = masterTenantLookupService;
-        this.recruitmentEmailTemplateService = recruitmentEmailTemplateService;
         this.applicationEventRepository = applicationEventRepository;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Override
     public PublicApplicationResponseDto apply(String tenantSlug, String jobSlug, PublicApplicationRequestDto requestDto) {
-        PublicCompanyDto company = toCompanyDto(resolveTenant(tenantSlug));
+        PlatformTenant tenant = resolveTenant(tenantSlug);
+        PublicCompanyDto company = toCompanyDto(tenant);
         JobPosition jobPosition = resolvePublicJob(jobSlug);
         String email = normalizeEmail(requestDto.getEmail());
 
@@ -105,13 +113,20 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                     jobPosition.getId(),
                     REAPPLY_ALLOWED_STATUSES
             ).ifPresent(existing -> {
-                throw new BadRequestException("You already have an active application for this vacancy");
+                throw new DuplicateApplicationException("You already have an active application for this vacancy");
             });
         }
 
-        FileStorageService.StoredFileResult storedResume = storeResume(requestDto.getResume());
+        String previousResume = candidate.getResumeFileUrl();
+        StoredFileDto storedResume = storeResume(requestDto.getResume());
+        registerResumeCleanup(tenant.getSlug(), "wnfileid://" + storedResume.id(), previousResume);
         applyCandidateFields(candidate, requestDto, email, storedResume);
         Candidate savedCandidate = candidateRepository.save(candidate);
+        fileStorageService.link(
+                savedCandidate.getResumeFileUrl(),
+                "CANDIDATE",
+                savedCandidate.getId(),
+                StorageCategory.CANDIDATE_RESUME);
 
         CandidateApplication application = new CandidateApplication();
         application.setCandidate(savedCandidate);
@@ -129,12 +144,12 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         recordApplicationReceived(finalizedApplication);
         notifyRecruitmentOwners(finalizedApplication);
         auditCandidateApplied(finalizedApplication);
-        recruitmentEmailTemplateService.send(
-                finalizedApplication,
-                RecruitmentEmailTemplateType.APPLICATION_RECEIVED,
+        applicationEventPublisher.publishEvent(new PublicApplicationSubmittedEvent(
+                finalizedApplication.getId(),
+                tenant.getTenantKey(),
+                tenant.getSlug(),
                 company.getCompanyName(),
-                buildCareersLink(company.getTenantSlug()),
-                null);
+                buildCareersLink(company.getTenantSlug())));
 
         return PublicApplicationResponseDto.builder()
                 .referenceNumber(finalizedApplication.getReferenceNumber())
@@ -178,7 +193,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                 .orElseThrow(() -> new ResourceNotFoundException("Job vacancy not found"));
     }
 
-    private FileStorageService.StoredFileResult storeResume(MultipartFile resume) {
+    private StoredFileDto storeResume(MultipartFile resume) {
         if (resume == null || resume.isEmpty()) {
             throw new BadRequestException("Resume is required");
         }
@@ -187,14 +202,14 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         if (!"pdf".equals(extension) && !"docx".equals(extension)) {
             throw new BadRequestException("Only PDF and DOCX resumes are allowed");
         }
-        return fileStorageService.store(resume, "doc");
+        return fileStorageService.store(resume, StorageCategory.CANDIDATE_RESUME);
     }
 
     private void applyCandidateFields(
             Candidate candidate,
             PublicApplicationRequestDto requestDto,
             String email,
-            FileStorageService.StoredFileResult storedResume) {
+            StoredFileDto storedResume) {
         candidate.setFullName((requestDto.getFirstName().trim() + " " + requestDto.getLastName().trim()).trim());
         candidate.setEmail(email);
         candidate.setPhone(trimToNull(requestDto.getPhone()));
@@ -206,10 +221,34 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         candidate.setCurrentTitle(trimToNull(requestDto.getCurrentPosition()));
         candidate.setYearsOfExperience(requestDto.getYearsOfExperience());
         candidate.setSource(PUBLIC_SOURCE);
-        candidate.setResumeFileName(storedResume.name());
-        candidate.setResumeFileUrl(storedResume.path());
-        candidate.setResumeMimeType(storedResume.mimeType());
+        candidate.setResumeFileName(storedResume.originalName());
+        candidate.setResumeFileUrl("wnfileid://" + storedResume.id());
+        candidate.setResumeMimeType(storedResume.contentType());
         candidate.setResumeFileSizeBytes(storedResume.size());
+    }
+
+    private void registerResumeCleanup(String tenantSlug, String newReference, String previousReference) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    if (fileStorageService.isLocalReference(previousReference)) {
+                        deleteResumeSafely(tenantSlug, previousReference);
+                    }
+                } else {
+                    deleteResumeSafely(tenantSlug, newReference);
+                }
+            }
+        });
+    }
+
+    private void deleteResumeSafely(String tenantSlug, String reference) {
+        try {
+            fileStorageService.delete(tenantSlug, reference);
+        } catch (RuntimeException exception) {
+            log.warn("Unable to clean up resume file {} for tenant {}", reference, tenantSlug, exception);
+        }
     }
 
     private void notifyRecruitmentOwners(CandidateApplication application) {
@@ -248,7 +287,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         return PublicCompanyDto.builder()
                 .tenantSlug(tenant.getSlug())
                 .companyName(tenant.getCompanyName())
-                .logoUrl(null)
+                .logoUrl(fileStorageService.toPublicBrandingUrl(tenant.getLogoFileReference()))
                 .about("Explore current opportunities at " + tenant.getCompanyName() + ".")
                 .build();
     }

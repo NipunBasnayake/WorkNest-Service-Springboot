@@ -10,11 +10,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @Validated
@@ -31,7 +32,9 @@ public class PublicApplicationsController {
     public ResponseEntity<ApiResponse<PublicApplicationResponseDto>> apply(
             @PathVariable("tenantSlug") String tenantSlug,
             @PathVariable("jobSlug") String jobSlug,
-            @Valid @ModelAttribute PublicApplicationRequestDto requestDto) {
+            @Valid @RequestPart("application") PublicApplicationRequestDto requestDto,
+            @RequestPart("resume") MultipartFile resume) {
+        requestDto.setResume(resume);
         return ResponseEntity.ok(ApiResponse.success(
                 "Application submitted successfully",
                 publicCandidateApplicationService.apply(tenantSlug, jobSlug, requestDto)));

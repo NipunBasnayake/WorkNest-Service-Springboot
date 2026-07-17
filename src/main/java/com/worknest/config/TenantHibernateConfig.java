@@ -17,7 +17,6 @@ import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import javax.sql.DataSource;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -37,7 +36,6 @@ public class TenantHibernateConfig {
     @Bean
     @Primary
     public LocalContainerEntityManagerFactoryBean entityManagerFactory(
-            @Qualifier("masterDataSource") DataSource dataSource,
             MultiTenantConnectionProvider<String> multiTenantConnectionProvider,
             CurrentTenantIdentifierResolver<String> tenantIdentifierResolver,
             @Value("${app.tenant.jpa.hibernate.ddl-auto:update}") String ddlAuto,
@@ -45,7 +43,14 @@ public class TenantHibernateConfig {
             @Value("${spring.jpa.properties.hibernate.format_sql:false}") boolean formatSql) {
 
         LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
-        em.setDataSource(dataSource);
+        /*
+         * The tenant persistence unit obtains every connection through the
+         * MultiTenantConnectionProvider, including its bootstrap connection.
+         * Do not assign masterDataSource here: JpaTransactionManager would then
+         * bind the active tenant connection under the master DataSource key.
+         * A master JdbcTemplate lookup made inside that transaction would reuse
+         * the tenant connection and query master tables in the tenant database.
+         */
         em.setPackagesToScan("com.worknest.tenant.entity");
         em.setPersistenceUnitName("tenant");
         em.setJpaVendorAdapter(jpaVendorAdapter());

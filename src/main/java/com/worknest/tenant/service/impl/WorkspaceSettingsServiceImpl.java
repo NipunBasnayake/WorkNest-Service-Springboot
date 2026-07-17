@@ -2,6 +2,8 @@ package com.worknest.tenant.service.impl;
 
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.service.MasterTenantLookupService;
@@ -20,16 +22,19 @@ public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
     private final MasterTenantLookupService masterTenantLookupService;
     private final PlatformTenantRepository platformTenantRepository;
     private final MasterTenantContextRunner masterTenantContextRunner;
+    private final FileStorageService fileStorageService;
 
     public WorkspaceSettingsServiceImpl(
             SecurityUtils securityUtils,
             MasterTenantLookupService masterTenantLookupService,
             PlatformTenantRepository platformTenantRepository,
-            MasterTenantContextRunner masterTenantContextRunner) {
+            MasterTenantContextRunner masterTenantContextRunner,
+            FileStorageService fileStorageService) {
         this.securityUtils = securityUtils;
         this.masterTenantLookupService = masterTenantLookupService;
         this.platformTenantRepository = platformTenantRepository;
         this.masterTenantContextRunner = masterTenantContextRunner;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -57,7 +62,18 @@ public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
             }
 
             tenant.setCompanyName(companyName);
+            String requestedLogo = trimToNull(requestDto.getLogoUrl());
+            if (requestedLogo != null) {
+                tenant.setLogoFileReference(fileStorageService.normalizeStoredReference(requestedLogo));
+            }
             PlatformTenant updated = platformTenantRepository.save(tenant);
+            if (requestedLogo != null) {
+                fileStorageService.claimAndLink(
+                        updated.getLogoFileReference(),
+                        "WORKSPACE",
+                        updated.getId(),
+                        StorageCategory.WORKSPACE_LOGO);
+            }
             return toWorkspaceProfile(updated);
         });
     }
@@ -66,6 +82,7 @@ public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
         return WorkspaceProfileResponseDto.builder()
                 .tenantKey(tenant.getTenantKey())
                 .companyName(tenant.getCompanyName())
+                .logoUrl(fileStorageService.toPublicUrl(tenant.getLogoFileReference()))
                 .status(tenant.getStatus())
                 .build();
     }
@@ -76,5 +93,11 @@ public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
             throw new BadRequestException("Company name is required");
         }
         return normalized;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

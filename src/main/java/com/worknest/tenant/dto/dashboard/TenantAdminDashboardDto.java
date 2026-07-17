@@ -33,5 +33,6 @@ public class TenantAdminDashboardDto {
     private List<DashboardAnnouncementItemDto> recentAnnouncements;
     private List<DashboardNotificationItemDto> recentNotifications;
     private AttendanceOverviewDto todayAttendance;
+    private RecruitmentDashboardSummaryDto recruitment;
     private LocalDateTime generatedAt;
 }

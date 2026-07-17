@@ -2,6 +2,8 @@ package com.worknest.tenant.service.impl;
 
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.common.EmployeeSimpleDto;
@@ -50,6 +52,7 @@ public class TeamChatServiceImpl implements TeamChatService {
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final TenantRealtimePublisher tenantRealtimePublisher;
+    private final FileStorageService fileStorageService;
 
     public TeamChatServiceImpl(
             TeamChatRepository teamChatRepository,
@@ -60,7 +63,8 @@ public class TeamChatServiceImpl implements TeamChatService {
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
-            TenantRealtimePublisher tenantRealtimePublisher) {
+            TenantRealtimePublisher tenantRealtimePublisher,
+            FileStorageService fileStorageService) {
         this.teamChatRepository = teamChatRepository;
         this.teamChatMessageRepository = teamChatMessageRepository;
         this.teamRepository = teamRepository;
@@ -70,6 +74,7 @@ public class TeamChatServiceImpl implements TeamChatService {
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.tenantRealtimePublisher = tenantRealtimePublisher;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -151,6 +156,7 @@ public class TeamChatServiceImpl implements TeamChatService {
         teamChatRepository.save(teamChat);
 
         TeamChatMessage saved = teamChatMessageRepository.save(teamChatMessage);
+        linkAttachments(requestDto.getAttachmentReferences(), saved.getId());
         TeamChatMessageResponseDto response = toMessageResponse(saved);
 
         notifyTeamParticipants(team, sender.getId(), saved.getId());
@@ -280,7 +286,21 @@ public class TeamChatServiceImpl implements TeamChatService {
                 .senderName(buildFullName(sender))
                 .message(teamChatMessage.getMessage())
                 .createdAt(teamChatMessage.getCreatedAt())
+                .attachments(fileStorageService.listLinkedFiles("TEAM_CHAT_MESSAGE", teamChatMessage.getId()))
                 .build();
+    }
+
+    private void linkAttachments(List<String> references, Long messageId) {
+        if (references == null) return;
+        references.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(fileStorageService::normalizeStoredReference)
+                .distinct()
+                .forEach(reference -> fileStorageService.claimAndLink(
+                        reference,
+                        "TEAM_CHAT_MESSAGE",
+                        messageId,
+                        StorageCategory.CHAT_ATTACHMENT));
     }
 
     private List<EmployeeSimpleDto> teamParticipants(Team team) {

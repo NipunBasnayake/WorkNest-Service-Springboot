@@ -5,6 +5,7 @@ import com.worknest.tenant.enums.JobPositionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,7 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-public interface JobPositionRepository extends JpaRepository<JobPosition, Long> {
+public interface JobPositionRepository extends JpaRepository<JobPosition, Long>, JpaSpecificationExecutor<JobPosition> {
 
     Page<JobPosition> findByTitleContainingIgnoreCaseOrDepartmentContainingIgnoreCase(
             String title,
@@ -30,8 +31,6 @@ public interface JobPositionRepository extends JpaRepository<JobPosition, Long> 
     long countByStatus(JobPositionStatus status);
 
     long countByStatusAndDeletedFalse(JobPositionStatus status);
-
-    List<JobPosition> findTop5ByPublishedTrueAndDeletedFalseOrderByPublishedAtDesc();
 
     default List<JobPosition> findPublishedJobs() {
         return findPublishedJobs(JobPositionStatus.OPEN, LocalDateTime.now());

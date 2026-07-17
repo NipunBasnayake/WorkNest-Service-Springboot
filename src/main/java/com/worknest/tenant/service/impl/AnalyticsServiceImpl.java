@@ -172,7 +172,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 metric("pendingLeave", "Pending leave", leaves.getOrDefault(LeaveStatus.PENDING.name(), 0d), "", null, "amber", "Awaiting a decision"),
                 metric("approvedLeave", "Approved leave", leaves.getOrDefault(LeaveStatus.APPROVED.name(), 0d), "", null, "green", "Selected period"),
                 metric("averageLeave", "Average leave", round(leaveRequestRepository.averageLeaveDaysForReport(start, end, employeeId, normalizedDepartment)), " days", null, "purple", "Per request"),
-                metric("openJobs", "Open jobs", jobPositionRepository.countByStatus(JobPositionStatus.OPEN), "", null, "purple", "Recruitment demand"),
+                metric("openJobs", "Open jobs", jobPositionRepository.countByStatusAndDeletedFalse(JobPositionStatus.OPEN), "", null, "purple", "Recruitment demand"),
                 metric("applications", "Applications", applications, "", null, "blue", "Selected period"),
                 metric("interviews", "Interviews", interviewRepository.countByScheduledAtBetween(startTime, endTime), "", null, "amber", "Scheduled in period"),
                 metric("hires", "Hires", hired, "", null, "green", acceptance + "% offer acceptance"),

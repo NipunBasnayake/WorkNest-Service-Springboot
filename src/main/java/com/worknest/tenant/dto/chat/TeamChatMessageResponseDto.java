@@ -2,11 +2,13 @@ package com.worknest.tenant.dto.chat;
 
 import com.worknest.tenant.dto.common.EmployeeSimpleDto;
 import com.worknest.tenant.enums.ChatType;
+import com.worknest.common.storage.StoredFileDto;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Setter
@@ -21,4 +23,5 @@ public class TeamChatMessageResponseDto {
     private String senderName;
     private String message;
     private LocalDateTime createdAt;
+    private List<StoredFileDto> attachments;
 }

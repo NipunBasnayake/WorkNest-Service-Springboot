@@ -19,6 +19,7 @@ import com.worknest.tenant.repository.LeaveRequestRepository;
 import com.worknest.tenant.service.AttachmentService;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
+import com.worknest.common.storage.FileStorageService;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,9 @@ class LeaveRequestServiceImplTest {
     @Mock
     private EmailNotificationService emailNotificationService;
 
+    @Mock
+    private FileStorageService fileStorageService;
+
     private TenantDtoMapper tenantDtoMapper;
     private LeaveRequestServiceImpl leaveRequestService;
 
@@ -79,7 +83,8 @@ class LeaveRequestServiceImplTest {
                 tenantDtoMapper,
                 notificationService,
                 auditLogService,
-                emailNotificationService
+                emailNotificationService,
+                fileStorageService
         );
 
         doNothing().when(authorizationService).requirePermission(any(Permission.class));

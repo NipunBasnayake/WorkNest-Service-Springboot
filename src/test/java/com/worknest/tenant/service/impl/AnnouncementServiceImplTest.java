@@ -21,6 +21,7 @@ import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
+import com.worknest.tenant.service.AttachmentService;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,9 @@ class AnnouncementServiceImplTest {
     @Mock
     private SecurityUtils securityUtils;
 
+    @Mock
+    private AttachmentService attachmentService;
+
     private AnnouncementServiceImpl announcementService;
 
     @BeforeEach
@@ -92,12 +96,14 @@ class AnnouncementServiceImplTest {
                 auditLogService,
                 tenantRealtimePublisher,
                 emailNotificationService,
-                securityUtils
+                securityUtils,
+                attachmentService
         );
 
         lenient().doNothing().when(authorizationService).requirePermission(any(Permission.class));
         lenient().when(authorizationService.getCurrentTenantKeyOrThrow()).thenReturn("acme");
         lenient().when(notificationService.createSystemNotification(anyLong(), any(), any(), any(), any())).thenReturn(null);
+        lenient().when(attachmentService.listAttachments(any(), anyLong())).thenReturn(List.of());
         lenient().when(securityUtils.getCurrentUserEmailOrThrow()).thenReturn("current@worknest.test");
         PlatformUserPrincipal principal = org.mockito.Mockito.mock(PlatformUserPrincipal.class);
         lenient().when(principal.getId()).thenReturn(100L);

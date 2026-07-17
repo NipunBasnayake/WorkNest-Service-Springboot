@@ -26,6 +26,7 @@ public class EmployeeResponseDto {
     private String designation;
     private String department;
     private String phone;
+    private String avatarUrl;
     private BigDecimal salary;
     private LocalDate joinedDate;
     private UserStatus status;

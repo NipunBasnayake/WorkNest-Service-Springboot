@@ -10,6 +10,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.mail.MailException;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.validation.BindException;
@@ -22,6 +23,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.sql.SQLException;
 import java.util.Arrays;
@@ -81,6 +83,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleDuplicateEmailException(
             DuplicateEmailException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, "DUPLICATE_EMAIL", ex.getMessage(), request, ex, false);
+    }
+
+    @ExceptionHandler(DuplicateApplicationException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateApplicationException(
+            DuplicateApplicationException ex, HttpServletRequest request) {
+        return build(HttpStatus.CONFLICT, "DUPLICATE_APPLICATION", ex.getMessage(), request, ex, false);
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
@@ -281,6 +289,32 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST,
                 "MULTIPART_ERROR",
                 "Invalid multipart request or file size exceeded the configured limit",
+                request,
+                ex,
+                false
+        );
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMediaTypeNotSupportedException(
+            HttpMediaTypeNotSupportedException ex, HttpServletRequest request) {
+        return build(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "UNSUPPORTED_MEDIA_TYPE",
+                "Content type is not supported for this endpoint",
+                request,
+                ex,
+                false
+        );
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ErrorResponse> handleMissingServletRequestPartException(
+            MissingServletRequestPartException ex, HttpServletRequest request) {
+        return build(
+                HttpStatus.BAD_REQUEST,
+                "MISSING_MULTIPART_PART",
+                "Required multipart part is missing: " + ex.getRequestPartName(),
                 request,
                 ex,
                 false

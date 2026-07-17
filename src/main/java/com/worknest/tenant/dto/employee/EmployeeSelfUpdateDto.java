@@ -28,6 +28,9 @@ public class EmployeeSelfUpdateDto {
     )
     private String phone;
 
+    @Size(max = 1000, message = "Avatar file reference must not exceed 1000 characters")
+    private String avatarUrl;
+
     @Size(min = 8, max = 100, message = "Password must be between 8 and 100 characters")
     private String password;
 }

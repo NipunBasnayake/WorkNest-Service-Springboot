@@ -6,6 +6,7 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.security.util.SecurityUtils;
@@ -518,6 +519,7 @@ public class ProjectServiceImpl implements ProjectService {
             String fileUrl = trimToNull(attachment.getFileUrl());
             if (fileUrl != null && !expectedUrls.contains(fileUrl)) {
                 attachmentRepository.delete(attachment);
+                if (fileStorageService.isLocalReference(fileUrl)) fileStorageService.delete(fileUrl);
             }
         }
 
@@ -538,7 +540,12 @@ public class ProjectServiceImpl implements ProjectService {
             attachment.setFileSize(resolveDocumentSize(document));
             attachment.setUploadedBy(uploader);
             attachment.setUploadedByUserId(uploaderUserId);
-            attachmentRepository.save(attachment);
+            Attachment saved = attachmentRepository.save(attachment);
+            fileStorageService.claimAndLink(
+                    saved.getFileUrl(),
+                    AttachmentEntityType.PROJECT.name(),
+                    project.getId(),
+                    StorageCategory.PROJECT_ATTACHMENT);
         }
     }
 

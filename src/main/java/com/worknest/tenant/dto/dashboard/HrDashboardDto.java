@@ -17,5 +17,6 @@ public class HrDashboardDto {
     private List<StatusCountDto> leavesByStatus;
     private AttendanceOverviewDto todayAttendance;
     private List<StatusCountDto> employeesByRole;
+    private RecruitmentDashboardSummaryDto recruitment;
     private LocalDateTime generatedAt;
 }

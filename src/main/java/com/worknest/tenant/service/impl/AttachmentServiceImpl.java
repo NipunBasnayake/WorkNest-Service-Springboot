@@ -5,6 +5,8 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
+import com.worknest.common.storage.StoredFileDto;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.attachment.AttachmentCreateRequestDto;
@@ -90,6 +92,11 @@ public class AttachmentServiceImpl implements AttachmentService {
         attachment.setUploadedBy(uploader);
 
         Attachment saved = attachmentRepository.save(attachment);
+        fileStorageService.claimAndLink(
+                saved.getFileUrl(),
+                saved.getEntityType().name(),
+                saved.getEntityId(),
+                storageCategory(saved.getEntityType()));
         auditLogService.logAction(
                 AuditActionType.UPLOAD,
                 AuditEntityType.ATTACHMENT,
@@ -109,9 +116,23 @@ public class AttachmentServiceImpl implements AttachmentService {
             Long fileSize,
             MultipartFile file) {
         if (file != null && !file.isEmpty()) {
-            throw new BadRequestException(
-                    "Direct file upload is no longer supported. Upload the file to external storage and submit fileUrl metadata instead."
-            );
+            AttachmentEntityType normalizedType = normalizeEntityType(entityType);
+            Employee uploader = authorizationService.getCurrentEmployeeOrThrow();
+            validateEntityAccess(normalizedType, entityId, uploader, true);
+            StoredFileDto stored = fileStorageService.store(file, storageCategory(normalizedType));
+            try {
+                AttachmentCreateRequestDto uploadedRequest = new AttachmentCreateRequestDto();
+                uploadedRequest.setEntityType(normalizedType);
+                uploadedRequest.setEntityId(entityId);
+                uploadedRequest.setFileUrl("wnfileid://" + stored.id());
+                uploadedRequest.setFileType(stored.contentType());
+                uploadedRequest.setFileName(stored.originalName());
+                uploadedRequest.setFileSize(stored.size());
+                return createAttachment(uploadedRequest);
+            } catch (RuntimeException exception) {
+                fileStorageService.delete("wnfileid://" + stored.id());
+                throw exception;
+            }
         }
 
         AttachmentCreateRequestDto requestDto = new AttachmentCreateRequestDto();
@@ -174,7 +195,11 @@ public class AttachmentServiceImpl implements AttachmentService {
             throw new ForbiddenOperationException("You are not allowed to delete this attachment");
         }
 
+        String storedReference = attachment.getFileUrl();
         attachmentRepository.delete(attachment);
+        if (fileStorageService.isLocalReference(storedReference)) {
+            fileStorageService.delete(storedReference);
+        }
         auditLogService.logAction(
                 AuditActionType.DELETE,
                 AuditEntityType.ATTACHMENT,
@@ -299,6 +324,16 @@ public class AttachmentServiceImpl implements AttachmentService {
             throw new BadRequestException("Attachment entity type is required");
         }
         return entityType.canonical();
+    }
+
+    private StorageCategory storageCategory(AttachmentEntityType entityType) {
+        return switch (normalizeEntityType(entityType)) {
+            case TASK -> StorageCategory.TASK_ATTACHMENT;
+            case PROJECT -> StorageCategory.PROJECT_ATTACHMENT;
+            case ANNOUNCEMENT -> StorageCategory.ANNOUNCEMENT_ATTACHMENT;
+            case LEAVE_REQUEST -> StorageCategory.LEAVE_ATTACHMENT;
+            case LEAVE -> throw new IllegalStateException("LEAVE must be normalized before category selection");
+        };
     }
 
     private String normalizeFileUrl(String fileUrl) {

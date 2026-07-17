@@ -1,6 +1,7 @@
 package com.worknest.publicapi.service.impl;
 
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.util.SlugUtils;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
@@ -22,12 +23,15 @@ public class PublicCareersServiceImpl implements PublicCareersService {
 
     private final JobPositionRepository jobPositionRepository;
     private final MasterTenantLookupService masterTenantLookupService;
+    private final FileStorageService fileStorageService;
 
     public PublicCareersServiceImpl(
             JobPositionRepository jobPositionRepository,
-            MasterTenantLookupService masterTenantLookupService) {
+            MasterTenantLookupService masterTenantLookupService,
+            FileStorageService fileStorageService) {
         this.jobPositionRepository = jobPositionRepository;
         this.masterTenantLookupService = masterTenantLookupService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -63,7 +67,7 @@ public class PublicCareersServiceImpl implements PublicCareersService {
         return PublicCompanyDto.builder()
                 .tenantSlug(tenant.getSlug())
                 .companyName(tenant.getCompanyName())
-                .logoUrl(null)
+                .logoUrl(fileStorageService.toPublicBrandingUrl(tenant.getLogoFileReference()))
                 .about("Explore current opportunities at " + tenant.getCompanyName() + ".")
                 .build();
     }

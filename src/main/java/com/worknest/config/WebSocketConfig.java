@@ -21,8 +21,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(WebSocketConfig.class);
-
     private final StompJwtChannelInterceptor stompJwtChannelInterceptor;
     private final List<String> allowedOrigins;
 
@@ -79,8 +77,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new))
-                .withSockJS();
+                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new));
     }
 
     @Override

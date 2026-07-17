@@ -5,6 +5,8 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
+import com.worknest.common.storage.StorageCategory;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
@@ -51,6 +53,7 @@ public class HrChatServiceImpl implements HrChatService {
     private final NotificationService notificationService;
     private final TenantRealtimePublisher tenantRealtimePublisher;
     private final EmailNotificationService emailNotificationService;
+    private final FileStorageService fileStorageService;
 
     public HrChatServiceImpl(
             HrConversationRepository hrConversationRepository,
@@ -62,7 +65,8 @@ public class HrChatServiceImpl implements HrChatService {
             AuditLogService auditLogService,
             NotificationService notificationService,
             TenantRealtimePublisher tenantRealtimePublisher,
-            EmailNotificationService emailNotificationService) {
+            EmailNotificationService emailNotificationService,
+            FileStorageService fileStorageService) {
         this.hrConversationRepository = hrConversationRepository;
         this.hrMessageRepository = hrMessageRepository;
         this.employeeRepository = employeeRepository;
@@ -73,6 +77,7 @@ public class HrChatServiceImpl implements HrChatService {
         this.notificationService = notificationService;
         this.tenantRealtimePublisher = tenantRealtimePublisher;
         this.emailNotificationService = emailNotificationService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -176,6 +181,7 @@ public class HrChatServiceImpl implements HrChatService {
         hrConversationRepository.save(conversation);
 
         HrMessage saved = hrMessageRepository.save(message);
+        linkAttachments(requestDto.getAttachmentReferences(), saved.getId());
         HrMessageResponseDto response = toMessageResponse(saved);
 
         notifyHrSupportRecipients(conversation, sender, saved.getId());
@@ -367,7 +373,21 @@ public class HrChatServiceImpl implements HrChatService {
                 .message(message.getMessage())
                 .read(message.isRead())
                 .createdAt(message.getCreatedAt())
+                .attachments(fileStorageService.listLinkedFiles("HR_CHAT_MESSAGE", message.getId()))
                 .build();
+    }
+
+    private void linkAttachments(List<String> references, Long messageId) {
+        if (references == null) return;
+        references.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(fileStorageService::normalizeStoredReference)
+                .distinct()
+                .forEach(reference -> fileStorageService.claimAndLink(
+                        reference,
+                        "HR_CHAT_MESSAGE",
+                        messageId,
+                        StorageCategory.CHAT_ATTACHMENT));
     }
 
     private long getUnreadCount(HrConversation conversation) {

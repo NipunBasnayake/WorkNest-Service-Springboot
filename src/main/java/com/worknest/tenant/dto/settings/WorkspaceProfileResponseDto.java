@@ -11,5 +11,6 @@ import lombok.Setter;
 public class WorkspaceProfileResponseDto {
     private String tenantKey;
     private String companyName;
+    private String logoUrl;
     private TenantStatus status;
 }

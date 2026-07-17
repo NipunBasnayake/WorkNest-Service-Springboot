@@ -48,7 +48,6 @@ public interface RecruitmentService {
     InterviewFeedbackResponseDto submitFeedback(InterviewFeedbackRequestDto requestDto);
     List<InterviewResponseDto> listUpcomingInterviews(LocalDateTime from, LocalDateTime to);
 
-    RecruitmentDashboardDto getDashboard();
     List<RecruitmentEmailTemplateResponseDto> listEmailTemplates();
     RecruitmentEmailTemplateResponseDto updateEmailTemplate(
             com.worknest.tenant.enums.RecruitmentEmailTemplateType type,

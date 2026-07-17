@@ -5,6 +5,7 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ForbiddenOperationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.common.storage.FileStorageService;
 import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
@@ -34,7 +35,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -48,6 +51,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final EmailNotificationService emailNotificationService;
+    private final FileStorageService fileStorageService;
     @Autowired(required = false)
     private TenantRealtimePublisher tenantRealtimePublisher;
 
@@ -59,7 +63,8 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
             TenantDtoMapper tenantDtoMapper,
             NotificationService notificationService,
             AuditLogService auditLogService,
-            EmailNotificationService emailNotificationService) {
+            EmailNotificationService emailNotificationService,
+            FileStorageService fileStorageService) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.employeeRepository = employeeRepository;
         this.authorizationService = authorizationService;
@@ -68,6 +73,7 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.emailNotificationService = emailNotificationService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -482,19 +488,32 @@ public class LeaveRequestServiceImpl implements LeaveRequestService {
         }
 
         List<AttachmentResponseDto> existingAttachments = attachmentService.listAttachments(AttachmentEntityType.LEAVE_REQUEST, leaveRequestId);
+        Map<String, AttachmentResponseDto> existingByReference = new LinkedHashMap<>();
         for (AttachmentResponseDto attachment : existingAttachments) {
-            attachmentService.deleteAttachment(attachment.getId());
+            existingByReference.put(fileStorageService.normalizeStoredReference(attachment.getFileUrl()), attachment);
         }
 
+        Map<String, LeaveAttachmentRequestDto> requestedByReference = new LinkedHashMap<>();
         for (LeaveAttachmentRequestDto attachment : attachments) {
-            if (attachment == null) {
-                continue;
+            if (attachment != null) {
+                requestedByReference.put(fileStorageService.normalizeStoredReference(attachment.getFileUrl()), attachment);
             }
+        }
+
+        for (Map.Entry<String, AttachmentResponseDto> existing : existingByReference.entrySet()) {
+            if (!requestedByReference.containsKey(existing.getKey())) {
+                attachmentService.deleteAttachment(existing.getValue().getId());
+            }
+        }
+
+        for (Map.Entry<String, LeaveAttachmentRequestDto> requested : requestedByReference.entrySet()) {
+            if (existingByReference.containsKey(requested.getKey())) continue;
+            LeaveAttachmentRequestDto attachment = requested.getValue();
 
             AttachmentCreateRequestDto createRequest = new AttachmentCreateRequestDto();
             createRequest.setEntityType(AttachmentEntityType.LEAVE_REQUEST);
             createRequest.setEntityId(leaveRequestId);
-            createRequest.setFileUrl(attachment.getFileUrl());
+            createRequest.setFileUrl(requested.getKey());
             createRequest.setFileName(attachment.getFileName());
             createRequest.setFileType(attachment.getFileType());
             createRequest.setFileSize(attachment.getFileSize());

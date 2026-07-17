@@ -33,6 +33,9 @@ public class PlatformTenant {
     @Column(name = "company_name", nullable = false, length = 255)
     private String companyName;
 
+    @Column(name = "logo_file_reference", length = 1000)
+    private String logoFileReference;
+
     @Column(name = "database_name", nullable = false, length = 100)
     private String databaseName;
 

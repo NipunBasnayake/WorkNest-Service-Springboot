@@ -13,7 +13,7 @@ import java.util.List;
 @ConfigurationProperties(prefix = "storage")
 public class StorageProperties {
 
-    private String root = "uploads";
+    private String root = "storage";
     private DataSize maxImageSize = DataSize.ofMegabytes(2);
     private DataSize maxDocumentSize = DataSize.ofMegabytes(10);
     private List<String> allowedImageTypes = new ArrayList<>(List.of("jpg", "jpeg", "png", "webp"));

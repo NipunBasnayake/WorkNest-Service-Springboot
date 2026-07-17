@@ -62,6 +62,9 @@ public class Employee {
     @Column(name = "phone", length = 30)
     private String phone;
 
+    @Column(name = "avatar_file_reference", length = 1000)
+    private String avatarFileReference;
+
     @Column(name = "salary", precision = 12, scale = 2)
     private BigDecimal salary;
 

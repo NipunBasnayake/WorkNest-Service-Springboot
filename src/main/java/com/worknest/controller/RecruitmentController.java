@@ -265,12 +265,6 @@ public class RecruitmentController {
         return ResponseEntity.ok(ApiResponse.success("Interviews retrieved successfully", recruitmentService.listUpcomingInterviews(from, to)));
     }
 
-    @GetMapping("/dashboard")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
-    public ResponseEntity<ApiResponse<RecruitmentDashboardDto>> getDashboard() {
-        return ResponseEntity.ok(ApiResponse.success("Recruitment dashboard retrieved successfully", recruitmentService.getDashboard()));
-    }
-
     @GetMapping("/email-templates")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<List<RecruitmentEmailTemplateResponseDto>>> listEmailTemplates() {

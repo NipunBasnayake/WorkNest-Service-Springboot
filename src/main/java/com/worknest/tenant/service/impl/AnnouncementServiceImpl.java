@@ -27,6 +27,8 @@ import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamRepository;
 import com.worknest.tenant.service.AnnouncementService;
+import com.worknest.tenant.service.AttachmentService;
+import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
 import org.springframework.data.domain.Page;
@@ -59,6 +61,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private final TenantRealtimePublisher tenantRealtimePublisher;
     private final EmailNotificationService emailNotificationService;
     private final SecurityUtils securityUtils;
+    private final AttachmentService attachmentService;
 
     public AnnouncementServiceImpl(
             AnnouncementRepository announcementRepository,
@@ -71,7 +74,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             AuditLogService auditLogService,
             TenantRealtimePublisher tenantRealtimePublisher,
             EmailNotificationService emailNotificationService,
-            SecurityUtils securityUtils) {
+            SecurityUtils securityUtils,
+            AttachmentService attachmentService) {
         this.announcementRepository = announcementRepository;
         this.employeeRepository = employeeRepository;
         this.teamRepository = teamRepository;
@@ -83,6 +87,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         this.tenantRealtimePublisher = tenantRealtimePublisher;
         this.emailNotificationService = emailNotificationService;
         this.securityUtils = securityUtils;
+        this.attachmentService = attachmentService;
     }
 
     @Override
@@ -159,6 +164,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
             throw new ForbiddenOperationException("You are not allowed to delete this announcement");
         }
 
+        attachmentService.listAttachments(AttachmentEntityType.ANNOUNCEMENT, announcementId)
+                .forEach(attachment -> attachmentService.deleteAttachment(attachment.getId()));
         announcementRepository.delete(announcement);
         auditLogService.logAction(
                 AuditActionType.DELETE,

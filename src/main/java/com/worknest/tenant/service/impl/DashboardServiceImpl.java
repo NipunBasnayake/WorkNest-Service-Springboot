@@ -42,6 +42,9 @@ public class DashboardServiceImpl implements DashboardService {
     private final AttendanceRecordRepository attendanceRecordRepository;
     private final AnnouncementRepository announcementRepository;
     private final NotificationRepository notificationRepository;
+    private final JobPositionRepository jobPositionRepository;
+    private final CandidateApplicationRepository candidateApplicationRepository;
+    private final InterviewRepository interviewRepository;
     private final AttendanceService attendanceService;
     private final SecurityUtils securityUtils;
 
@@ -55,6 +58,9 @@ public class DashboardServiceImpl implements DashboardService {
             AttendanceRecordRepository attendanceRecordRepository,
             AnnouncementRepository announcementRepository,
             NotificationRepository notificationRepository,
+            JobPositionRepository jobPositionRepository,
+            CandidateApplicationRepository candidateApplicationRepository,
+            InterviewRepository interviewRepository,
             AttendanceService attendanceService,
             SecurityUtils securityUtils) {
         this.employeeRepository = employeeRepository;
@@ -66,6 +72,9 @@ public class DashboardServiceImpl implements DashboardService {
         this.attendanceRecordRepository = attendanceRecordRepository;
         this.announcementRepository = announcementRepository;
         this.notificationRepository = notificationRepository;
+        this.jobPositionRepository = jobPositionRepository;
+        this.candidateApplicationRepository = candidateApplicationRepository;
+        this.interviewRepository = interviewRepository;
         this.attendanceService = attendanceService;
         this.securityUtils = securityUtils;
     }
@@ -111,6 +120,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .recentAnnouncements(recentAnnouncements)
                 .recentNotifications(recentNotifications)
                 .todayAttendance(todayAttendance)
+                .recruitment(buildRecruitmentSummary())
                 .generatedAt(LocalDateTime.now())
                 .build();
     }
@@ -209,7 +219,51 @@ public class DashboardServiceImpl implements DashboardService {
                 .leavesByStatus(buildStatusCounts(LeaveStatus.values(), leaveRequestRepository.countByStatusGroup()))
                 .todayAttendance(todayAttendance)
                 .employeesByRole(roleCounts)
+                .recruitment(buildRecruitmentSummary())
                 .generatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    private RecruitmentDashboardSummaryDto buildRecruitmentSummary() {
+        LocalDateTime now = LocalDateTime.now();
+        List<InterviewStatus> activeInterviewStatuses = List.of(InterviewStatus.SCHEDULED, InterviewStatus.RESCHEDULED);
+        List<CandidatePipelineStatus> shortlistedStatuses = List.of(
+                CandidatePipelineStatus.SHORTLISTED,
+                CandidatePipelineStatus.SCREENING);
+
+        List<RecruitmentDashboardSummaryDto.RecentApplicationDto> recentApplications =
+                candidateApplicationRepository.findTop8ByOrderByAppliedAtDesc().stream()
+                        .map(application -> RecruitmentDashboardSummaryDto.RecentApplicationDto.builder()
+                                .id(application.getId())
+                                .candidateName(application.getCandidate().getFullName())
+                                .jobTitle(application.getJobPosition().getTitle())
+                                .status(application.getStatus())
+                                .appliedAt(application.getAppliedAt())
+                                .build())
+                        .toList();
+
+        List<RecruitmentDashboardSummaryDto.UpcomingInterviewDto> upcomingInterviews =
+                interviewRepository.findTop8ByStatusInAndScheduledAtAfterOrderByScheduledAtAsc(activeInterviewStatuses, now)
+                        .stream()
+                        .map(interview -> RecruitmentDashboardSummaryDto.UpcomingInterviewDto.builder()
+                                .id(interview.getId())
+                                .applicationId(interview.getApplication().getId())
+                                .candidateName(interview.getApplication().getCandidate().getFullName())
+                                .jobTitle(interview.getApplication().getJobPosition().getTitle())
+                                .mode(interview.getMode())
+                                .scheduledAt(interview.getScheduledAt())
+                                .build())
+                        .toList();
+
+        return RecruitmentDashboardSummaryDto.builder()
+                .openJobs(jobPositionRepository.countByStatusAndDeletedFalse(JobPositionStatus.OPEN))
+                .applicationsReceived(candidateApplicationRepository.count())
+                .shortlisted(candidateApplicationRepository.countByStatusIn(shortlistedStatuses))
+                .interviewsScheduled(interviewRepository.countByStatusInAndScheduledAtAfter(activeInterviewStatuses, now))
+                .offers(candidateApplicationRepository.countByStatus(CandidatePipelineStatus.OFFERED))
+                .hired(candidateApplicationRepository.countByStatus(CandidatePipelineStatus.HIRED))
+                .recentApplications(recentApplications)
+                .upcomingInterviews(upcomingInterviews)
                 .build();
     }
 

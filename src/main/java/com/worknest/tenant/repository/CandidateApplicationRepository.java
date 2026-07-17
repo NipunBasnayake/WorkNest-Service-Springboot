@@ -5,6 +5,9 @@ import com.worknest.tenant.enums.CandidatePipelineStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,7 +16,10 @@ import java.util.List;
 import java.util.Optional;
 import java.time.LocalDateTime;
 
-public interface CandidateApplicationRepository extends JpaRepository<CandidateApplication, Long> {
+public interface CandidateApplicationRepository extends JpaRepository<CandidateApplication, Long>, JpaSpecificationExecutor<CandidateApplication> {
+
+    @EntityGraph(attributePaths = {"candidate", "jobPosition", "hiredEmployee"})
+    Page<CandidateApplication> findAll(Specification<CandidateApplication> specification, Pageable pageable);
 
     List<CandidateApplication> findByJobPositionIdOrderByAppliedAtDesc(Long jobPositionId);
 
@@ -44,6 +50,10 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
 
     long countByJobPositionIdAndStatus(Long jobPositionId, CandidatePipelineStatus status);
 
+    @Query("SELECT ca.jobPosition.id, COUNT(ca) FROM CandidateApplication ca WHERE ca.jobPosition.id IN :jobIds GROUP BY ca.jobPosition.id")
+    List<Object[]> countByJobPositionIds(@Param("jobIds") Collection<Long> jobIds);
+
+    @EntityGraph(attributePaths = {"candidate", "jobPosition"})
     List<CandidateApplication> findTop8ByOrderByAppliedAtDesc();
 
     @Query("""

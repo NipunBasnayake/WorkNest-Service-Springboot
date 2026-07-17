@@ -10,27 +10,23 @@ import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.multitenancy.context.TenantContextHolder;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
-import org.springframework.beans.factory.annotation.Value;
+import com.worknest.tenant.entity.StoredFileMetadata;
+import com.worknest.tenant.repository.StoredFileMetadataRepository;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriUtils;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -42,11 +38,11 @@ import java.util.zip.ZipInputStream;
 public class FileStorageService {
 
     private static final String INTERNAL_PREFIX = "wnfile://";
+    private static final String INTERNAL_ID_PREFIX = "wnfileid://";
     private static final String STORAGE_BUCKET = "worknest-local";
-    private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final Set<String> ALLOWED_ROOT_DIRECTORIES = Set.of(
-            "workspace", "employees", "recruitment", "tasks", "announcements",
-            "leave", "chat", "documents", "images", "docs"
+            "companies", "workspace", "employees", "recruitment", "projects", "tasks", "announcements",
+            "leave", "chat", "documents", "temporary", "images", "docs"
     );
     private static final Set<String> DANGEROUS_EXTENSIONS = Set.of(
             "ade", "adp", "apk", "app", "bat", "bin", "cmd", "com", "cpl", "dll", "dmg", "elf",
@@ -55,9 +51,9 @@ public class FileStorageService {
     );
 
     private final StorageProperties storageProperties;
-    private final Path storageRootPath;
-    private final Path tenantsRootPath;
-    private final String signedUrlSecret;
+    private final StorageProvider storageProvider;
+    private final StoredFileMetadataRepository storedFileMetadataRepository;
+    private final StoredFileAccessPolicy storedFileAccessPolicy;
     private final SecurityUtils securityUtils;
     private final MasterTenantLookupService masterTenantLookupService;
 
@@ -91,26 +87,30 @@ public class FileStorageService {
 
     public FileStorageService(
             StorageProperties storageProperties,
+            StorageProvider storageProvider,
+            StoredFileMetadataRepository storedFileMetadataRepository,
+            StoredFileAccessPolicy storedFileAccessPolicy,
             SecurityUtils securityUtils,
-            MasterTenantLookupService masterTenantLookupService,
-            @Value("${app.storage.signed-url-secret:${app.jwt.secret:worknest-dev-file-secret}}") String signedUrlSecret) {
+            MasterTenantLookupService masterTenantLookupService) {
         this.storageProperties = storageProperties;
-        this.storageRootPath = storageProperties.rootPath();
-        this.tenantsRootPath = storageRootPath.resolve("tenants").normalize();
+        this.storageProvider = storageProvider;
+        this.storedFileMetadataRepository = storedFileMetadataRepository;
+        this.storedFileAccessPolicy = storedFileAccessPolicy;
         this.securityUtils = securityUtils;
         this.masterTenantLookupService = masterTenantLookupService;
-        this.signedUrlSecret = signedUrlSecret == null || signedUrlSecret.isBlank()
-                ? "worknest-dev-file-secret"
-                : signedUrlSecret;
         createDirectories();
     }
 
     public Path getTenantsRootPath() {
-        return tenantsRootPath;
+        return storageProvider.localTenantRoot();
     }
 
     public StoredFileResult store(MultipartFile file, String type) {
         return toLegacyResult(store(file, StorageCategory.fromLegacyType(type)));
+    }
+
+    public StoredFileResult storeForUpload(MultipartFile file, StorageCategory category) {
+        return toLegacyResult(store(file, category));
     }
 
     public StoredFileDto store(MultipartFile file, StorageCategory category, String... pathSegments) {
@@ -127,29 +127,25 @@ public class FileStorageService {
         relativeSegments.addAll(normalizePathSegments(pathSegments));
         relativeSegments.add(validatedFile.storedFileName());
         String storedName = String.join("/", relativeSegments);
-
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        Path targetDirectory = tenantRoot.resolve(String.join("/", relativeSegments.subList(0, relativeSegments.size() - 1))).normalize();
-        Path targetPath = targetDirectory.resolve(validatedFile.storedFileName()).normalize();
-        ensurePathInside(targetPath, tenantRoot);
+        storageProvider.write(normalizedTenantSlug, storedName, validatedFile.bytes());
 
         try {
-            Files.createDirectories(targetDirectory);
-            Files.write(targetPath, validatedFile.bytes());
-        } catch (IOException ex) {
-            throw new BadRequestException("Failed to store file", ex);
+            StoredFileMetadata metadata = new StoredFileMetadata();
+            metadata.setOriginalFilename(validatedFile.originalName());
+            metadata.setStoredFilename(validatedFile.storedFileName());
+            metadata.setRelativePath(storedName);
+            metadata.setExtension(validatedFile.extension());
+            metadata.setContentType(validatedFile.contentType());
+            metadata.setFileSize(validatedFile.size());
+            metadata.setUploadedByUserId(currentUserIdOrNull());
+            metadata.setStorageCategory(resolvedCategory);
+            metadata.setRelatedModule(resolvedCategory.name());
+            StoredFileMetadata saved = storedFileMetadataRepository.save(metadata);
+            return toDto(normalizedTenantSlug, saved);
+        } catch (RuntimeException exception) {
+            storageProvider.delete(normalizedTenantSlug, storedName);
+            throw exception;
         }
-
-        Instant uploadedAt = Instant.now();
-        return new StoredFileDto(
-                validatedFile.id(),
-                validatedFile.originalName(),
-                storedName,
-                buildPublicUrl(normalizedTenantSlug, storedName),
-                validatedFile.size(),
-                validatedFile.contentType(),
-                uploadedAt
-        );
     }
 
     public StoredFileDto replace(MultipartFile file, StorageCategory category, String existingStoredName, String... pathSegments) {
@@ -171,15 +167,20 @@ public class FileStorageService {
 
     public void delete(String tenantSlug, String storedName) {
         String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
-        String relativePath = normalizeStoredName(storedName);
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        Path filePath = tenantRoot.resolve(relativePath).normalize();
-        ensurePathInside(filePath, tenantRoot);
-        try {
-            Files.deleteIfExists(filePath);
-        } catch (IOException ex) {
-            throw new BadRequestException("Failed to delete file", ex);
+        Long metadataId = parseMetadataId(storedName);
+        if (metadataId != null) {
+            StoredFileMetadata metadata = getMetadata(metadataId);
+            storageProvider.delete(normalizedTenantSlug, metadata.getRelativePath());
+            metadata.setActive(false);
+            storedFileMetadataRepository.save(metadata);
+            return;
         }
+        String relativePath = normalizeStoredName(storedName);
+        storageProvider.delete(normalizedTenantSlug, relativePath);
+        storedFileMetadataRepository.findByRelativePathAndActiveTrue(relativePath).ifPresent(metadata -> {
+            metadata.setActive(false);
+            storedFileMetadataRepository.save(metadata);
+        });
     }
 
     public boolean exists(String storedName) {
@@ -188,11 +189,13 @@ public class FileStorageService {
 
     public boolean exists(String tenantSlug, String storedName) {
         String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        Long metadataId = parseMetadataId(storedName);
+        if (metadataId != null) {
+            StoredFileMetadata metadata = getMetadata(metadataId);
+            return storageProvider.exists(normalizedTenantSlug, metadata.getRelativePath());
+        }
         String relativePath = normalizeStoredName(storedName);
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        Path filePath = tenantRoot.resolve(relativePath).normalize();
-        ensurePathInside(filePath, tenantRoot);
-        return Files.isRegularFile(filePath);
+        return storageProvider.exists(normalizedTenantSlug, relativePath);
     }
 
     public StoredFileResource download(String storedName) {
@@ -201,32 +204,18 @@ public class FileStorageService {
 
     public StoredFileResource download(String tenantSlug, String storedName) {
         String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
+        Long metadataId = parseMetadataId(storedName);
+        if (metadataId != null) return resource(normalizedTenantSlug, getMetadata(metadataId));
         String relativePath = normalizeStoredName(storedName);
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        Path filePath = tenantRoot.resolve(relativePath).normalize();
-        ensurePathInside(filePath, tenantRoot);
-        if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
-            throw new ResourceNotFoundException("File not found");
-        }
-
-        try {
-            Resource resource = new UrlResource(filePath.toUri());
-            if (!resource.exists() || !resource.isReadable()) {
-                throw new ResourceNotFoundException("File not found");
-            }
-            String fileName = filePath.getFileName().toString();
-            return new StoredFileResource(resource, fileName, detectContentTypeFromName(fileName));
-        } catch (MalformedURLException ex) {
-            throw new BadRequestException("Invalid file path", ex);
-        }
-    }
-
-    public String buildPublicUrl(String storedName) {
-        return buildPublicUrl(resolveCurrentTenantSlug(), storedName);
+        Resource resource = storageProvider.read(normalizedTenantSlug, relativePath);
+        String fileName = fileNameFromStoredName(relativePath);
+        return new StoredFileResource(resource, fileName, detectContentTypeFromName(fileName));
     }
 
     public String buildPublicUrl(String tenantSlug, String storedName) {
         String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
+        Long metadataId = parseMetadataId(storedName);
+        if (metadataId != null) return buildFileApiUrl(normalizedTenantSlug, metadataId, "preview");
         String relativePath = normalizeStoredName(storedName);
         return "/files/" + encodePathSegment(normalizedTenantSlug) + "/" + encodeRelativePath(relativePath);
     }
@@ -235,26 +224,17 @@ public class FileStorageService {
         validateFile(file, requireCategory(category));
     }
 
+    public void validateUploadAccess(StorageCategory category) {
+        storedFileAccessPolicy.requireUpload(requireCategory(category));
+    }
+
     public void createDirectories() {
-        try {
-            Files.createDirectories(storageRootPath);
-            Files.createDirectories(tenantsRootPath);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to initialize upload directory", ex);
-        }
+        storageProvider.initialize(java.util.Arrays.stream(StorageCategory.values()).map(StorageCategory::directorySegments).toList());
     }
 
     public void createDirectories(String tenantSlug) {
         String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        try {
-            Files.createDirectories(tenantRoot);
-            for (StorageCategory category : StorageCategory.values()) {
-                Files.createDirectories(tenantRoot.resolve(String.join("/", category.directorySegments())).normalize());
-            }
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to initialize tenant upload directories", ex);
-        }
+        storageProvider.initializeTenant(normalizedTenantSlug, java.util.Arrays.stream(StorageCategory.values()).map(StorageCategory::directorySegments).toList());
     }
 
     public void validateTenantFileAccess(String tenantSlug, String relativePath) {
@@ -273,10 +253,7 @@ public class FileStorageService {
         }
 
         String normalizedPath = normalizeRelativePath(relativePath);
-        Path tenantRoot = tenantRoot(normalizedTenantSlug);
-        Path filePath = tenantRoot.resolve(normalizedPath).normalize();
-        ensurePathInside(filePath, tenantRoot);
-        if (!Files.isRegularFile(filePath)) {
+        if (!storageProvider.exists(normalizedTenantSlug, normalizedPath)) {
             throw new ResourceNotFoundException("File not found");
         }
     }
@@ -285,6 +262,11 @@ public class FileStorageService {
         String normalized = trimToNull(fileUrl);
         if (normalized == null) {
             throw new BadRequestException("fileUrl is required");
+        }
+        Long metadataId = parseMetadataId(normalized);
+        if (metadataId != null) {
+            getMetadata(metadataId);
+            return INTERNAL_ID_PREFIX + metadataId;
         }
         if (isLocalReference(normalized)) {
             return INTERNAL_PREFIX + normalizeRelativePath(normalized.substring(INTERNAL_PREFIX.length()));
@@ -307,34 +289,129 @@ public class FileStorageService {
         if (!isLocalReference(normalized)) {
             return normalized;
         }
+        Long metadataId = parseMetadataId(normalized);
+        if (metadataId != null) return buildFileApiUrl(resolveCurrentTenantSlug(), metadataId, "preview");
         return buildPublicUrl(resolveCurrentTenantSlug(), normalized);
     }
 
     public boolean isLocalReference(String value) {
-        return value != null && value.startsWith(INTERNAL_PREFIX);
+        return value != null && (value.startsWith(INTERNAL_PREFIX) || value.startsWith(INTERNAL_ID_PREFIX));
     }
 
     public StoredFileResource loadAsResource(String storedReference) {
         return download(resolveCurrentTenantSlug(), storedReference);
     }
 
-    public StoredFileResource loadPublicResource(String tenantSlug, String folderName, String fileName, long expires, String signature) {
-        String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
-        String relativePath = normalizeRelativePath(normalizePathSegment(folderName) + "/" + normalizePathSegment(fileName));
-        validateSignature(normalizedTenantSlug, relativePath, expires, signature);
-        return download(normalizedTenantSlug, relativePath);
-    }
-
     private StoredFileResult toLegacyResult(StoredFileDto storedFile) {
         return new StoredFileResult(
                 storedFile.url(),
-                INTERNAL_PREFIX + storedFile.storedName(),
-                fileNameFromStoredName(storedFile.storedName()),
+                INTERNAL_ID_PREFIX + storedFile.id(),
+                storedFile.originalName(),
                 storedFile.contentType(),
                 storedFile.size(),
                 STORAGE_BUCKET,
                 storedFile.uploadedAt().toString()
         );
+    }
+
+    public StoredFileDto getFile(Long id) {
+        StoredFileMetadata metadata = getMetadata(id);
+        storedFileAccessPolicy.requireRead(metadata);
+        return toDto(resolveCurrentTenantSlug(), metadata);
+    }
+
+    public StoredFileResource getFileResource(Long id) {
+        StoredFileMetadata metadata = getMetadata(id);
+        storedFileAccessPolicy.requireRead(metadata);
+        return resource(resolveCurrentTenantSlug(), metadata);
+    }
+
+    public StoredFileResource getPublicBrandingResource(Long id) {
+        StoredFileMetadata metadata = getMetadata(id);
+        if (metadata.getStorageCategory() != StorageCategory.WORKSPACE_LOGO
+                && metadata.getStorageCategory() != StorageCategory.WORKSPACE_BANNER) {
+            throw new ResourceNotFoundException("File not found");
+        }
+        if (!"WORKSPACE".equals(metadata.getRelatedModule()) || metadata.getRelatedEntityId() == null) {
+            throw new ResourceNotFoundException("File not found");
+        }
+        return resource(resolveCurrentTenantSlug(), metadata);
+    }
+
+    public String toPublicBrandingUrl(String storedReference) {
+        Long metadataId = parseMetadataId(storedReference);
+        if (metadataId == null) return null;
+        return "/api/public/" + encodePathSegment(resolveCurrentTenantSlug()) + "/branding/" + metadataId;
+    }
+
+    public StoredFileDto replace(Long id, MultipartFile file) {
+        StoredFileMetadata current = getMetadata(id);
+        storedFileAccessPolicy.requireWrite(current);
+        String tenantSlug = resolveCurrentTenantSlug();
+        ValidatedFile replacement = validateFile(file, current.getStorageCategory());
+        List<String> relativeSegments = new ArrayList<>(current.getStorageCategory().directorySegments());
+        relativeSegments.add(replacement.storedFileName());
+        String replacementPath = String.join("/", relativeSegments);
+        String previousPath = current.getRelativePath();
+
+        storageProvider.write(tenantSlug, replacementPath, replacement.bytes());
+        try {
+            current.setOriginalFilename(replacement.originalName());
+            current.setStoredFilename(replacement.storedFileName());
+            current.setRelativePath(replacementPath);
+            current.setExtension(replacement.extension());
+            current.setContentType(replacement.contentType());
+            current.setFileSize(replacement.size());
+            StoredFileMetadata saved = storedFileMetadataRepository.save(current);
+            if (!previousPath.equals(replacementPath)) storageProvider.delete(tenantSlug, previousPath);
+            return toDto(tenantSlug, saved);
+        } catch (RuntimeException exception) {
+            storageProvider.delete(tenantSlug, replacementPath);
+            throw exception;
+        }
+    }
+
+    public void delete(Long id) {
+        StoredFileMetadata metadata = getMetadata(id);
+        storedFileAccessPolicy.requireWrite(metadata);
+        if (metadata.getRelatedEntityId() != null) {
+            throw new BadRequestException("Delete linked files through the owning module");
+        }
+        delete(INTERNAL_ID_PREFIX + id);
+    }
+
+    public void link(String storedReference, String relatedModule, Long relatedEntityId, StorageCategory category) {
+        Long metadataId = parseMetadataId(storedReference);
+        if (metadataId == null) return;
+        StoredFileMetadata metadata = getMetadata(metadataId);
+        link(metadata, relatedModule, relatedEntityId, category);
+    }
+
+    public void claimAndLink(String storedReference, String relatedModule, Long relatedEntityId, StorageCategory category) {
+        Long metadataId = parseMetadataId(storedReference);
+        if (metadataId == null) return;
+        StoredFileMetadata metadata = getMetadata(metadataId);
+        storedFileAccessPolicy.requireWrite(metadata);
+        link(metadata, relatedModule, relatedEntityId, category);
+    }
+
+    public List<StoredFileDto> listLinkedFiles(String relatedModule, Long relatedEntityId) {
+        String module = trimToNull(relatedModule);
+        if (module == null || relatedEntityId == null || relatedEntityId <= 0) return List.of();
+        String tenantSlug = resolveCurrentTenantSlug();
+        return storedFileMetadataRepository
+                .findByRelatedModuleAndRelatedEntityIdAndActiveTrueOrderByUploadedAtAsc(module, relatedEntityId)
+                .stream()
+                .peek(storedFileAccessPolicy::requireRead)
+                .map(metadata -> toDto(tenantSlug, metadata))
+                .toList();
+    }
+
+    private void link(StoredFileMetadata metadata, String relatedModule, Long relatedEntityId, StorageCategory category) {
+        if (category != null) metadata.setStorageCategory(category);
+        metadata.setRelatedModule(trimToNull(relatedModule));
+        metadata.setRelatedEntityId(relatedEntityId);
+        storedFileMetadataRepository.save(metadata);
     }
 
     private ValidatedFile validateFile(MultipartFile file, StorageCategory category) {
@@ -590,15 +667,71 @@ public class FileStorageService {
         return tenant;
     }
 
-    private Path tenantRoot(String tenantSlug) {
-        return tenantsRootPath.resolve(normalizeTenantSlug(tenantSlug)).normalize();
-    }
-
     private StorageCategory requireCategory(StorageCategory category) {
         if (category == null) {
             throw new BadRequestException("Storage category is required");
         }
         return category;
+    }
+
+    private StoredFileMetadata getMetadata(Long id) {
+        if (id == null || id <= 0) throw new BadRequestException("File id must be positive");
+        return storedFileMetadataRepository.findById(id)
+                .filter(StoredFileMetadata::isActive)
+                .orElseThrow(() -> new ResourceNotFoundException("File not found"));
+    }
+
+    private StoredFileDto toDto(String tenantSlug, StoredFileMetadata metadata) {
+        Instant uploadedAt = metadata.getUploadedAt() == null
+                ? Instant.now()
+                : metadata.getUploadedAt().atZone(java.time.ZoneId.systemDefault()).toInstant();
+        return new StoredFileDto(
+                String.valueOf(metadata.getId()),
+                metadata.getOriginalFilename(),
+                metadata.getRelativePath(),
+                buildFileApiUrl(tenantSlug, metadata.getId(), "preview"),
+                metadata.getFileSize(),
+                metadata.getContentType(),
+                uploadedAt);
+    }
+
+    private StoredFileResource resource(String tenantSlug, StoredFileMetadata metadata) {
+        Resource resource = storageProvider.read(tenantSlug, metadata.getRelativePath());
+        return new StoredFileResource(resource, metadata.getOriginalFilename(), metadata.getContentType());
+    }
+
+    private Long currentUserIdOrNull() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getPrincipal() instanceof PlatformUserPrincipal principal
+                ? principal.getId()
+                : null;
+    }
+
+    private String buildFileApiUrl(String tenantSlug, Long id, String operation) {
+        return "/api/" + encodePathSegment(normalizeTenantSlug(tenantSlug)) + "/files/" + id + "/" + operation;
+    }
+
+    private Long parseMetadataId(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) return null;
+        String idValue = null;
+        if (normalized.startsWith(INTERNAL_ID_PREFIX)) {
+            idValue = normalized.substring(INTERNAL_ID_PREFIX.length());
+        } else {
+            String path = extractUriPath(normalized);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("^/api/[a-z0-9][a-z0-9-]{0,79}/files/(\\d+)(?:/(?:preview|download))?$")
+                    .matcher(path);
+            if (matcher.matches()) idValue = matcher.group(1);
+        }
+        if (idValue == null) return null;
+        try {
+            long id = Long.parseLong(idValue);
+            if (id <= 0) throw new NumberFormatException();
+            return id;
+        } catch (NumberFormatException exception) {
+            throw new BadRequestException("Invalid file reference");
+        }
     }
 
     private String normalizeStoredName(String storedName) {
@@ -772,12 +905,6 @@ public class FileStorageService {
         return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
     }
 
-    private void ensurePathInside(Path candidate, Path parent) {
-        if (!candidate.normalize().startsWith(parent.normalize())) {
-            throw new BadRequestException("Invalid file path");
-        }
-    }
-
     private String encodeRelativePath(String relativePath) {
         String normalized = normalizeRelativePath(relativePath);
         String[] segments = normalized.split("/");
@@ -790,27 +917,6 @@ public class FileStorageService {
 
     private String encodePathSegment(String value) {
         return UriUtils.encodePathSegment(value, StandardCharsets.UTF_8);
-    }
-
-    private void validateSignature(String tenantSlug, String path, long expires, String signature) {
-        if (Instant.now().getEpochSecond() > expires) {
-            throw new ForbiddenOperationException("File link has expired");
-        }
-        String expected = sign(tenantSlug, path, expires);
-        if (signature == null || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8))) {
-            throw new ForbiddenOperationException("File link is invalid");
-        }
-    }
-
-    private String sign(String tenantSlug, String path, long expires) {
-        String payload = tenantSlug + "\n" + path + "\n" + expires;
-        try {
-            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
-            mac.init(new SecretKeySpec(signedUrlSecret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
-            return HexFormat.of().formatHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("Unable to sign file URL", ex);
-        }
     }
 
     private String trimToNull(String value) {

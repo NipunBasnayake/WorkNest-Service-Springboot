@@ -25,17 +25,23 @@ public class EmailDispatchService {
     private final JavaMailSender javaMailSender;
     private final String defaultFromAddress;
     private final Executor emailExecutor;
+    private final boolean enabled;
 
     public EmailDispatchService(
             JavaMailSender javaMailSender,
             @Value("${app.email.from:${spring.mail.username:}}") String defaultFromAddress,
+            @Value("${app.email.enabled:false}") boolean enabled,
             @Qualifier("emailExecutor") Executor emailExecutor) {
         this.javaMailSender = javaMailSender;
         this.defaultFromAddress = defaultFromAddress;
+        this.enabled = enabled;
         this.emailExecutor = emailExecutor;
     }
 
     public void sendHtmlEmailOrThrow(String toEmail, EmailContent emailContent) {
+        if (!enabled) {
+            return;
+        }
         try {
             sendHtmlEmailInternal(toEmail, emailContent);
         } catch (MessagingException | MailException ex) {
@@ -45,6 +51,9 @@ public class EmailDispatchService {
     }
 
     public void sendHtmlEmailAsync(String toEmail, EmailContent emailContent) {
+        if (!enabled) {
+            return;
+        }
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override

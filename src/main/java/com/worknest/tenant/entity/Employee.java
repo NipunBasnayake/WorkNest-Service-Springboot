@@ -16,7 +16,8 @@ import java.time.LocalDateTime;
         name = "employees",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_employees_email", columnNames = "email"),
-                @UniqueConstraint(name = "uk_employees_code", columnNames = "employee_code")
+                @UniqueConstraint(name = "uk_employees_code", columnNames = "employee_code"),
+                @UniqueConstraint(name = "uk_employees_avatar_asset", columnNames = "avatar_asset_id")
         },
         indexes = {
                 @Index(name = "idx_employees_role_status", columnList = "role,status")
@@ -62,8 +63,9 @@ public class Employee {
     @Column(name = "phone", length = 30)
     private String phone;
 
-    @Column(name = "avatar_file_reference", length = 1000)
-    private String avatarFileReference;
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "avatar_asset_id")
+    private StoredFileMetadata avatarAsset;
 
     @Column(name = "salary", precision = 12, scale = 2)
     private BigDecimal salary;

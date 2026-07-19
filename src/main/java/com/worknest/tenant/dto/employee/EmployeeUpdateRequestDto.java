@@ -50,9 +50,6 @@ public class EmployeeUpdateRequestDto {
     )
     private String phone;
 
-    @Size(max = 1000, message = "Avatar file reference must not exceed 1000 characters")
-    private String avatarUrl;
-
     @DecimalMin(value = "0.00", message = "Salary cannot be negative")
     @Digits(integer = 12, fraction = 2, message = "Salary must be a valid amount with up to 2 decimals")
     private BigDecimal salary;

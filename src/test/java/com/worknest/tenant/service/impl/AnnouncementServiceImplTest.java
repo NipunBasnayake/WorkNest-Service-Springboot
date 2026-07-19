@@ -334,7 +334,7 @@ class AnnouncementServiceImplTest {
 
         AnnouncementCreateRequestDto request = new AnnouncementCreateRequestDto();
         request.setTitle("Policy");
-        request.setMessage("This employee should not be able to publish.");
+        request.setContent("This employee should not be able to publish.");
 
         Assertions.assertThatThrownBy(() -> announcementService.createAnnouncement(request))
                 .isInstanceOf(ForbiddenOperationException.class);

@@ -6,7 +6,6 @@ import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
-import com.worknest.common.storage.StorageCategory;
 import com.worknest.common.util.EmployeeCodeGenerator;
 import com.worknest.master.entity.PlatformUser;
 import com.worknest.security.authorization.AuthorizationService;
@@ -96,23 +95,11 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setDepartment(trimToNull(requestDto.getDepartment()));
         employee.setPhone(trimToNull(requestDto.getPhone()));
 
-        String requestedAvatar = trimToNull(requestDto.getAvatarUrl());
-        if (requestedAvatar != null) {
-            String normalizedAvatar = fileStorageService.normalizeStoredReference(requestedAvatar);
-            employee.setAvatarFileReference(normalizedAvatar);
-        }
         employee.setSalary(requestDto.getSalary());
         employee.setJoinedDate(requestDto.getJoinedDate());
         employee.setStatus(requestDto.getStatus() == null ? UserStatus.ACTIVE : requestDto.getStatus());
 
         Employee savedEmployee = employeeRepository.save(employee);
-        if (requestedAvatar != null) {
-            fileStorageService.claimAndLink(
-                    savedEmployee.getAvatarFileReference(),
-                    "EMPLOYEE",
-                    savedEmployee.getId(),
-                    StorageCategory.EMPLOYEE_AVATAR);
-        }
         String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
         auditLogService.logAction(
@@ -160,10 +147,6 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setDesignation(trimToNull(requestDto.getDesignation()));
         employee.setDepartment(trimToNull(requestDto.getDepartment()));
         employee.setPhone(trimToNull(requestDto.getPhone()));
-        String requestedAvatar = trimToNull(requestDto.getAvatarUrl());
-        if (requestedAvatar != null) {
-            employee.setAvatarFileReference(fileStorageService.normalizeStoredReference(requestedAvatar));
-        }
         employee.setSalary(requestDto.getSalary());
 
         if (requestDto.getJoinedDate() != null) {
@@ -177,13 +160,6 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         Employee updated = employeeRepository.save(employee);
-        if (requestedAvatar != null) {
-            fileStorageService.claimAndLink(
-                    updated.getAvatarFileReference(),
-                    "EMPLOYEE",
-                    updated.getId(),
-                    StorageCategory.EMPLOYEE_AVATAR);
-        }
         String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
         auditLogService.logAction(
@@ -299,23 +275,11 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setDesignation(trimToNull(requestDto.getDesignation()));
         employee.setPhone(trimToNull(requestDto.getPhone()));
 
-        String requestedAvatar = trimToNull(requestDto.getAvatarUrl());
-        if (requestedAvatar != null) {
-            employee.setAvatarFileReference(fileStorageService.normalizeStoredReference(requestedAvatar));
-        }
-
         if (requestDto.getPassword() != null && !requestDto.getPassword().isBlank()) {
             employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
         }
 
         Employee updated = employeeRepository.save(employee);
-        if (requestedAvatar != null) {
-            fileStorageService.claimAndLink(
-                    updated.getAvatarFileReference(),
-                    "EMPLOYEE",
-                    updated.getId(),
-                    StorageCategory.EMPLOYEE_AVATAR);
-        }
         String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
         PlatformUser syncedUser = platformUserSyncBridgeService.syncOnUpdate(
                 updated,
@@ -539,13 +503,17 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .designation(employee.getDesignation())
                 .department(employee.getDepartment())
                 .phone(employee.getPhone())
-                .avatarUrl(fileStorageService.toPublicUrl(employee.getAvatarFileReference()))
+                .avatarUrl(resolveAvatarUrl(employee))
                 .salary(employee.getSalary())
                 .joinedDate(employee.getJoinedDate())
                 .status(employee.getStatus())
                 .createdAt(employee.getCreatedAt())
                 .updatedAt(employee.getUpdatedAt())
                 .build();
+    }
+
+    private String resolveAvatarUrl(Employee employee) {
+        return fileStorageService.toImageVariantUrl(employee.getAvatarAsset(), "256");
     }
 
     private EmployeeSkillResponseDto toSkillResponse(EmployeeSkill skill) {

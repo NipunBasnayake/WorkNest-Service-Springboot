@@ -15,6 +15,7 @@ public class EmployeeSimpleDto {
     private String employeeCode;
     private String fullName;
     private String email;
+    private String avatarUrl;
     private PlatformRole role;
     private UserStatus status;
 }

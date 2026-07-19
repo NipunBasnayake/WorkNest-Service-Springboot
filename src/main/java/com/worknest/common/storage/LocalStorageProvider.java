@@ -10,7 +10,13 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 
 @Component
@@ -78,12 +84,54 @@ public class LocalStorageProvider implements StorageProvider {
     }
 
     @Override
+    public boolean hashMatches(String tenantSlug, String relativePath, String expectedSha256) {
+        if (expectedSha256 == null || !expectedSha256.matches("(?i)^[0-9a-f]{64}$")) return false;
+        Path target = resolve(tenantSlug, relativePath);
+        if (!Files.isRegularFile(target)) return false;
+        try (var input = Files.newInputStream(target)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) digest.update(buffer, 0, read);
+            }
+            byte[] expected = HexFormat.of().parseHex(expectedSha256);
+            return MessageDigest.isEqual(expected, digest.digest());
+        } catch (IOException | NoSuchAlgorithmException | IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    @Override
     public void delete(String tenantSlug, String relativePath) {
         try {
             Files.deleteIfExists(resolve(tenantSlug, relativePath));
         } catch (IOException exception) {
             throw new BadRequestException("Failed to delete file", exception);
         }
+    }
+
+    @Override
+    public List<StoredObjectDescriptor> listObjects(String tenantSlug, String relativePrefix) {
+        Path tenantRoot = tenantRoot(tenantSlug);
+        Path prefix = resolve(tenantSlug, relativePrefix);
+        if (!Files.exists(prefix)) return List.of();
+        List<StoredObjectDescriptor> objects = new ArrayList<>();
+        try (var paths = Files.walk(prefix)) {
+            paths.filter(Files::isRegularFile).forEach(path -> {
+                try {
+                    String relativePath = tenantRoot.relativize(path).toString().replace('\\', '/');
+                    Instant lastModified = Files.getLastModifiedTime(path).toInstant();
+                    objects.add(new StoredObjectDescriptor(relativePath, Files.size(path), lastModified));
+                } catch (IOException exception) {
+                    throw new IllegalStateException("Unable to inspect stored object", exception);
+                }
+            });
+        } catch (IOException exception) {
+            throw new IllegalStateException("Unable to list stored objects", exception);
+        }
+        objects.sort(Comparator.comparing(StoredObjectDescriptor::relativePath));
+        return List.copyOf(objects);
     }
 
     @Override

@@ -91,6 +91,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "DUPLICATE_APPLICATION", ex.getMessage(), request, ex, false);
     }
 
+    @ExceptionHandler(StaleBrandingVersionException.class)
+    public ResponseEntity<ErrorResponse> handleStaleBrandingVersionException(
+            StaleBrandingVersionException ex, HttpServletRequest request) {
+        return build(HttpStatus.CONFLICT, "STALE_BRANDING_VERSION", ex.getMessage(), request, ex, false);
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
             InvalidCredentialsException ex, HttpServletRequest request) {

@@ -53,12 +53,19 @@ public class FileUploadController {
 
     @GetMapping({"/{id}/preview", "/preview/{id}"})
     public ResponseEntity<Resource> previewFile(@PathVariable("id") @Positive Long id) {
-        return resourceResponse(fileStorageService.getFileResource(id), true);
+        return resourceResponse(fileStorageService.getFileResource(id), true, false);
+    }
+
+    @GetMapping("/{id}/variants/{variant}/preview")
+    public ResponseEntity<Resource> previewFileVariant(
+            @PathVariable("id") @Positive Long id,
+            @PathVariable("variant") String variant) {
+        return resourceResponse(fileStorageService.getFileVariantResource(id, variant), true, true);
     }
 
     @GetMapping({"/{id}/download", "/download/{id}"})
     public ResponseEntity<Resource> downloadFile(@PathVariable("id") @Positive Long id) {
-        return resourceResponse(fileStorageService.getFileResource(id), false);
+        return resourceResponse(fileStorageService.getFileResource(id), false, false);
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -74,7 +81,10 @@ public class FileUploadController {
         return ResponseEntity.ok(ApiResponse.success("File deleted successfully"));
     }
 
-    private ResponseEntity<Resource> resourceResponse(FileStorageService.StoredFileResource file, boolean inline) {
+    private ResponseEntity<Resource> resourceResponse(
+            FileStorageService.StoredFileResource file,
+            boolean inline,
+            boolean immutable) {
         MediaType mediaType;
         try {
             mediaType = MediaType.parseMediaType(file.mimeType());
@@ -83,10 +93,14 @@ public class FileUploadController {
         }
         String disposition = (inline ? "inline" : "attachment") + "; filename*=UTF-8''"
                 + UriUtils.encode(file.fileName(), StandardCharsets.UTF_8);
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition)
                 .header("X-Content-Type-Options", "nosniff")
-                .contentType(mediaType)
-                .body(file.resource());
+                .header(HttpHeaders.CACHE_CONTROL, immutable
+                        ? "private, max-age=31536000, immutable"
+                        : "private, max-age=300")
+                .contentType(mediaType);
+        if (file.etag() != null) response.eTag(file.etag());
+        return response.body(file.resource());
     }
 }

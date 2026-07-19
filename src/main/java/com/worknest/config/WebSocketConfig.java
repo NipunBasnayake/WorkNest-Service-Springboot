@@ -1,13 +1,15 @@
 package com.worknest.config;
 
 import com.worknest.security.filter.StompJwtChannelInterceptor;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
@@ -22,26 +24,19 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final StompJwtChannelInterceptor stompJwtChannelInterceptor;
+    private final ObjectProvider<TaskScheduler> messageBrokerTaskScheduler;
     private final List<String> allowedOrigins;
 
     public WebSocketConfig(
             StompJwtChannelInterceptor stompJwtChannelInterceptor,
+            @Qualifier("messageBrokerTaskScheduler") ObjectProvider<TaskScheduler> messageBrokerTaskScheduler,
             @Value("${app.websocket.allowed-origins:http://localhost:3000,http://localhost:5173}") String allowedOriginsRaw) {
         this.stompJwtChannelInterceptor = stompJwtChannelInterceptor;
+        this.messageBrokerTaskScheduler = messageBrokerTaskScheduler;
         this.allowedOrigins = Arrays.stream(allowedOriginsRaw.split(","))
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
                 .toList();
-    }
-
-    @Bean(destroyMethod = "shutdown")
-    public ThreadPoolTaskScheduler brokerTaskScheduler() {
-        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(10);
-        scheduler.setThreadNamePrefix("simple-broker-");
-        scheduler.setWaitForTasksToCompleteOnShutdown(true);
-        scheduler.setAwaitTerminationSeconds(60);
-        return scheduler;
     }
 
     @Bean(destroyMethod = "shutdown")
@@ -78,12 +73,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new));
+        registry.addEndpoint("/ws-sockjs")
+                .setAllowedOriginPatterns(allowedOrigins.toArray(String[]::new))
+                .withSockJS();
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker("/topic", "/queue")
-                .setTaskScheduler(brokerTaskScheduler())
+                .setTaskScheduler(messageBrokerTaskScheduler.getObject())
                 .setHeartbeatValue(new long[]{10_000, 10_000});
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");

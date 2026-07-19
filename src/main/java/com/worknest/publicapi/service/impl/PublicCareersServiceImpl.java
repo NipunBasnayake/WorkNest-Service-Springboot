@@ -1,10 +1,9 @@
 package com.worknest.publicapi.service.impl;
 
 import com.worknest.common.exception.ResourceNotFoundException;
-import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.util.SlugUtils;
-import com.worknest.master.entity.PlatformTenant;
-import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.master.dto.TenantBrandingViewDto;
+import com.worknest.master.service.TenantBrandingService;
 import com.worknest.publicapi.dto.PublicCareerJobDetailDto;
 import com.worknest.publicapi.dto.PublicCareerJobSummaryDto;
 import com.worknest.publicapi.dto.PublicCareersResponseDto;
@@ -22,21 +21,18 @@ public class PublicCareersServiceImpl implements PublicCareersService {
     private static final int SUMMARY_MAX_LENGTH = 240;
 
     private final JobPositionRepository jobPositionRepository;
-    private final MasterTenantLookupService masterTenantLookupService;
-    private final FileStorageService fileStorageService;
+    private final TenantBrandingService tenantBrandingService;
 
     public PublicCareersServiceImpl(
             JobPositionRepository jobPositionRepository,
-            MasterTenantLookupService masterTenantLookupService,
-            FileStorageService fileStorageService) {
+            TenantBrandingService tenantBrandingService) {
         this.jobPositionRepository = jobPositionRepository;
-        this.masterTenantLookupService = masterTenantLookupService;
-        this.fileStorageService = fileStorageService;
+        this.tenantBrandingService = tenantBrandingService;
     }
 
     @Override
     public PublicCareersResponseDto listPublishedCareers(String tenantSlug) {
-        PublicCompanyDto company = toCompanyDto(resolveTenant(tenantSlug));
+        PublicCompanyDto company = toCompanyDto(tenantBrandingService.getPublicBranding(tenantSlug));
         return PublicCareersResponseDto.builder()
                 .company(company)
                 .jobs(jobPositionRepository.findPublishedJobs().stream()
@@ -47,7 +43,7 @@ public class PublicCareersServiceImpl implements PublicCareersService {
 
     @Override
     public PublicCareerJobDetailDto getPublishedCareer(String tenantSlug, String jobSlug) {
-        PublicCompanyDto company = toCompanyDto(resolveTenant(tenantSlug));
+        PublicCompanyDto company = toCompanyDto(tenantBrandingService.getPublicBranding(tenantSlug));
         String normalizedSlug = SlugUtils.slugify(jobSlug);
         if (normalizedSlug == null) {
             throw new ResourceNotFoundException("Job vacancy not found");
@@ -58,17 +54,12 @@ public class PublicCareersServiceImpl implements PublicCareersService {
         return toDetailDto(company, position);
     }
 
-    private PlatformTenant resolveTenant(String tenantSlug) {
-        return masterTenantLookupService.findBySlug(tenantSlug)
-                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantSlug));
-    }
-
-    private PublicCompanyDto toCompanyDto(PlatformTenant tenant) {
+    private PublicCompanyDto toCompanyDto(TenantBrandingViewDto branding) {
         return PublicCompanyDto.builder()
-                .tenantSlug(tenant.getSlug())
-                .companyName(tenant.getCompanyName())
-                .logoUrl(fileStorageService.toPublicBrandingUrl(tenant.getLogoFileReference()))
-                .about("Explore current opportunities at " + tenant.getCompanyName() + ".")
+                .tenantSlug(branding.tenantSlug())
+                .companyName(branding.companyName())
+                .logoUrl(branding.logo() == null ? null : branding.logo().url())
+                .about("Explore current opportunities at " + branding.companyName() + ".")
                 .build();
     }
 

@@ -12,6 +12,8 @@ public interface StorageProvider {
     void write(String tenantSlug, String relativePath, byte[] content);
     Resource read(String tenantSlug, String relativePath);
     boolean exists(String tenantSlug, String relativePath);
+    boolean hashMatches(String tenantSlug, String relativePath, String expectedSha256);
     void delete(String tenantSlug, String relativePath);
+    List<StoredObjectDescriptor> listObjects(String tenantSlug, String relativePrefix);
     Path localTenantRoot();
 }

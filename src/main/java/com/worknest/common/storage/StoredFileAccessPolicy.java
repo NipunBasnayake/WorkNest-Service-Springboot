@@ -101,7 +101,7 @@ public class StoredFileAccessPolicy {
             case ANNOUNCEMENT_ATTACHMENT -> requireAnnouncementAccess(entityId, write);
             case LEAVE_ATTACHMENT -> requireLeaveAccess(entityId, write);
             case CHAT_ATTACHMENT -> requireChatAccess(file, write);
-            case DOCUMENT, TEMPORARY -> {
+            case IMAGE, DOCUMENT, TEMPORARY -> {
                 if (!owner) throw denied();
             }
         }
@@ -110,8 +110,10 @@ public class StoredFileAccessPolicy {
     private void requireEmployeeAvatarAccess(Long employeeId, boolean owner, boolean write) {
         Employee current = authorizationService.getCurrentEmployeeOrNull();
         boolean self = current != null && current.getId().equals(employeeId);
-        if (write && !owner && !self && !authorizationService.hasPermission(Permission.MANAGE_EMPLOYEE)) throw denied();
-        if (!write && !self && !authorizationService.hasPermission(Permission.VIEW_EMPLOYEE)) throw denied();
+        // Tenant resolution plus the tenant persistence unit already isolate the row.
+        // Any authenticated employee may read a coworker's avatar for collaboration UI.
+        if (!write) return;
+        if (!owner && !self && !authorizationService.hasPermission(Permission.MANAGE_EMPLOYEE)) throw denied();
     }
 
     private void requireTaskAccess(Long taskId, boolean write) {

@@ -9,6 +9,7 @@ public enum StorageCategory {
     WORKSPACE_LOGO(List.of("companies", "logos"), FileFamily.IMAGE),
     WORKSPACE_BANNER(List.of("companies", "banners"), FileFamily.IMAGE),
     EMPLOYEE_AVATAR(List.of("employees", "photos"), FileFamily.IMAGE),
+    IMAGE(List.of("images"), FileFamily.IMAGE),
     PROJECT_ATTACHMENT(List.of("projects", "attachments"), FileFamily.ANY),
     TASK_ATTACHMENT(List.of("tasks", "attachments"), FileFamily.ANY),
     ANNOUNCEMENT_ATTACHMENT(List.of("announcements", "attachments"), FileFamily.ANY),
@@ -38,16 +39,16 @@ public enum StorageCategory {
         return fileFamily == FileFamily.DOCUMENT || fileFamily == FileFamily.ANY;
     }
 
-    public static StorageCategory fromLegacyType(String type) {
+    public static StorageCategory fromType(String type) {
         String normalized = type == null ? "" : type.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "image" -> EMPLOYEE_AVATAR;
+            case "image" -> IMAGE;
             case "doc", "document" -> DOCUMENT;
             default -> throw new BadRequestException("Storage type must be 'image' or 'doc'");
         };
     }
 
-    public static StorageCategory fromClientValue(String category, String folder, String legacyType) {
+    public static StorageCategory fromClientValue(String category, String folder, String type) {
         String normalizedCategory = category == null ? "" : category.trim().replace('-', '_').toUpperCase(Locale.ROOT);
         if (!normalizedCategory.isBlank()) {
             try {
@@ -65,7 +66,7 @@ public enum StorageCategory {
         if (normalizedFolder.startsWith("recruitment/")) return CANDIDATE_RESUME;
         if (normalizedFolder.contains("avatar") || normalizedFolder.startsWith("employees/")) return EMPLOYEE_AVATAR;
         if (normalizedFolder.contains("logo")) return WORKSPACE_LOGO;
-        return fromLegacyType(legacyType);
+        return fromType(type);
     }
 
     private enum FileFamily {

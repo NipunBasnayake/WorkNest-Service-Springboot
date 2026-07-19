@@ -60,12 +60,9 @@ public class TenantHibernateConfig {
         // Multi-tenancy configuration (Hibernate 6.x style)
         jpaPropertiesMap.put(MultiTenancySettings.MULTI_TENANT_CONNECTION_PROVIDER, multiTenantConnectionProvider);
         jpaPropertiesMap.put(MultiTenancySettings.MULTI_TENANT_IDENTIFIER_RESOLVER, tenantIdentifierResolver);
-        jpaPropertiesMap.put("hibernate.multiTenancy", "DATABASE");
-
         // Additional Hibernate settings (configurable via application.yml / env vars)
         jpaPropertiesMap.put(JdbcSettings.FORMAT_SQL, formatSql);
         jpaPropertiesMap.put(JdbcSettings.SHOW_SQL, showSql);
-        jpaPropertiesMap.put("hibernate.dialect", "org.hibernate.dialect.MySQLDialect");
         jpaPropertiesMap.put("hibernate.hbm2ddl.auto", ddlAuto);
 
         em.setJpaPropertyMap(jpaPropertiesMap);

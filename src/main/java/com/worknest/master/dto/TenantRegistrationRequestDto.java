@@ -36,4 +36,7 @@ public class TenantRegistrationRequestDto {
     @NotBlank(message = "Tenant admin password is required")
     @Size(min = 8, max = 100, message = "Tenant admin password must be between 8 and 100 characters")
     private String adminPassword;
+
+    @Pattern(regexp = "^#[0-9A-Fa-f]{6}$", message = "Primary color must use #RRGGBB format")
+    private String primaryColor;
 }

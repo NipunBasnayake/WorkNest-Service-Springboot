@@ -28,6 +28,9 @@ class TenantHibernateConfigTest {
         );
 
         assertThat(factoryBean.getDataSource()).isNull();
+        assertThat(factoryBean.getJpaPropertyMap())
+                .containsEntry("hibernate.hbm2ddl.auto", "none")
+                .doesNotContainKeys("hibernate.multiTenancy", "hibernate.dialect");
     }
 
     @SuppressWarnings("unchecked")

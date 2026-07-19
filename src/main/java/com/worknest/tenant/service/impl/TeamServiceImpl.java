@@ -458,7 +458,7 @@ public class TeamServiceImpl implements TeamService {
                 .email(employee.getEmail())
                 .designation(employee.getDesignation())
                 .jobTitle(employee.getDesignation())
-                .avatar(null)
+                .avatar(tenantDtoMapper.toEmployeeSimple(employee).getAvatarUrl())
                 .teamRole(teamMember.getFunctionalRole())
                 .active(employee.getStatus() == UserStatus.ACTIVE)
                 .build();

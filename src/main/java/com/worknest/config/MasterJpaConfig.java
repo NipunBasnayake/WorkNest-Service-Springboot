@@ -41,7 +41,6 @@ public class MasterJpaConfig {
         Map<String, Object> props = new HashMap<>();
         props.put(JdbcSettings.FORMAT_SQL, formatSql);
         props.put(JdbcSettings.SHOW_SQL, showSql);
-        props.put("hibernate.dialect", "org.hibernate.dialect.MySQLDialect");
         props.put("hibernate.hbm2ddl.auto", ddlAuto);
         em.setJpaPropertyMap(props);
 

@@ -33,11 +33,11 @@ public class PublicApplicationSubmittedEmailListener {
                     event.companyName(),
                     event.careersLink());
         } catch (RuntimeException ex) {
-            log.error(
-                    "Application {} was saved, but its confirmation email could not be queued for tenant {}",
+            log.warn(
+                    "Application {} was saved, but its confirmation email could not be queued for tenant {}: {}",
                     event.applicationId(),
                     event.tenantSlug(),
-                    ex);
+                    ex.getMessage());
         } finally {
             restoreTenantContext(previousTenantKey, previousTenantSlug);
         }

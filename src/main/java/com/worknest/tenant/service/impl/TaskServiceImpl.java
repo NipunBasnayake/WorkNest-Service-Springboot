@@ -184,7 +184,7 @@ public class TaskServiceImpl implements TaskService {
         }
 
         Long requestedAssigneeId = resolveRequestedAssignedEmployeeId(requestDto);
-        if (requestDto.getAssignedEmployeeId() != null || requestDto.getAssigneeId() != null) {
+        if (requestDto.hasAssignedEmployeeSelection()) {
             task.setAssignee(resolveRequiredAssignedEmployee(task.getAssignedTeam(), requestedAssigneeId));
             markAssignmentReporter(task, reporter, reporterUserId);
         }
@@ -709,11 +709,11 @@ public class TaskServiceImpl implements TaskService {
 
 
     private Long resolveRequestedAssignedEmployeeId(TaskCreateRequestDto requestDto) {
-        return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
+        return requestDto.resolveAssignedEmployeeId();
     }
 
     private Long resolveRequestedAssignedEmployeeId(TaskUpdateRequestDto requestDto) {
-        return requestDto.getAssignedEmployeeId() != null ? requestDto.getAssignedEmployeeId() : requestDto.getAssigneeId();
+        return requestDto.resolveAssignedEmployeeId();
     }
 
     private Long resolveRequestedAssignedEmployeeId(TaskAssigneeUpdateRequestDto requestDto) {

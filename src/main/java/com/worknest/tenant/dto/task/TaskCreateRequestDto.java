@@ -46,4 +46,8 @@ public class TaskCreateRequestDto {
     private Long createdByEmployeeId;
 
     private LocalDate dueDate;
+
+    public Long resolveAssignedEmployeeId() {
+        return assignedEmployeeId != null ? assignedEmployeeId : assigneeId;
+    }
 }

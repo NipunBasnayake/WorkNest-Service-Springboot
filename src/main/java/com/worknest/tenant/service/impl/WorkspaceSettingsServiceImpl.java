@@ -1,14 +1,8 @@
 package com.worknest.tenant.service.impl;
 
-import com.worknest.common.exception.BadRequestException;
-import com.worknest.common.exception.ResourceNotFoundException;
-import com.worknest.common.storage.FileStorageService;
-import com.worknest.common.storage.StorageCategory;
-import com.worknest.master.entity.PlatformTenant;
-import com.worknest.master.repository.PlatformTenantRepository;
-import com.worknest.master.service.MasterTenantLookupService;
-import com.worknest.security.util.SecurityUtils;
-import com.worknest.tenant.context.MasterTenantContextRunner;
+import com.worknest.master.dto.BrandingUpdateRequestDto;
+import com.worknest.master.dto.TenantBrandingViewDto;
+import com.worknest.master.service.TenantBrandingService;
 import com.worknest.tenant.dto.settings.WorkspaceProfileResponseDto;
 import com.worknest.tenant.dto.settings.WorkspaceProfileUpdateRequestDto;
 import com.worknest.tenant.service.WorkspaceSettingsService;
@@ -18,86 +12,33 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
 
-    private final SecurityUtils securityUtils;
-    private final MasterTenantLookupService masterTenantLookupService;
-    private final PlatformTenantRepository platformTenantRepository;
-    private final MasterTenantContextRunner masterTenantContextRunner;
-    private final FileStorageService fileStorageService;
+    private final TenantBrandingService tenantBrandingService;
 
-    public WorkspaceSettingsServiceImpl(
-            SecurityUtils securityUtils,
-            MasterTenantLookupService masterTenantLookupService,
-            PlatformTenantRepository platformTenantRepository,
-            MasterTenantContextRunner masterTenantContextRunner,
-            FileStorageService fileStorageService) {
-        this.securityUtils = securityUtils;
-        this.masterTenantLookupService = masterTenantLookupService;
-        this.platformTenantRepository = platformTenantRepository;
-        this.masterTenantContextRunner = masterTenantContextRunner;
-        this.fileStorageService = fileStorageService;
+    public WorkspaceSettingsServiceImpl(TenantBrandingService tenantBrandingService) {
+        this.tenantBrandingService = tenantBrandingService;
     }
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager", readOnly = true)
     public WorkspaceProfileResponseDto getWorkspaceProfile() {
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
-        PlatformTenant tenant = masterTenantLookupService.findByTenantKey(tenantKey)
-                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for key: " + tenantKey));
-        return toWorkspaceProfile(tenant);
+        return toWorkspaceProfile(tenantBrandingService.getCurrentTenantBranding());
     }
 
     @Override
     @Transactional(transactionManager = "masterTransactionManager")
     public WorkspaceProfileResponseDto updateWorkspaceProfile(WorkspaceProfileUpdateRequestDto requestDto) {
-        String tenantKey = securityUtils.getCurrentTenantKeyOrThrow();
-        String companyName = normalizeCompanyName(requestDto.getCompanyName());
-
-        return masterTenantContextRunner.runInMasterContext(() -> {
-            PlatformTenant tenant = platformTenantRepository.findByTenantKey(tenantKey)
-                    .orElseThrow(() -> new ResourceNotFoundException("Tenant not found for key: " + tenantKey));
-
-            if (!tenant.getCompanyName().equalsIgnoreCase(companyName)
-                    && platformTenantRepository.existsByCompanyNameIgnoreCase(companyName)) {
-                throw new BadRequestException("Company name is already registered: " + companyName);
-            }
-
-            tenant.setCompanyName(companyName);
-            String requestedLogo = trimToNull(requestDto.getLogoUrl());
-            if (requestedLogo != null) {
-                tenant.setLogoFileReference(fileStorageService.normalizeStoredReference(requestedLogo));
-            }
-            PlatformTenant updated = platformTenantRepository.save(tenant);
-            if (requestedLogo != null) {
-                fileStorageService.claimAndLink(
-                        updated.getLogoFileReference(),
-                        "WORKSPACE",
-                        updated.getId(),
-                        StorageCategory.WORKSPACE_LOGO);
-            }
-            return toWorkspaceProfile(updated);
-        });
+        BrandingUpdateRequestDto brandingUpdate = new BrandingUpdateRequestDto();
+        brandingUpdate.setCompanyName(requestDto.getCompanyName());
+        return toWorkspaceProfile(tenantBrandingService.updateCurrentTenantBranding(brandingUpdate, null));
     }
 
-    private WorkspaceProfileResponseDto toWorkspaceProfile(PlatformTenant tenant) {
+    private WorkspaceProfileResponseDto toWorkspaceProfile(TenantBrandingViewDto branding) {
         return WorkspaceProfileResponseDto.builder()
-                .tenantKey(tenant.getTenantKey())
-                .companyName(tenant.getCompanyName())
-                .logoUrl(fileStorageService.toPublicUrl(tenant.getLogoFileReference()))
-                .status(tenant.getStatus())
+                .tenantKey(branding.tenantKey())
+                .companyName(branding.companyName())
+                .logoUrl(branding.logo() == null ? null : branding.logo().url())
+                .status(branding.status())
                 .build();
     }
 
-    private String normalizeCompanyName(String companyName) {
-        String normalized = companyName == null ? null : companyName.trim();
-        if (normalized == null || normalized.isBlank()) {
-            throw new BadRequestException("Company name is required");
-        }
-        return normalized;
-    }
-
-    private String trimToNull(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
 }

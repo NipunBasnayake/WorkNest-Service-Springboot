@@ -34,7 +34,6 @@ public class StartupSecretsValidator implements CommandLineRunner {
     private final String mailHost;
     private final String mailUsername;
     private final String mailPassword;
-    private final String ddlAuto;
 
     public StartupSecretsValidator(
             Environment environment,
@@ -44,8 +43,7 @@ public class StartupSecretsValidator implements CommandLineRunner {
             @Value("${app.jwt.secret:}") String jwtSecret,
             @Value("${spring.mail.host:}") String mailHost,
             @Value("${spring.mail.username:}") String mailUsername,
-            @Value("${spring.mail.password:}") String mailPassword,
-            @Value("${spring.jpa.hibernate.ddl-auto:}") String ddlAuto) {
+            @Value("${spring.mail.password:}") String mailPassword) {
         this.environment = environment;
         this.datasourceUrl = datasourceUrl;
         this.datasourceUsername = datasourceUsername;
@@ -54,7 +52,6 @@ public class StartupSecretsValidator implements CommandLineRunner {
         this.mailHost = mailHost;
         this.mailUsername = mailUsername;
         this.mailPassword = mailPassword;
-        this.ddlAuto = ddlAuto;
     }
 
     @Override
@@ -72,10 +69,6 @@ public class StartupSecretsValidator implements CommandLineRunner {
             requireNonBlank(mailHost, "spring.mail.host");
             requireNonBlank(mailUsername, "spring.mail.username");
             requireNonBlank(mailPassword, "spring.mail.password");
-        }
-
-        if ("update".equalsIgnoreCase(trimToEmpty(ddlAuto))) {
-            throw new IllegalStateException("spring.jpa.hibernate.ddl-auto=update is not allowed in production profile");
         }
 
         rejectWeakPlaceholder(jwtSecret, "app.jwt.secret");
@@ -117,4 +110,3 @@ public class StartupSecretsValidator implements CommandLineRunner {
         return value == null ? "" : value.trim();
     }
 }
-

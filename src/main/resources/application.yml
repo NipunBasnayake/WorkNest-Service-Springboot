@@ -9,18 +9,18 @@ spring:
     enabled: false
 
   datasource:
-    url: jdbc:mysql://localhost:3306/platform_master?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-    username: root
-    password: 1234
+    url: ${DB_URL:jdbc:mysql://localhost:3306/platform_master?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:1234}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       register-mbeans: false
 
   mail:
-    host: smtp.gmail.com
-    port: 587
-    username: nipunsathsara1999@gmail.com
-    password: ljwd rzec csus prje xxxx
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
@@ -39,7 +39,6 @@ spring:
     properties:
       hibernate:
         format_sql: false
-        dialect: org.hibernate.dialect.MySQLDialect
 
   jackson:
     serialization:
@@ -69,6 +68,12 @@ storage:
     - xlsx
     - pptx
     - zip
+  reconciliation:
+    enabled: true
+    cron: "0 17 3 * * *"
+    time-zone: UTC
+    superseded-retention: P7D
+    orphan-grace: PT24H
 logging:
   pattern:
     level: "%5p [tenant:%X{tenantId:-na}]"
@@ -80,7 +85,7 @@ logging:
     org.springframework.security: INFO
     org.springframework.web.socket: INFO
     org.springframework.messaging: INFO
-    com.worknest: DEBUG
+    com.worknest: INFO
     com.worknest.tenant.filter: INFO
     com.worknest.tenant.resolver: INFO
     com.worknest.tenant.connection: INFO
@@ -135,7 +140,8 @@ app:
       - http://localhost:3000
       - http://localhost:5173
   email:
-    from: noreply@example.com
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:noreply@example.com}
     executor:
       core-pool-size: 2
       max-pool-size: 10
@@ -171,6 +177,10 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: method
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
   health:
     mail:
-      enabled: true
+      enabled: ${MAIL_HEALTH_ENABLED:${MAIL_ENABLED:false}}

@@ -11,7 +11,9 @@ import com.worknest.multitenancy.context.TenantContextHolder;
 import com.worknest.security.model.PlatformUserPrincipal;
 import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.entity.StoredFileMetadata;
+import com.worknest.tenant.entity.StoredFileVariant;
 import com.worknest.tenant.repository.StoredFileMetadataRepository;
+import com.worknest.tenant.repository.StoredFileVariantRepository;
 import org.springframework.core.io.Resource;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -28,7 +30,9 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
@@ -56,6 +60,9 @@ public class FileStorageService {
     private final StoredFileAccessPolicy storedFileAccessPolicy;
     private final SecurityUtils securityUtils;
     private final MasterTenantLookupService masterTenantLookupService;
+    private final ImageAssetProcessor imageAssetProcessor;
+    private final StoredFileVariantRepository storedFileVariantRepository;
+    private final AssetObservability observability;
 
     public record StoredFileResult(
             String url,
@@ -67,7 +74,7 @@ public class FileStorageService {
             String uploadedAt) {
     }
 
-    public record StoredFileResource(Resource resource, String fileName, String mimeType) {
+    public record StoredFileResource(Resource resource, String fileName, String mimeType, String etag) {
     }
 
     private record ValidatedFile(
@@ -91,13 +98,19 @@ public class FileStorageService {
             StoredFileMetadataRepository storedFileMetadataRepository,
             StoredFileAccessPolicy storedFileAccessPolicy,
             SecurityUtils securityUtils,
-            MasterTenantLookupService masterTenantLookupService) {
+            MasterTenantLookupService masterTenantLookupService,
+            ImageAssetProcessor imageAssetProcessor,
+            StoredFileVariantRepository storedFileVariantRepository,
+            AssetObservability observability) {
         this.storageProperties = storageProperties;
         this.storageProvider = storageProvider;
         this.storedFileMetadataRepository = storedFileMetadataRepository;
         this.storedFileAccessPolicy = storedFileAccessPolicy;
         this.securityUtils = securityUtils;
         this.masterTenantLookupService = masterTenantLookupService;
+        this.imageAssetProcessor = imageAssetProcessor;
+        this.storedFileVariantRepository = storedFileVariantRepository;
+        this.observability = observability;
         createDirectories();
     }
 
@@ -105,12 +118,8 @@ public class FileStorageService {
         return storageProvider.localTenantRoot();
     }
 
-    public StoredFileResult store(MultipartFile file, String type) {
-        return toLegacyResult(store(file, StorageCategory.fromLegacyType(type)));
-    }
-
     public StoredFileResult storeForUpload(MultipartFile file, StorageCategory category) {
-        return toLegacyResult(store(file, category));
+        return toUploadResult(store(file, category));
     }
 
     public StoredFileDto store(MultipartFile file, StorageCategory category, String... pathSegments) {
@@ -209,7 +218,7 @@ public class FileStorageService {
         String relativePath = normalizeStoredName(storedName);
         Resource resource = storageProvider.read(normalizedTenantSlug, relativePath);
         String fileName = fileNameFromStoredName(relativePath);
-        return new StoredFileResource(resource, fileName, detectContentTypeFromName(fileName));
+        return new StoredFileResource(resource, fileName, detectContentTypeFromName(fileName), null);
     }
 
     public String buildPublicUrl(String tenantSlug, String storedName) {
@@ -225,7 +234,13 @@ public class FileStorageService {
     }
 
     public void validateUploadAccess(StorageCategory category) {
-        storedFileAccessPolicy.requireUpload(requireCategory(category));
+        StorageCategory resolvedCategory = requireCategory(category);
+        if (resolvedCategory == StorageCategory.EMPLOYEE_AVATAR
+                || resolvedCategory == StorageCategory.WORKSPACE_LOGO
+                || resolvedCategory == StorageCategory.WORKSPACE_BANNER) {
+            throw new BadRequestException("Identity and branding images must use their owning module endpoint");
+        }
+        storedFileAccessPolicy.requireUpload(resolvedCategory);
     }
 
     public void createDirectories() {
@@ -302,7 +317,7 @@ public class FileStorageService {
         return download(resolveCurrentTenantSlug(), storedReference);
     }
 
-    private StoredFileResult toLegacyResult(StoredFileDto storedFile) {
+    private StoredFileResult toUploadResult(StoredFileDto storedFile) {
         return new StoredFileResult(
                 storedFile.url(),
                 INTERNAL_ID_PREFIX + storedFile.id(),
@@ -323,25 +338,241 @@ public class FileStorageService {
     public StoredFileResource getFileResource(Long id) {
         StoredFileMetadata metadata = getMetadata(id);
         storedFileAccessPolicy.requireRead(metadata);
-        return resource(resolveCurrentTenantSlug(), metadata);
+        String tenantSlug = resolveCurrentTenantSlug();
+        requireIntegrity(tenantSlug, metadata.getRelativePath(), metadata.getSha256());
+        return resource(tenantSlug, metadata);
     }
 
-    public StoredFileResource getPublicBrandingResource(Long id) {
+    public StoredFileResource getFileVariantResource(Long id, String variantName) {
         StoredFileMetadata metadata = getMetadata(id);
-        if (metadata.getStorageCategory() != StorageCategory.WORKSPACE_LOGO
-                && metadata.getStorageCategory() != StorageCategory.WORKSPACE_BANNER) {
-            throw new ResourceNotFoundException("File not found");
+        storedFileAccessPolicy.requireRead(metadata);
+        String normalizedVariant = trimToNull(variantName);
+        if (normalizedVariant == null || !normalizedVariant.matches("[0-9]{2,4}")) {
+            throw new ResourceNotFoundException("File variant not found");
         }
-        if (!"WORKSPACE".equals(metadata.getRelatedModule()) || metadata.getRelatedEntityId() == null) {
-            throw new ResourceNotFoundException("File not found");
+        StoredFileVariant variant = storedFileVariantRepository
+                .findBySourceFileIdAndVariantName(id, normalizedVariant)
+                .orElseThrow(() -> new ResourceNotFoundException("File variant not found"));
+        if (!storageProvider.exists(resolveCurrentTenantSlug(), variant.getRelativePath())) {
+            observability.recordFallback("avatar_variant_missing");
+            throw new ResourceNotFoundException("File variant not found");
         }
-        return resource(resolveCurrentTenantSlug(), metadata);
+        String tenantSlug = resolveCurrentTenantSlug();
+        requireIntegrity(tenantSlug, variant.getRelativePath(), variant.getSha256());
+        return new StoredFileResource(
+                storageProvider.read(tenantSlug, variant.getRelativePath()),
+                "avatar-" + variant.getVariantName() + "." + variant.getExtension(),
+                variant.getContentType(),
+                variant.getSha256() == null ? null : '"' + variant.getSha256() + '"'
+        );
     }
 
-    public String toPublicBrandingUrl(String storedReference) {
-        Long metadataId = parseMetadataId(storedReference);
-        if (metadataId == null) return null;
-        return "/api/public/" + encodePathSegment(resolveCurrentTenantSlug()) + "/branding/" + metadataId;
+    public StoredImageAssetDto storeImageAsset(
+            MultipartFile file,
+            ImageAssetProcessor.Profile profile,
+            StorageCategory category,
+            String relatedModule,
+            Long relatedEntityId) {
+        StorageCategory resolvedCategory = requireCategory(category);
+        if (!resolvedCategory.acceptsImage()) {
+            throw new BadRequestException("Storage category does not accept images");
+        }
+        if (relatedEntityId == null || relatedEntityId <= 0) {
+            throw new BadRequestException("Related entity is required for identity images");
+        }
+        String tenantSlug = requireActiveTenantSlug(resolveCurrentTenantSlug());
+        StoredImageObjectSet stored = storeImageObjects(
+                tenantSlug,
+                file,
+                profile,
+                resolvedCategory,
+                String.valueOf(relatedEntityId)
+        );
+        try {
+            StoredFileMetadata metadata = new StoredFileMetadata();
+            StoredImageObjectSet.StoredImageObject original = stored.original();
+            metadata.setOriginalFilename(stored.originalFilename());
+            metadata.setStoredFilename("original." + original.extension());
+            metadata.setRelativePath(original.relativePath());
+            metadata.setExtension(original.extension());
+            metadata.setContentType(original.contentType());
+            metadata.setFileSize(original.fileSize());
+            metadata.setSha256(original.sha256());
+            metadata.setWidth(original.width());
+            metadata.setHeight(original.height());
+            metadata.setTransformationVersion(stored.transformationVersion());
+            metadata.setUploadedByUserId(currentUserIdOrNull());
+            metadata.setStorageCategory(resolvedCategory);
+            metadata.setRelatedModule(trimToNull(relatedModule));
+            metadata.setRelatedEntityId(relatedEntityId);
+            metadata = storedFileMetadataRepository.save(metadata);
+
+            Map<String, String> variants = new LinkedHashMap<>();
+            for (StoredImageObjectSet.StoredImageObject storedVariant : stored.variants()) {
+                StoredFileVariant variant = new StoredFileVariant();
+                variant.setSourceFile(metadata);
+                variant.setVariantName(storedVariant.name());
+                variant.setRelativePath(storedVariant.relativePath());
+                variant.setExtension(storedVariant.extension());
+                variant.setContentType(storedVariant.contentType());
+                variant.setFileSize(storedVariant.fileSize());
+                variant.setSha256(storedVariant.sha256());
+                variant.setWidth(storedVariant.width());
+                variant.setHeight(storedVariant.height());
+                metadata.addVariant(variant);
+                variants.put(
+                        storedVariant.name(),
+                        buildVariantApiUrl(tenantSlug, metadata.getId(), storedVariant.name())
+                );
+            }
+            storedFileMetadataRepository.save(metadata);
+            return new StoredImageAssetDto(
+                    String.valueOf(metadata.getId()),
+                    buildFileApiUrl(tenantSlug, metadata.getId(), "preview"),
+                    Map.copyOf(variants),
+                    metadata.getWidth(),
+                    metadata.getHeight(),
+                    metadata.getContentType()
+            );
+        } catch (RuntimeException exception) {
+            deleteWrittenPaths(tenantSlug, stored.allPaths());
+            throw exception;
+        }
+    }
+
+    /**
+     * The single image upload pipeline used by tenant assets and master-owned branding assets.
+     * Callers own their database metadata; this method owns validation, decoding, transforms,
+     * provider writes, partial-write cleanup, and transaction rollback cleanup.
+     */
+    public StoredImageObjectSet storeImageObjects(
+            String tenantSlug,
+            MultipartFile file,
+            ImageAssetProcessor.Profile profile,
+            StorageCategory category,
+            String... ownerSegments) {
+        StorageCategory resolvedCategory = requireCategory(category);
+        if (!resolvedCategory.acceptsImage()) {
+            throw new BadRequestException("Storage category does not accept images");
+        }
+        if (profile == null) {
+            throw new BadRequestException("Image processing profile is required");
+        }
+
+        String normalizedTenantSlug = normalizeTenantSlug(tenantSlug);
+        List<String> pathSegments = new ArrayList<>(resolvedCategory.directorySegments());
+        pathSegments.addAll(normalizePathSegments(ownerSegments));
+        String publicId = UUID.randomUUID().toString();
+        pathSegments.add(publicId);
+        String basePath = String.join("/", pathSegments);
+
+        ImageAssetProcessor.ProcessedImage processed = imageAssetProcessor.process(file, profile);
+        storageProvider.initializeTenant(normalizedTenantSlug, List.of(resolvedCategory.directorySegments()));
+        List<String> writtenPaths = new ArrayList<>();
+        try {
+            String originalPath = basePath + "/original." + processed.extension();
+            storageProvider.write(normalizedTenantSlug, originalPath, processed.bytes());
+            writtenPaths.add(originalPath);
+            StoredImageObjectSet.StoredImageObject original = toStoredImageObject(
+                    "original",
+                    originalPath,
+                    processed.extension(),
+                    processed.contentType(),
+                    processed.bytes().length,
+                    processed.sha256(),
+                    processed.width(),
+                    processed.height()
+            );
+
+            List<StoredImageObjectSet.StoredImageObject> variants = new ArrayList<>();
+            for (ImageAssetProcessor.ImageVariant variant : processed.variants()) {
+                String variantPath = basePath + "/" + variant.name() + "." + variant.extension();
+                storageProvider.write(normalizedTenantSlug, variantPath, variant.bytes());
+                writtenPaths.add(variantPath);
+                variants.add(toStoredImageObject(
+                        variant.name(),
+                        variantPath,
+                        variant.extension(),
+                        variant.contentType(),
+                        variant.bytes().length,
+                        variant.sha256(),
+                        variant.width(),
+                        variant.height()
+                ));
+            }
+
+            StoredImageObjectSet stored = new StoredImageObjectSet(
+                    publicId,
+                    processed.originalFilename(),
+                    original,
+                    variants,
+                    2
+            );
+            registerRollbackCleanup(normalizedTenantSlug, stored.allPaths());
+            return stored;
+        } catch (RuntimeException exception) {
+            deleteWrittenPaths(normalizedTenantSlug, writtenPaths);
+            throw exception;
+        }
+    }
+
+    private StoredImageObjectSet.StoredImageObject toStoredImageObject(
+            String name,
+            String relativePath,
+            String extension,
+            String contentType,
+            int fileSize,
+            String sha256,
+            int width,
+            int height) {
+        return new StoredImageObjectSet.StoredImageObject(
+                name,
+                relativePath,
+                extension,
+                contentType,
+                fileSize,
+                sha256,
+                width,
+                height
+        );
+    }
+
+    public void supersedeImageAsset(StoredFileMetadata metadata) {
+        if (metadata == null || !metadata.isActive()) return;
+        metadata.setActive(false);
+        metadata.setLifecycleState("SUPERSEDED");
+        storedFileMetadataRepository.save(metadata);
+    }
+
+    public StoredImageAssetDto toImageAssetDto(StoredFileMetadata metadata, String preferredVariant) {
+        if (metadata == null || !metadata.isActive()) return null;
+        String tenantSlug = resolveCurrentTenantSlug();
+        Map<String, String> variants = new LinkedHashMap<>();
+        storedFileVariantRepository.findBySourceFileIdOrderByWidthAsc(metadata.getId())
+                .forEach(variant -> variants.put(
+                        variant.getVariantName(),
+                        buildVariantApiUrl(tenantSlug, metadata.getId(), variant.getVariantName())
+                ));
+        String url = variants.getOrDefault(
+                preferredVariant,
+                buildFileApiUrl(tenantSlug, metadata.getId(), "preview")
+        );
+        return new StoredImageAssetDto(
+                String.valueOf(metadata.getId()),
+                url,
+                Map.copyOf(variants),
+                metadata.getWidth(),
+                metadata.getHeight(),
+                metadata.getContentType()
+        );
+    }
+
+    public String toImageVariantUrl(StoredFileMetadata metadata, String variant) {
+        if (metadata == null || !metadata.isActive()) return null;
+        if (metadata.getTransformationVersion() == null || metadata.getTransformationVersion() < 2) {
+            return buildFileApiUrl(resolveCurrentTenantSlug(), metadata.getId(), "preview");
+        }
+        return buildVariantApiUrl(resolveCurrentTenantSlug(), metadata.getId(), variant);
     }
 
     public StoredFileDto replace(Long id, MultipartFile file) {
@@ -480,15 +711,15 @@ public class FileStorageService {
     private String detectContentType(String extension, byte[] fileBytes) {
         return switch (extension) {
             case "jpg", "jpeg" -> {
-                validateJpeg(fileBytes);
+                imageAssetProcessor.validateDecoded(fileBytes, extension);
                 yield "image/jpeg";
             }
             case "png" -> {
-                validatePng(fileBytes);
+                imageAssetProcessor.validateDecoded(fileBytes, extension);
                 yield "image/png";
             }
             case "webp" -> {
-                validateWebp(fileBytes);
+                imageAssetProcessor.validateDecoded(fileBytes, extension);
                 yield "image/webp";
             }
             case "pdf" -> {
@@ -697,7 +928,20 @@ public class FileStorageService {
 
     private StoredFileResource resource(String tenantSlug, StoredFileMetadata metadata) {
         Resource resource = storageProvider.read(tenantSlug, metadata.getRelativePath());
-        return new StoredFileResource(resource, metadata.getOriginalFilename(), metadata.getContentType());
+        return new StoredFileResource(
+                resource,
+                metadata.getOriginalFilename(),
+                metadata.getContentType(),
+                metadata.getSha256() == null ? null : '"' + metadata.getSha256() + '"'
+        );
+    }
+
+    private void requireIntegrity(String tenantSlug, String relativePath, String sha256) {
+        if (sha256 == null) return;
+        if (!storageProvider.hashMatches(tenantSlug, relativePath, sha256)) {
+            observability.recordFallback("stored_object_integrity_failure");
+            throw new ResourceNotFoundException("File not found");
+        }
     }
 
     private Long currentUserIdOrNull() {
@@ -709,6 +953,34 @@ public class FileStorageService {
 
     private String buildFileApiUrl(String tenantSlug, Long id, String operation) {
         return "/api/" + encodePathSegment(normalizeTenantSlug(tenantSlug)) + "/files/" + id + "/" + operation;
+    }
+
+    private String buildVariantApiUrl(String tenantSlug, Long id, String variant) {
+        return "/api/" + encodePathSegment(normalizeTenantSlug(tenantSlug)) + "/files/" + id
+                + "/variants/" + encodePathSegment(variant) + "/preview";
+    }
+
+    private void registerRollbackCleanup(String tenantSlug, List<String> paths) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) return;
+        List<String> immutablePaths = List.copyOf(paths);
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int status) {
+                        if (status != STATUS_COMMITTED) deleteWrittenPaths(tenantSlug, immutablePaths);
+                    }
+                }
+        );
+    }
+
+    private void deleteWrittenPaths(String tenantSlug, List<String> paths) {
+        for (String path : paths) {
+            try {
+                storageProvider.delete(tenantSlug, path);
+            } catch (RuntimeException ignored) {
+                // Reconciliation will retry cleanup if provider deletion fails.
+            }
+        }
     }
 
     private Long parseMetadataId(String value) {

@@ -2,6 +2,8 @@ package com.worknest.tenant.service;
 
 import com.worknest.notification.email.EmailContent;
 import com.worknest.notification.email.EmailDispatchService;
+import com.worknest.notification.email.BrandContext;
+import com.worknest.notification.email.BrandContextResolver;
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.tenant.dto.recruitment.RecruitmentEmailLogResponseDto;
 import com.worknest.tenant.dto.recruitment.RecruitmentEmailTemplateResponseDto;
@@ -14,6 +16,7 @@ import com.worknest.tenant.enums.RecruitmentEmailTemplateType;
 import com.worknest.tenant.repository.RecruitmentEmailLogRepository;
 import com.worknest.tenant.repository.RecruitmentEmailTemplateRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.format.DateTimeFormatter;
@@ -40,14 +43,25 @@ public class RecruitmentEmailTemplateService {
     private final RecruitmentEmailTemplateRepository templateRepository;
     private final RecruitmentEmailLogRepository logRepository;
     private final EmailDispatchService emailDispatchService;
+    private final BrandContextResolver brandContextResolver;
+
+    @Autowired
+    public RecruitmentEmailTemplateService(
+            RecruitmentEmailTemplateRepository templateRepository,
+            RecruitmentEmailLogRepository logRepository,
+            EmailDispatchService emailDispatchService,
+            BrandContextResolver brandContextResolver) {
+        this.templateRepository = templateRepository;
+        this.logRepository = logRepository;
+        this.emailDispatchService = emailDispatchService;
+        this.brandContextResolver = brandContextResolver;
+    }
 
     public RecruitmentEmailTemplateService(
             RecruitmentEmailTemplateRepository templateRepository,
             RecruitmentEmailLogRepository logRepository,
             EmailDispatchService emailDispatchService) {
-        this.templateRepository = templateRepository;
-        this.logRepository = logRepository;
-        this.emailDispatchService = emailDispatchService;
+        this(templateRepository, logRepository, emailDispatchService, null);
     }
 
     public List<RecruitmentEmailTemplateResponseDto> listTemplates() {
@@ -82,7 +96,7 @@ public class RecruitmentEmailTemplateService {
         Map<String, String> variables = buildVariables(application, companyName, careersLink, interview);
         String subject = replaceVariables(template.getSubject(), variables);
         String body = replaceVariables(template.getBodyMarkdown(), variables);
-        EmailContent email = new EmailContent(subject, wrapEmail(subject, renderMarkdown(body), companyName));
+        EmailContent email = new EmailContent(subject, wrapEmail(subject, renderMarkdown(body), resolveBrand(companyName)));
         emailDispatchService.sendHtmlEmailAsync(application.getCandidate().getEmail(), email);
 
         RecruitmentEmailLog log = new RecruitmentEmailLog();
@@ -225,12 +239,34 @@ public class RecruitmentEmailTemplateService {
         return linked.toString();
     }
 
-    private String wrapEmail(String subject, String content, String companyName) {
+    private String wrapEmail(String subject, String content, BrandContext brand) {
+        String logo = brand.logoUrl() == null || brand.logoUrl().isBlank() ? ""
+                : "<img src=\"" + escape(brand.logoUrl()) + "\" alt=\"" + escape(brand.companyName())
+                + " logo\" width=\"160\" style=\"display:block;max-width:160px;max-height:48px;width:auto;height:auto;margin-bottom:10px;background:#fff;border-radius:8px;padding:4px\"/>";
         return "<!doctype html><html><body style=\"margin:0;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a\">"
                 + "<div style=\"max-width:640px;margin:24px auto;padding:0 16px\"><div style=\"background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden\">"
-                + "<div style=\"padding:22px 28px;background:#6d28d9;color:#fff\"><strong>" + escape(companyName) + "</strong></div>"
+                + "<div style=\"padding:22px 28px;background:" + escape(brand.primaryColor()) + ";color:" + emailForeground(brand.primaryColor()) + "\">"
+                + logo + "<strong>" + escape(brand.companyName()) + "</strong></div>"
                 + "<div style=\"padding:28px;line-height:1.65\">" + content + "</div></div>"
                 + "<p style=\"text-align:center;color:#64748b;font-size:12px\">Sent through WorkNest · " + escape(subject) + "</p></div></body></html>";
+    }
+
+    private BrandContext resolveBrand(String companyName) {
+        BrandContext resolved = brandContextResolver == null
+                ? BrandContext.workNest()
+                : brandContextResolver.resolveCurrentTenantOrDefault();
+        if (!"WorkNest".equals(resolved.companyName()) || companyName == null || companyName.isBlank()) {
+            return resolved;
+        }
+        return new BrandContext(companyName.trim(), "#9332EA", null, true);
+    }
+
+    private String emailForeground(String hexColor) {
+        if (hexColor == null || !hexColor.matches("^#[0-9A-Fa-f]{6}$")) return "#FFFFFF";
+        int red = Integer.parseInt(hexColor.substring(1, 3), 16);
+        int green = Integer.parseInt(hexColor.substring(3, 5), 16);
+        int blue = Integer.parseInt(hexColor.substring(5, 7), 16);
+        return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? "#111827" : "#FFFFFF";
     }
 
     private String escape(String value) {

@@ -55,7 +55,7 @@ public class MasterDataSourceConfig {
     public DataSource masterDataSource() {
         validateMasterDataSourceProperties();
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(masterDbUrl);
+        config.setJdbcUrl(MySqlDataSourceSupport.withSafeZeroDateHandling(masterDbUrl));
         config.setUsername(masterDbUsername);
         config.setPassword(masterDbPassword);
         config.setDriverClassName(driverClassName);
@@ -71,6 +71,7 @@ public class MasterDataSourceConfig {
         }
         config.setPoolName("WorkNestMasterPool");
         config.setRegisterMbeans(false);
+        config.setConnectionInitSql(MySqlDataSourceSupport.STRICT_DATE_CONNECTION_INIT_SQL);
 
         return new HikariDataSource(config);
     }
@@ -96,4 +97,3 @@ public class MasterDataSourceConfig {
         }
     }
 }
-

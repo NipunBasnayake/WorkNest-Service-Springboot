@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,5 +63,32 @@ class LocalStorageProviderTest {
                 .isEqualTo("globex".getBytes(StandardCharsets.UTF_8));
         assertThat(Files.readString(temporaryDirectory.resolve("storage/tenants/acme/tasks/attachments/brief.pdf")))
                 .isEqualTo("acme");
+    }
+
+    @Test
+    void verifiesStoredObjectIntegrityWithoutCrossTenantReads() throws Exception {
+        byte[] content = "trusted-logo".getBytes(StandardCharsets.UTF_8);
+        provider.write("acme", "companies/logos/logo.png", content);
+        String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+
+        assertThat(provider.hashMatches("acme", "companies/logos/logo.png", sha256)).isTrue();
+        assertThat(provider.hashMatches("acme", "companies/logos/logo.png", "0".repeat(64))).isFalse();
+        assertThat(provider.hashMatches("acme", "companies/logos/missing.png", sha256)).isFalse();
+    }
+
+    @Test
+    void listsOnlyObjectsInsideRequestedTenantPrefix() {
+        provider.write("acme", "companies/logos/a/original.png", new byte[] {1, 2, 3});
+        provider.write("acme", "employees/photos/1/avatar.png", new byte[] {4});
+        provider.initializeTenant("other", categories);
+        provider.write("other", "companies/logos/b/original.png", new byte[] {5});
+
+        List<StoredObjectDescriptor> objects = provider.listObjects("acme", "companies/logos");
+
+        assertThat(objects).singleElement().satisfies(object -> {
+            assertThat(object.relativePath()).isEqualTo("companies/logos/a/original.png");
+            assertThat(object.size()).isEqualTo(3);
+            assertThat(object.lastModified()).isNotNull();
+        });
     }
 }

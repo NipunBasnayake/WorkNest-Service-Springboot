@@ -32,4 +32,12 @@ public class TaskUpdateRequestDto {
     private Long assigneeId;
 
     private LocalDate dueDate;
+
+    public Long resolveAssignedEmployeeId() {
+        return assignedEmployeeId != null ? assignedEmployeeId : assigneeId;
+    }
+
+    public boolean hasAssignedEmployeeSelection() {
+        return assignedEmployeeId != null || assigneeId != null;
+    }
 }

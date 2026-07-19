@@ -45,6 +45,10 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
          * subsequent tenant queries.
          */
         DataSource tenantDataSource = tenantDataSourceService.getDataSource(tenant.getTenantKey());
+        updateHibernateSchema(tenant, tenantDataSource);
+    }
+
+    private void updateHibernateSchema(PlatformTenant tenant, DataSource tenantDataSource) {
 
         LocalContainerEntityManagerFactoryBean em = new LocalContainerEntityManagerFactoryBean();
         try {
@@ -56,7 +60,6 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
             Map<String, Object> jpaProps = new HashMap<>();
             jpaProps.put(JdbcSettings.SHOW_SQL, showSql);
             jpaProps.put(JdbcSettings.FORMAT_SQL, formatSql);
-            jpaProps.put("hibernate.dialect", "org.hibernate.dialect.MySQLDialect");
             jpaProps.put("hibernate.hbm2ddl.auto", ddlAuto);
             em.setJpaPropertyMap(jpaProps);
 
@@ -74,4 +77,5 @@ public class TenantSchemaServiceImpl implements TenantSchemaService {
             /* Do NOT close the DataSource here — it is cached and reused. */
         }
     }
+
 }

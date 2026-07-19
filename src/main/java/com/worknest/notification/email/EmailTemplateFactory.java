@@ -13,6 +13,11 @@ public class EmailTemplateFactory {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private final BrandContextResolver brandContextResolver;
+
+    public EmailTemplateFactory(BrandContextResolver brandContextResolver) {
+        this.brandContextResolver = brandContextResolver;
+    }
 
     public EmailContent passwordResetLink(
             String fullName,
@@ -421,6 +426,7 @@ public class EmailTemplateFactory {
             String fullName,
             Map<String, String> details,
             String footerNote) {
+        BrandContext brand = brandContextResolver.resolveCurrentTenantOrDefault();
         StringBuilder detailsRows = new StringBuilder();
         for (Map.Entry<String, String> entry : details.entrySet()) {
             detailsRows.append("<tr><td style=\"padding:8px 0;color:#4a5568;font-size:14px;\">")
@@ -441,8 +447,9 @@ public class EmailTemplateFactory {
                 <body style="margin:0;padding:0;background:#f5f7fb;font-family:Segoe UI,Arial,sans-serif;color:#1a202c;">
                   <div style="max-width:640px;margin:24px auto;padding:0 16px;">
                     <div style="background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;">
-                      <div style="padding:24px 24px 12px 24px;background:#0f172a;color:#ffffff;">
-                        <p style="margin:0;font-size:12px;opacity:0.8;">%s</p>
+                      <div style="padding:24px 24px 16px 24px;background:%s;color:%s;">
+                        %s
+                        <p style="margin:8px 0 0 0;font-size:12px;opacity:0.85;">%s</p>
                         <h1 style="margin:8px 0 0 0;font-size:22px;line-height:1.2;">%s</h1>
                       </div>
                       <div style="padding:24px;">
@@ -451,20 +458,41 @@ public class EmailTemplateFactory {
                         <p style="margin:16px 0 0 0;font-size:13px;color:#4a5568;">%s</p>
                       </div>
                     </div>
-                    <p style="text-align:center;color:#718096;font-size:12px;margin:12px 0 0 0;">WorkNest Notification</p>
+                    <p style="text-align:center;color:#718096;font-size:12px;margin:12px 0 0 0;">%s</p>
                   </div>
                 </body>
                 </html>
                 """.formatted(
                 escape(subject),
+                escape(brand.primaryColor()),
+                emailForeground(brand.primaryColor()),
+                emailBrandMark(brand),
                 escape(preheader),
                 escape(heading),
                 escapeOrDash(fullName),
                 detailsRows,
-                escapeOrDash(footerNote)
+                escapeOrDash(footerNote),
+                escape(brand.companyName() + (brand.poweredByWorkNest() ? " · Powered by WorkNest" : " Notification"))
         );
 
         return new EmailContent(subject, html);
+    }
+
+    private String emailBrandMark(BrandContext brand) {
+        String logo = brand.logoUrl() == null || brand.logoUrl().isBlank()
+                ? ""
+                : "<img src=\"" + escape(brand.logoUrl()) + "\" alt=\"" + escape(brand.companyName())
+                + " logo\" width=\"160\" style=\"display:block;max-width:160px;max-height:48px;width:auto;height:auto;margin:0 0 10px 0;object-fit:contain;background:#ffffff;border-radius:8px;padding:4px;\"/>";
+        return logo + "<strong style=\"font-size:16px;\">" + escape(brand.companyName()) + "</strong>";
+    }
+
+    private String emailForeground(String hexColor) {
+        if (hexColor == null || !hexColor.matches("^#[0-9A-Fa-f]{6}$")) return "#FFFFFF";
+        int red = Integer.parseInt(hexColor.substring(1, 3), 16);
+        int green = Integer.parseInt(hexColor.substring(3, 5), 16);
+        int blue = Integer.parseInt(hexColor.substring(5, 7), 16);
+        double brightness = (red * 299 + green * 587 + blue * 114) / 1000.0;
+        return brightness > 150 ? "#111827" : "#FFFFFF";
     }
 
     private String safeSubjectSuffix(String value) {

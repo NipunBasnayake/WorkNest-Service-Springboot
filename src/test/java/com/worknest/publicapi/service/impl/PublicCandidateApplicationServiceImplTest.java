@@ -7,7 +7,9 @@ import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.storage.StorageCategory;
 import com.worknest.common.storage.StoredFileDto;
 import com.worknest.master.entity.PlatformTenant;
+import com.worknest.master.dto.TenantBrandingViewDto;
 import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.master.service.TenantBrandingService;
 import com.worknest.publicapi.dto.PublicApplicationRequestDto;
 import com.worknest.publicapi.dto.PublicApplicationResponseDto;
 import com.worknest.publicapi.event.PublicApplicationSubmittedEvent;
@@ -40,6 +42,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +58,7 @@ class PublicCandidateApplicationServiceImplTest {
     @Mock private NotificationService notificationService;
     @Mock private AuditLogService auditLogService;
     @Mock private MasterTenantLookupService masterTenantLookupService;
+    @Mock private TenantBrandingService tenantBrandingService;
     @Mock private RecruitmentApplicationEventRepository applicationEventRepository;
     @Mock private ApplicationEventPublisher applicationEventPublisher;
 
@@ -73,6 +77,7 @@ class PublicCandidateApplicationServiceImplTest {
                 notificationService,
                 auditLogService,
                 masterTenantLookupService,
+                tenantBrandingService,
                 applicationEventRepository,
                 applicationEventPublisher);
 
@@ -80,6 +85,19 @@ class PublicCandidateApplicationServiceImplTest {
         tenant.setTenantKey("tenant-residue");
         tenant.setSlug("residue-solutions");
         tenant.setCompanyName("Residue Solutions");
+        org.mockito.Mockito.lenient().when(tenantBrandingService.getPublicBranding("residue-solutions"))
+                .thenReturn(new TenantBrandingViewDto(
+                        1L,
+                        "tenant-residue",
+                        "residue-solutions",
+                        "Residue Solutions",
+                        "#2563EB",
+                        1L,
+                        1,
+                        null,
+                        com.worknest.common.enums.TenantStatus.ACTIVE,
+                        LocalDateTime.of(2026, 7, 16, 1, 0)
+                ));
 
         job = new JobPosition();
         job.setId(12L);
@@ -137,7 +155,7 @@ class PublicCandidateApplicationServiceImplTest {
         assertThatThrownBy(() -> service.apply("residue-solutions", "software-engineer", request))
                 .isInstanceOf(DuplicateApplicationException.class)
                 .hasMessage("You already have an active application for this vacancy");
-        verify(fileStorageService, never()).store(any(), any(String.class));
+        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
     }
 
     @Test
@@ -158,7 +176,7 @@ class PublicCandidateApplicationServiceImplTest {
         assertThatThrownBy(() -> service.apply("residue-solutions", "missing-job", request("resume.pdf")))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessage("Job vacancy not found");
-        verify(fileStorageService, never()).store(any(), any(String.class));
+        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
     }
 
     @Test

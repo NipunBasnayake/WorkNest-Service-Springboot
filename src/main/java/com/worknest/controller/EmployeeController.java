@@ -6,22 +6,27 @@ import com.worknest.common.enums.UserStatus;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.employee.*;
 import com.worknest.tenant.service.EmployeeService;
+import com.worknest.tenant.service.EmployeeAvatarService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/employees")
 public class EmployeeController {
 
     private final EmployeeService employeeService;
+    private final EmployeeAvatarService employeeAvatarService;
 
-    public EmployeeController(EmployeeService employeeService) {
+    public EmployeeController(EmployeeService employeeService, EmployeeAvatarService employeeAvatarService) {
         this.employeeService = employeeService;
+        this.employeeAvatarService = employeeAvatarService;
     }
 
     @PostMapping
@@ -87,6 +92,45 @@ public class EmployeeController {
             @Valid @RequestBody EmployeeSelfUpdateDto requestDto) {
         EmployeeResponseDto responseDto = employeeService.updateMyProfile(requestDto);
         return ResponseEntity.ok(ApiResponse.success("Employee profile updated", responseDto));
+    }
+
+    @PutMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<EmployeeAvatarDto>> uploadMyAvatar(
+            @RequestPart("file") MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Profile picture updated successfully",
+                employeeAvatarService.uploadOwnAvatar(file)
+        ));
+    }
+
+    @DeleteMapping("/me/avatar")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<ApiResponse<EmployeeAvatarDto>> deleteMyAvatar() {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Profile picture removed successfully",
+                employeeAvatarService.deleteOwnAvatar()
+        ));
+    }
+
+    @PutMapping(value = "/{id:\\d+}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeAvatarDto>> uploadEmployeeAvatar(
+            @PathVariable("id") Long id,
+            @RequestPart("file") MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Employee profile picture updated successfully",
+                employeeAvatarService.uploadManagedAvatar(id, file)
+        ));
+    }
+
+    @DeleteMapping("/{id:\\d+}/avatar")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<EmployeeAvatarDto>> deleteEmployeeAvatar(@PathVariable("id") Long id) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Employee profile picture removed successfully",
+                employeeAvatarService.deleteManagedAvatar(id)
+        ));
     }
 
     @PostMapping("/{id:\\d+}/provision-account")

@@ -10,7 +10,9 @@ import com.worknest.common.storage.StorageCategory;
 import com.worknest.common.storage.StoredFileDto;
 import com.worknest.common.util.SlugUtils;
 import com.worknest.master.entity.PlatformTenant;
+import com.worknest.master.dto.TenantBrandingViewDto;
 import com.worknest.master.service.MasterTenantLookupService;
+import com.worknest.master.service.TenantBrandingService;
 import com.worknest.publicapi.dto.PublicApplicationRequestDto;
 import com.worknest.publicapi.dto.PublicApplicationResponseDto;
 import com.worknest.publicapi.dto.PublicApplicationStatusDto;
@@ -71,6 +73,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
     private final MasterTenantLookupService masterTenantLookupService;
+    private final TenantBrandingService tenantBrandingService;
     private final RecruitmentApplicationEventRepository applicationEventRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
     @Value("${app.public-web-base-url:http://localhost:5173}")
@@ -85,6 +88,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
             NotificationService notificationService,
             AuditLogService auditLogService,
             MasterTenantLookupService masterTenantLookupService,
+            TenantBrandingService tenantBrandingService,
             RecruitmentApplicationEventRepository applicationEventRepository,
             ApplicationEventPublisher applicationEventPublisher) {
         this.candidateRepository = candidateRepository;
@@ -95,6 +99,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         this.notificationService = notificationService;
         this.auditLogService = auditLogService;
         this.masterTenantLookupService = masterTenantLookupService;
+        this.tenantBrandingService = tenantBrandingService;
         this.applicationEventRepository = applicationEventRepository;
         this.applicationEventPublisher = applicationEventPublisher;
     }
@@ -284,11 +289,12 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     }
 
     private PublicCompanyDto toCompanyDto(PlatformTenant tenant) {
+        TenantBrandingViewDto branding = tenantBrandingService.getPublicBranding(tenant.getSlug());
         return PublicCompanyDto.builder()
-                .tenantSlug(tenant.getSlug())
-                .companyName(tenant.getCompanyName())
-                .logoUrl(fileStorageService.toPublicBrandingUrl(tenant.getLogoFileReference()))
-                .about("Explore current opportunities at " + tenant.getCompanyName() + ".")
+                .tenantSlug(branding.tenantSlug())
+                .companyName(branding.companyName())
+                .logoUrl(branding.logo() == null ? null : branding.logo().url())
+                .about("Explore current opportunities at " + branding.companyName() + ".")
                 .build();
     }
 

@@ -4,6 +4,7 @@ import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.TenantNotFoundException;
 import com.worknest.common.exception.TenantResolutionException;
 import com.worknest.common.util.AppConstants;
+import com.worknest.config.MySqlDataSourceSupport;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.tenant.datasource.TenantDataSourceService;
@@ -124,7 +125,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     @Override
     public DataSource createDataSource(PlatformTenant tenant) {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(tenant.getDbUrl());
+        config.setJdbcUrl(MySqlDataSourceSupport.withSafeZeroDateHandling(tenant.getDbUrl()));
         config.setUsername(tenant.getDbUsername());
         config.setPassword(tenant.getDbPassword());
         config.setDriverClassName("com.mysql.cj.jdbc.Driver");
@@ -140,6 +141,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         }
         config.setPoolName("WorkNestTenantPool-" + tenant.getTenantKey());
         config.setRegisterMbeans(false);
+        config.setConnectionInitSql(MySqlDataSourceSupport.STRICT_DATE_CONNECTION_INIT_SQL);
 
         return new HikariDataSource(config);
     }

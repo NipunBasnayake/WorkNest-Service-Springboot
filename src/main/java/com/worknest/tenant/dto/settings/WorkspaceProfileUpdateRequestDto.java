@@ -13,6 +13,4 @@ public class WorkspaceProfileUpdateRequestDto {
     @Size(max = 255, message = "Company name must not exceed 255 characters")
     private String companyName;
 
-    @Size(max = 1000, message = "Logo file reference must not exceed 1000 characters")
-    private String logoUrl;
 }

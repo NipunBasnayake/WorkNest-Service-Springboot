@@ -81,6 +81,7 @@ public class SecurityConfig {
                                 "/api/auth/reset-password",
                                 "/api/platform/onboarding/tenants",
                                 "/ws/**",
+                                "/ws-sockjs/**",
                                 "/error"
                         )
                 )
@@ -101,7 +102,8 @@ public class SecurityConfig {
                                 "/api/public/**",
                                 "/api/platform/onboarding/tenants",
                                 "/error",
-                                "/ws/**")
+                                "/ws/**",
+                                "/ws-sockjs/**")
                         .permitAll();
 
                     if (publicHealthEnabled) {
@@ -113,6 +115,8 @@ public class SecurityConfig {
                     }
 
                     authorize
+                        .requestMatchers("/actuator/metrics", "/actuator/metrics/**")
+                        .hasRole("PLATFORM_ADMIN")
                         .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
                         .authenticated()
                         .requestMatchers("/api/platform/**")

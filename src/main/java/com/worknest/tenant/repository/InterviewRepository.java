@@ -17,10 +17,12 @@ public interface InterviewRepository extends JpaRepository<Interview, Long>, Jpa
     @EntityGraph(attributePaths = {"application", "application.candidate", "application.jobPosition", "interviewer"})
     Page<Interview> findAll(Specification<Interview> specification, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"application", "application.candidate", "application.jobPosition", "interviewer"})
     List<Interview> findByScheduledAtBetweenOrderByScheduledAtAsc(LocalDateTime from, LocalDateTime to);
 
     List<Interview> findByApplicationCandidateIdOrderByScheduledAtDesc(Long candidateId);
 
+    @EntityGraph(attributePaths = {"application", "application.candidate", "application.jobPosition", "interviewer"})
     List<Interview> findByApplicationIdOrderByScheduledAtDesc(Long applicationId);
 
     @EntityGraph(attributePaths = {"application", "application.candidate", "application.jobPosition"})

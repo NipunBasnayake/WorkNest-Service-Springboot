@@ -24,6 +24,5 @@ public class TenantRegistrationResponseDto {
     private String tenantAdminEmail;
     private String primaryColor;
     private Long brandingVersion;
-    private String logoUrl;
     private LocalDateTime createdAt;
 }

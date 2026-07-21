@@ -240,13 +240,10 @@ public class RecruitmentEmailTemplateService {
     }
 
     private String wrapEmail(String subject, String content, BrandContext brand) {
-        String logo = brand.logoUrl() == null || brand.logoUrl().isBlank() ? ""
-                : "<img src=\"" + escape(brand.logoUrl()) + "\" alt=\"" + escape(brand.companyName())
-                + " logo\" width=\"160\" style=\"display:block;max-width:160px;max-height:48px;width:auto;height:auto;margin-bottom:10px;background:#fff;border-radius:8px;padding:4px\"/>";
         return "<!doctype html><html><body style=\"margin:0;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a\">"
                 + "<div style=\"max-width:640px;margin:24px auto;padding:0 16px\"><div style=\"background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden\">"
                 + "<div style=\"padding:22px 28px;background:" + escape(brand.primaryColor()) + ";color:" + emailForeground(brand.primaryColor()) + "\">"
-                + logo + "<strong>" + escape(brand.companyName()) + "</strong></div>"
+                + "<strong>" + escape(brand.companyName()) + "</strong></div>"
                 + "<div style=\"padding:28px;line-height:1.65\">" + content + "</div></div>"
                 + "<p style=\"text-align:center;color:#64748b;font-size:12px\">Sent through WorkNest · " + escape(subject) + "</p></div></body></html>";
     }
@@ -258,7 +255,7 @@ public class RecruitmentEmailTemplateService {
         if (!"WorkNest".equals(resolved.companyName()) || companyName == null || companyName.isBlank()) {
             return resolved;
         }
-        return new BrandContext(companyName.trim(), "#9332EA", null, true);
+        return new BrandContext(companyName.trim(), "#9332EA");
     }
 
     private String emailForeground(String hexColor) {

@@ -36,7 +36,6 @@ public class WorkspaceSettingsServiceImpl implements WorkspaceSettingsService {
         return WorkspaceProfileResponseDto.builder()
                 .tenantKey(branding.tenantKey())
                 .companyName(branding.companyName())
-                .logoUrl(branding.logo() == null ? null : branding.logo().url())
                 .status(branding.status())
                 .build();
     }

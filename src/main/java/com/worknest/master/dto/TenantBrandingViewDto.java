@@ -11,8 +11,6 @@ public record TenantBrandingViewDto(
         String companyName,
         String primaryColor,
         Long brandingVersion,
-        Integer tokenAlgorithmVersion,
-        BrandingLogoDto logo,
         TenantStatus status,
         LocalDateTime updatedAt) {
 }

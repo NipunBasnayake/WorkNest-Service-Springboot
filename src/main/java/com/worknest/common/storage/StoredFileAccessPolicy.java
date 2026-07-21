@@ -68,7 +68,7 @@ public class StoredFileAccessPolicy {
     public void requireUpload(StorageCategory category) {
         securityUtils.getCurrentPrincipalOrThrow();
         switch (category) {
-            case WORKSPACE_LOGO, WORKSPACE_BANNER -> requirePermission(Permission.MANAGE_TENANT_SETTINGS);
+            case WORKSPACE_BANNER -> requirePermission(Permission.MANAGE_TENANT_SETTINGS);
             case CANDIDATE_RESUME -> requirePermission(Permission.MANAGE_RECRUITMENT);
             case ANNOUNCEMENT_ATTACHMENT -> requirePermission(Permission.SEND_ANNOUNCEMENT);
             case CHAT_ATTACHMENT -> requirePermission(Permission.CHAT_ACCESS);
@@ -92,7 +92,7 @@ public class StoredFileAccessPolicy {
 
         switch (file.getStorageCategory()) {
             case CANDIDATE_RESUME -> requirePermission(write ? Permission.MANAGE_RECRUITMENT : Permission.VIEW_RECRUITMENT);
-            case WORKSPACE_LOGO, WORKSPACE_BANNER -> {
+            case WORKSPACE_BANNER -> {
                 if (write) requirePermission(Permission.MANAGE_TENANT_SETTINGS);
             }
             case EMPLOYEE_AVATAR -> requireEmployeeAvatarAccess(entityId, owner, write);

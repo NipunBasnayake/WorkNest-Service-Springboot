@@ -30,8 +30,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * One decoded-image validation and transformation pipeline shared by master
- * branding assets and tenant-owned employee avatars.
+ * Decoded-image validation and transformation pipeline for employee avatars.
  */
 @Component
 public class ImageAssetProcessor {
@@ -41,15 +40,12 @@ public class ImageAssetProcessor {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
 
     public enum Profile {
-        LOGO(new int[] {64, 128, 256, 512}, false),
-        AVATAR(new int[] {32, 64, 128, 256}, true);
+        AVATAR(new int[] {32, 64, 128, 256});
 
         private final int[] variantSizes;
-        private final boolean squareCrop;
 
-        Profile(int[] variantSizes, boolean squareCrop) {
+        Profile(int[] variantSizes) {
             this.variantSizes = variantSizes;
-            this.squareCrop = squareCrop;
         }
     }
 
@@ -104,9 +100,7 @@ public class ImageAssetProcessor {
             String originalFilename = normalizeFilename(file.getOriginalFilename());
             String extension = extensionOf(originalFilename);
             DecodedImage decoded = decode(source, extension);
-            BufferedImage normalized = profile.squareCrop
-                    ? centerCropSquare(decoded.image())
-                    : decoded.image();
+            BufferedImage normalized = centerCropSquare(decoded.image());
             ProcessedImage processed = buildProcessedImage(originalFilename, normalized, profile);
             success = true;
             return processed;
@@ -128,9 +122,7 @@ public class ImageAssetProcessor {
         byte[] normalizedBytes = encode(image, outputExtension);
         List<ImageVariant> variants = new ArrayList<>();
         for (int size : profile.variantSizes) {
-            BufferedImage variantImage = profile.squareCrop
-                    ? resize(image, size, size)
-                    : resizeContained(image, size);
+            BufferedImage variantImage = resize(image, size, size);
             byte[] variantBytes = encode(variantImage, outputExtension);
             variants.add(new ImageVariant(
                     Integer.toString(size),
@@ -323,13 +315,6 @@ public class ImageAssetProcessor {
         int y = Math.max(0, (source.getHeight() - side) / 2);
         BufferedImage cropped = source.getSubimage(x, y, side, side);
         return toSafeColorModel(cropped);
-    }
-
-    private BufferedImage resizeContained(BufferedImage source, int maxSide) {
-        double scale = Math.min(1d, (double) maxSide / Math.max(source.getWidth(), source.getHeight()));
-        int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
-        int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
-        return resize(source, width, height);
     }
 
     private BufferedImage resize(BufferedImage source, int width, int height) {

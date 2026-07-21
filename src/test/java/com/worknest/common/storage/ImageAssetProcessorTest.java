@@ -36,30 +36,17 @@ class ImageAssetProcessorTest {
     }
 
     @Test
-    void logoPreservesAspectRatioAndNeverUpscalesSmallOriginal() throws Exception {
-        MockMultipartFile file = image("logo.png", "png", 120, 60, true);
-
-        ImageAssetProcessor.ProcessedImage result = processor.process(file, ImageAssetProcessor.Profile.LOGO);
-
-        assertThat(result.contentType()).isEqualTo("image/png");
-        assertThat(result.variants().get(0).width()).isEqualTo(64);
-        assertThat(result.variants().get(0).height()).isEqualTo(32);
-        assertThat(result.variants().get(3).width()).isEqualTo(120);
-        assertThat(result.variants().get(3).height()).isEqualTo(60);
-    }
-
-    @Test
     void appliesJpegExifOrientationBeforeGeneratingVariants() throws Exception {
         byte[] jpeg = imageBytes("jpg", 80, 40, false);
         MockMultipartFile file = new MockMultipartFile(
                 "file", "phone-photo.jpg", "image/jpeg", withExifOrientation(jpeg, 6));
 
-        ImageAssetProcessor.ProcessedImage result = processor.process(file, ImageAssetProcessor.Profile.LOGO);
+        ImageAssetProcessor.ProcessedImage result = processor.process(file, ImageAssetProcessor.Profile.AVATAR);
 
         assertThat(result.width()).isEqualTo(40);
-        assertThat(result.height()).isEqualTo(80);
+        assertThat(result.height()).isEqualTo(40);
         assertThat(result.variants().getFirst().width()).isEqualTo(32);
-        assertThat(result.variants().getFirst().height()).isEqualTo(64);
+        assertThat(result.variants().getFirst().height()).isEqualTo(32);
     }
 
     @Test

@@ -21,7 +21,7 @@ class LocalStorageProviderTest {
 
     private LocalStorageProvider provider;
     private final List<List<String>> categories = List.of(
-            List.of("companies", "logos"),
+            List.of("employees", "photos"),
             List.of("recruitment", "resumes"),
             List.of("tasks", "attachments"));
 
@@ -38,7 +38,7 @@ class LocalStorageProviderTest {
     void createsOrganizedTenantDirectoriesAndRoundTripsAFile() throws Exception {
         provider.write("acme", "recruitment/resumes/resume.pdf", "%PDF-test".getBytes(StandardCharsets.UTF_8));
 
-        assertThat(temporaryDirectory.resolve("storage/tenants/acme/companies/logos")).isDirectory();
+        assertThat(temporaryDirectory.resolve("storage/tenants/acme/employees/photos")).isDirectory();
         assertThat(provider.exists("acme", "recruitment/resumes/resume.pdf")).isTrue();
         assertThat(provider.read("acme", "recruitment/resumes/resume.pdf").getContentAsByteArray())
                 .isEqualTo("%PDF-test".getBytes(StandardCharsets.UTF_8));
@@ -67,26 +67,26 @@ class LocalStorageProviderTest {
 
     @Test
     void verifiesStoredObjectIntegrityWithoutCrossTenantReads() throws Exception {
-        byte[] content = "trusted-logo".getBytes(StandardCharsets.UTF_8);
-        provider.write("acme", "companies/logos/logo.png", content);
+        byte[] content = "trusted-avatar".getBytes(StandardCharsets.UTF_8);
+        provider.write("acme", "employees/photos/avatar.png", content);
         String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
 
-        assertThat(provider.hashMatches("acme", "companies/logos/logo.png", sha256)).isTrue();
-        assertThat(provider.hashMatches("acme", "companies/logos/logo.png", "0".repeat(64))).isFalse();
-        assertThat(provider.hashMatches("acme", "companies/logos/missing.png", sha256)).isFalse();
+        assertThat(provider.hashMatches("acme", "employees/photos/avatar.png", sha256)).isTrue();
+        assertThat(provider.hashMatches("acme", "employees/photos/avatar.png", "0".repeat(64))).isFalse();
+        assertThat(provider.hashMatches("acme", "employees/photos/missing.png", sha256)).isFalse();
     }
 
     @Test
     void listsOnlyObjectsInsideRequestedTenantPrefix() {
-        provider.write("acme", "companies/logos/a/original.png", new byte[] {1, 2, 3});
+        provider.write("acme", "employees/photos/a/original.png", new byte[] {1, 2, 3});
         provider.write("acme", "employees/photos/1/avatar.png", new byte[] {4});
         provider.initializeTenant("other", categories);
-        provider.write("other", "companies/logos/b/original.png", new byte[] {5});
+        provider.write("other", "employees/photos/b/original.png", new byte[] {5});
 
-        List<StoredObjectDescriptor> objects = provider.listObjects("acme", "companies/logos");
+        List<StoredObjectDescriptor> objects = provider.listObjects("acme", "employees/photos/a");
 
         assertThat(objects).singleElement().satisfies(object -> {
-            assertThat(object.relativePath()).isEqualTo("companies/logos/a/original.png");
+            assertThat(object.relativePath()).isEqualTo("employees/photos/a/original.png");
             assertThat(object.size()).isEqualTo(3);
             assertThat(object.lastModified()).isNotNull();
         });

@@ -187,7 +187,7 @@ class AnnouncementServiceImplTest {
 
         when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.TENANT_ADMIN);
         when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(tenantAdmin);
-        when(announcementRepository.findAllByOrderByPinnedDescCreatedAtDesc()).thenReturn(List.of(announcement));
+        when(announcementRepository.findVisibleAnnouncements(20L, true)).thenReturn(List.of(announcement));
 
         List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
 
@@ -196,7 +196,7 @@ class AnnouncementServiceImplTest {
         Assertions.assertThat(results.getFirst().isOwnedByCurrentUser()).isFalse();
         Assertions.assertThat(results.getFirst().isCanEdit()).isTrue();
         Assertions.assertThat(results.getFirst().isCanDelete()).isTrue();
-        verify(announcementRepository).findAllByOrderByPinnedDescCreatedAtDesc();
+        verify(announcementRepository).findVisibleAnnouncements(20L, true);
     }
 
     @Test
@@ -208,7 +208,7 @@ class AnnouncementServiceImplTest {
 
         when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
         when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hrUser);
-        when(announcementRepository.findAllByOrderByPinnedDescCreatedAtDesc()).thenReturn(List.of(ownAnnouncement, otherAnnouncement));
+        when(announcementRepository.findVisibleAnnouncements(30L, true)).thenReturn(List.of(ownAnnouncement, otherAnnouncement));
 
         List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
 
@@ -228,7 +228,7 @@ class AnnouncementServiceImplTest {
 
         when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
         when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(me);
-        when(announcementRepository.findByTeamIsNullOrderByPinnedDescCreatedAtDesc()).thenReturn(List.of(announcement));
+        when(announcementRepository.findVisibleAnnouncements(10L, false)).thenReturn(List.of(announcement));
 
         List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
 
@@ -236,7 +236,7 @@ class AnnouncementServiceImplTest {
         Assertions.assertThat(results.getFirst().getId()).isEqualTo(44L);
         Assertions.assertThat(results.getFirst().isCanEdit()).isFalse();
         Assertions.assertThat(results.getFirst().isCanDelete()).isFalse();
-        verify(announcementRepository).findByTeamIsNullOrderByPinnedDescCreatedAtDesc();
+        verify(announcementRepository).findVisibleAnnouncements(10L, false);
     }
 
     @Test
@@ -254,7 +254,7 @@ class AnnouncementServiceImplTest {
 
         when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
         when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(me);
-        when(announcementRepository.findByTeamIsNullOrderByPinnedDescCreatedAtDesc())
+        when(announcementRepository.findVisibleAnnouncements(10L, false))
                 .thenReturn(List.of(newRegular, oldPinned, newerPinned));
 
         List<AnnouncementResponseDto> results = announcementService.listAnnouncements();

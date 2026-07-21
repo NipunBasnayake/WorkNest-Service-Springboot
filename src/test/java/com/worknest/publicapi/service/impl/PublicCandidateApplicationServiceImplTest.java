@@ -178,6 +178,25 @@ class PublicCandidateApplicationServiceImplTest {
     }
 
     @Test
+    void legacyDottedJobSlugIsResolvedWithoutRewritingBeforeApplicationValidation() {
+        PublicApplicationRequestDto request = request("resume.txt");
+        job.setSlug("business.analyst-2026-7");
+        job.setTitle("Business Analyst");
+        when(masterTenantLookupService.findBySlug("residue-solutions")).thenReturn(Optional.of(tenant));
+        when(jobPositionRepository.findPublishedJobBySlug("business.analyst-2026-7"))
+                .thenReturn(Optional.of(job));
+        when(candidateRepository.findByEmailIgnoreCase("ada@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.apply(
+                "residue-solutions", "Business.Analyst-2026-7", request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Only PDF and DOCX resumes are allowed");
+
+        verify(jobPositionRepository).findPublishedJobBySlug("business.analyst-2026-7");
+        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
+    }
+
+    @Test
     void invalidResumeExtensionIsBadRequest() {
         PublicApplicationRequestDto request = request("resume.txt");
         when(masterTenantLookupService.findBySlug("residue-solutions")).thenReturn(Optional.of(tenant));

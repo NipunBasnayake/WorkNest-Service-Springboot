@@ -236,7 +236,6 @@ public class FileStorageService {
     public void validateUploadAccess(StorageCategory category) {
         StorageCategory resolvedCategory = requireCategory(category);
         if (resolvedCategory == StorageCategory.EMPLOYEE_AVATAR
-                || resolvedCategory == StorageCategory.WORKSPACE_LOGO
                 || resolvedCategory == StorageCategory.WORKSPACE_BANNER) {
             throw new BadRequestException("Identity and branding images must use their owning module endpoint");
         }
@@ -441,7 +440,7 @@ public class FileStorageService {
     }
 
     /**
-     * The single image upload pipeline used by tenant assets and master-owned branding assets.
+     * The single image upload pipeline used by tenant-owned image assets.
      * Callers own their database metadata; this method owns validation, decoding, transforms,
      * provider writes, partial-write cleanup, and transaction rollback cleanup.
      */

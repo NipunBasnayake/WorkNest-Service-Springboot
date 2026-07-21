@@ -472,18 +472,14 @@ public class EmailTemplateFactory {
                 escapeOrDash(fullName),
                 detailsRows,
                 escapeOrDash(footerNote),
-                escape(brand.companyName() + (brand.poweredByWorkNest() ? " · Powered by WorkNest" : " Notification"))
+                escape(brand.companyName() + ("WorkNest".equals(brand.companyName()) ? " Notification" : " · Powered by WorkNest"))
         );
 
         return new EmailContent(subject, html);
     }
 
     private String emailBrandMark(BrandContext brand) {
-        String logo = brand.logoUrl() == null || brand.logoUrl().isBlank()
-                ? ""
-                : "<img src=\"" + escape(brand.logoUrl()) + "\" alt=\"" + escape(brand.companyName())
-                + " logo\" width=\"160\" style=\"display:block;max-width:160px;max-height:48px;width:auto;height:auto;margin:0 0 10px 0;object-fit:contain;background:#ffffff;border-radius:8px;padding:4px;\"/>";
-        return logo + "<strong style=\"font-size:16px;\">" + escape(brand.companyName()) + "</strong>";
+        return "<strong style=\"font-size:16px;\">" + escape(brand.companyName()) + "</strong>";
     }
 
     private String emailForeground(String hexColor) {

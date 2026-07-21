@@ -22,7 +22,6 @@ import com.worknest.tenant.dto.task.TaskStatusUpdateRequestDto;
 import com.worknest.tenant.dto.task.TaskUpdateRequestDto;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Project;
-import com.worknest.tenant.entity.ProjectTeam;
 import com.worknest.tenant.entity.Task;
 import com.worknest.tenant.entity.TaskComment;
 import com.worknest.tenant.entity.Team;
@@ -680,13 +679,10 @@ public class TaskServiceImpl implements TaskService {
             return false;
         }
 
-        return projectTeamRepository.findByProjectId(projectId).stream()
-                .map(ProjectTeam::getTeam)
-                .filter(team -> team != null && team.getId() != null)
-                .anyMatch(team -> teamMemberRepository
-                        .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employeeId)
-                        .map(teamMember -> teamMember.getFunctionalRole() == TeamFunctionalRole.PROJECT_MANAGER)
-                        .orElse(false));
+        return teamMemberRepository.existsActiveLinkedProjectRole(
+                projectId,
+                employeeId,
+                Set.of(TeamFunctionalRole.PROJECT_MANAGER));
     }
 
     private boolean isProjectManagerForTeamProject(Long employeeId, Long teamId) {
@@ -694,10 +690,10 @@ public class TaskServiceImpl implements TaskService {
             return false;
         }
 
-        return projectTeamRepository.findByTeamId(teamId).stream()
-                .map(ProjectTeam::getProject)
-                .filter(project -> project != null && project.getId() != null)
-                .anyMatch(project -> isProjectManagerForProject(employeeId, project.getId()));
+        return teamMemberRepository.existsActiveRoleForProjectsLinkedToTeam(
+                teamId,
+                employeeId,
+                TeamFunctionalRole.PROJECT_MANAGER);
     }
 
     private boolean isAssigneeExecutionStatusTransition(TaskStatus currentStatus, TaskStatus newStatus) {

@@ -38,7 +38,6 @@ public class TenantHibernateConfig {
     public LocalContainerEntityManagerFactoryBean entityManagerFactory(
             MultiTenantConnectionProvider<String> multiTenantConnectionProvider,
             CurrentTenantIdentifierResolver<String> tenantIdentifierResolver,
-            @Value("${app.tenant.jpa.hibernate.ddl-auto:update}") String ddlAuto,
             @Value("${spring.jpa.show-sql:false}") boolean showSql,
             @Value("${spring.jpa.properties.hibernate.format_sql:false}") boolean formatSql) {
 
@@ -63,7 +62,10 @@ public class TenantHibernateConfig {
         // Additional Hibernate settings (configurable via application.yml / env vars)
         jpaPropertiesMap.put(JdbcSettings.FORMAT_SQL, formatSql);
         jpaPropertiesMap.put(JdbcSettings.SHOW_SQL, showSql);
-        jpaPropertiesMap.put("hibernate.hbm2ddl.auto", ddlAuto);
+        // The generic bootstrap connection belongs to the master datasource and
+        // must never receive tenant-domain DDL. TenantProvisioningService applies
+        // schema updates against an explicitly selected tenant datasource.
+        jpaPropertiesMap.put("hibernate.hbm2ddl.auto", "none");
 
         em.setJpaPropertyMap(jpaPropertiesMap);
 

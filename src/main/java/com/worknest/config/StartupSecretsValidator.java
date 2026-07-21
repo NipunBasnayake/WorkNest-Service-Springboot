@@ -23,7 +23,10 @@ public class StartupSecretsValidator implements CommandLineRunner {
             "example",
             "replace-me",
             "password",
-            "secret"
+            "secret",
+            "1234",
+            "changeme123!",
+            "v29ya05lc3rtdxblclnly3jldetleuzvckpxvdeymzq1njc4otaxmjm0nty3odkw"
     );
 
     private final Environment environment;
@@ -34,6 +37,8 @@ public class StartupSecretsValidator implements CommandLineRunner {
     private final String mailHost;
     private final String mailUsername;
     private final String mailPassword;
+    private final boolean platformAdminBootstrapEnabled;
+    private final String platformAdminBootstrapPassword;
 
     public StartupSecretsValidator(
             Environment environment,
@@ -43,7 +48,9 @@ public class StartupSecretsValidator implements CommandLineRunner {
             @Value("${app.jwt.secret:}") String jwtSecret,
             @Value("${spring.mail.host:}") String mailHost,
             @Value("${spring.mail.username:}") String mailUsername,
-            @Value("${spring.mail.password:}") String mailPassword) {
+            @Value("${spring.mail.password:}") String mailPassword,
+            @Value("${bootstrap.platform-admin.enabled:false}") boolean platformAdminBootstrapEnabled,
+            @Value("${bootstrap.platform-admin.password:}") String platformAdminBootstrapPassword) {
         this.environment = environment;
         this.datasourceUrl = datasourceUrl;
         this.datasourceUsername = datasourceUsername;
@@ -52,6 +59,8 @@ public class StartupSecretsValidator implements CommandLineRunner {
         this.mailHost = mailHost;
         this.mailUsername = mailUsername;
         this.mailPassword = mailPassword;
+        this.platformAdminBootstrapEnabled = platformAdminBootstrapEnabled;
+        this.platformAdminBootstrapPassword = platformAdminBootstrapPassword;
     }
 
     @Override
@@ -65,6 +74,10 @@ public class StartupSecretsValidator implements CommandLineRunner {
         requireNonBlank(datasourcePassword, "spring.datasource.password");
         requireNonBlank(jwtSecret, "app.jwt.secret");
 
+        if ("root".equalsIgnoreCase(datasourceUsername.trim())) {
+            throw new IllegalStateException("Production database user must not be root");
+        }
+
         if (!isBlank(mailHost) || !isBlank(mailUsername)) {
             requireNonBlank(mailHost, "spring.mail.host");
             requireNonBlank(mailUsername, "spring.mail.username");
@@ -75,6 +88,10 @@ public class StartupSecretsValidator implements CommandLineRunner {
         rejectWeakPlaceholder(datasourcePassword, "spring.datasource.password");
         if (!isBlank(mailPassword)) {
             rejectWeakPlaceholder(mailPassword, "spring.mail.password");
+        }
+        if (platformAdminBootstrapEnabled) {
+            requireNonBlank(platformAdminBootstrapPassword, "bootstrap.platform-admin.password");
+            rejectWeakPlaceholder(platformAdminBootstrapPassword, "bootstrap.platform-admin.password");
         }
 
         log.info("Startup production configuration validation passed");

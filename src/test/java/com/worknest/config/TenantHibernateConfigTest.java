@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TenantHibernateConfigTest {
 
     @Test
-    void tenantPersistenceUnitDoesNotExposeMasterDataSourceToTenantTransactions() {
+    void tenantPersistenceUnitDoesNotExposeOrApplyDdlToMasterDataSource() {
         TenantHibernateConfig config = new TenantHibernateConfig();
         @SuppressWarnings("unchecked")
         MultiTenantConnectionProvider<String> connectionProvider = interfaceStub(MultiTenantConnectionProvider.class);
@@ -22,7 +22,6 @@ class TenantHibernateConfigTest {
         LocalContainerEntityManagerFactoryBean factoryBean = config.entityManagerFactory(
                 connectionProvider,
                 tenantResolver,
-                "none",
                 false,
                 false
         );

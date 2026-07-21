@@ -58,7 +58,6 @@ public class PublicCareersServiceImpl implements PublicCareersService {
         return PublicCompanyDto.builder()
                 .tenantSlug(branding.tenantSlug())
                 .companyName(branding.companyName())
-                .logoUrl(branding.logo() == null ? null : branding.logo().url())
                 .about("Explore current opportunities at " + branding.companyName() + ".")
                 .build();
     }

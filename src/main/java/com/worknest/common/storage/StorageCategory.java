@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Locale;
 
 public enum StorageCategory {
-    WORKSPACE_LOGO(List.of("companies", "logos"), FileFamily.IMAGE),
     WORKSPACE_BANNER(List.of("companies", "banners"), FileFamily.IMAGE),
     EMPLOYEE_AVATAR(List.of("employees", "photos"), FileFamily.IMAGE),
     IMAGE(List.of("images"), FileFamily.IMAGE),
@@ -65,7 +64,6 @@ public enum StorageCategory {
         if (normalizedFolder.startsWith("chat/")) return CHAT_ATTACHMENT;
         if (normalizedFolder.startsWith("recruitment/")) return CANDIDATE_RESUME;
         if (normalizedFolder.contains("avatar") || normalizedFolder.startsWith("employees/")) return EMPLOYEE_AVATAR;
-        if (normalizedFolder.contains("logo")) return WORKSPACE_LOGO;
         return fromType(type);
     }
 

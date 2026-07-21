@@ -21,7 +21,6 @@ public class AssetReconciliationScheduler {
     private static final Logger log = LoggerFactory.getLogger(AssetReconciliationScheduler.class);
 
     private final PlatformTenantRepository tenantRepository;
-    private final MasterAssetReconciliationService masterReconciliation;
     private final TenantAssetReconciliationService tenantReconciliation;
     private final AssetObservability observability;
     private final Duration supersededRetention;
@@ -29,13 +28,11 @@ public class AssetReconciliationScheduler {
 
     public AssetReconciliationScheduler(
             PlatformTenantRepository tenantRepository,
-            MasterAssetReconciliationService masterReconciliation,
             TenantAssetReconciliationService tenantReconciliation,
             AssetObservability observability,
             @Value("${storage.reconciliation.superseded-retention:P7D}") Duration supersededRetention,
             @Value("${storage.reconciliation.orphan-grace:PT24H}") Duration orphanGrace) {
         this.tenantRepository = tenantRepository;
-        this.masterReconciliation = masterReconciliation;
         this.tenantReconciliation = tenantReconciliation;
         this.observability = observability;
         this.supersededRetention = supersededRetention;
@@ -47,13 +44,6 @@ public class AssetReconciliationScheduler {
             zone = "${storage.reconciliation.time-zone:UTC}")
     public void reconcile() {
         List<AssetObservability.InventorySnapshot> snapshots = new ArrayList<>();
-        try {
-            snapshots.addAll(masterReconciliation.reconcile(supersededRetention, orphanGrace));
-        } catch (RuntimeException exception) {
-            observability.recordReconciliationFailure("branding");
-            log.error("Branding asset reconciliation failed", exception);
-        }
-
         for (PlatformTenant tenant : tenantRepository.findAll()) {
             if (!Boolean.TRUE.equals(tenant.getActive())) continue;
             try {

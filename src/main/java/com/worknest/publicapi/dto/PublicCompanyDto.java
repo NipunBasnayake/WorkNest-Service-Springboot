@@ -10,6 +10,5 @@ import lombok.Setter;
 public class PublicCompanyDto {
     private String tenantSlug;
     private String companyName;
-    private String logoUrl;
     private String about;
 }

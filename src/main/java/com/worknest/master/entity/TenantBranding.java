@@ -24,8 +24,7 @@ import java.time.LocalDateTime;
 @Table(
         name = "tenant_branding",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_tenant_branding_tenant", columnNames = "tenant_id"),
-                @UniqueConstraint(name = "uk_tenant_branding_custom_domain", columnNames = "custom_domain")
+                @UniqueConstraint(name = "uk_tenant_branding_tenant", columnNames = "tenant_id")
         },
         indexes = {
                 @Index(name = "idx_tenant_branding_updated_at", columnList = "updated_at")
@@ -37,8 +36,6 @@ import java.time.LocalDateTime;
 public class TenantBranding {
 
     public static final String DEFAULT_PRIMARY_COLOR = "#9332EA";
-    public static final int CURRENT_TOKEN_ALGORITHM_VERSION = 1;
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -49,30 +46,6 @@ public class TenantBranding {
 
     @Column(name = "primary_color", nullable = false, length = 7)
     private String primaryColor = DEFAULT_PRIMARY_COLOR;
-
-    @Column(name = "secondary_color", length = 7)
-    private String secondaryColor;
-
-    @Column(name = "accent_color", length = 7)
-    private String accentColor;
-
-    @Column(name = "theme_mode_policy", nullable = false, length = 20)
-    private String themeModePolicy = "SYSTEM";
-
-    @Column(name = "white_label_mode", nullable = false)
-    private boolean whiteLabelMode;
-
-    @Column(name = "powered_by_worknest", nullable = false)
-    private boolean poweredByWorkNest = true;
-
-    @Column(name = "custom_domain", length = 255)
-    private String customDomain;
-
-    @Column(name = "metadata_json", columnDefinition = "TEXT")
-    private String metadataJson;
-
-    @Column(name = "token_algorithm_version", nullable = false)
-    private int tokenAlgorithmVersion = CURRENT_TOKEN_ALGORITHM_VERSION;
 
     @Version
     @Column(name = "version", nullable = false)

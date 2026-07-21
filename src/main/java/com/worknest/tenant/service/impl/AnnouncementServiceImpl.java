@@ -180,9 +180,9 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     public List<AnnouncementResponseDto> listAnnouncements() {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         AnnouncementAccessContext accessContext = resolveAnnouncementAccessContext();
-        List<Announcement> announcements = accessContext.privileged()
-                ? announcementRepository.findAllByOrderByPinnedDescCreatedAtDesc()
-                : announcementRepository.findByTeamIsNullOrderByPinnedDescCreatedAtDesc();
+        List<Announcement> announcements = announcementRepository.findVisibleAnnouncements(
+                accessContext.employeeId(),
+                accessContext.privileged());
         log.info("Announcement list requested by user={}, role={}, tenant={}, count={}",
                 currentUserForLog(),
                 authorizationService.getCurrentRoleOrThrow(),

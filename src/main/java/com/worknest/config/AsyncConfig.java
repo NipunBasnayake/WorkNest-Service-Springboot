@@ -14,25 +14,6 @@ import java.util.concurrent.Executor;
 @EnableScheduling
 public class AsyncConfig {
 
-    @Bean(name = "tenantProvisioningExecutor")
-    public Executor tenantProvisioningExecutor(
-            @Value("${app.onboarding.provisioning.executor.core-pool-size:2}") int corePoolSize,
-            @Value("${app.onboarding.provisioning.executor.max-pool-size:8}") int maxPoolSize,
-            @Value("${app.onboarding.provisioning.executor.queue-capacity:200}") int queueCapacity,
-            @Value("${app.onboarding.provisioning.executor.keep-alive-seconds:60}") int keepAliveSeconds) {
-
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(corePoolSize);
-        executor.setMaxPoolSize(maxPoolSize);
-        executor.setQueueCapacity(queueCapacity);
-        executor.setKeepAliveSeconds(keepAliveSeconds);
-        executor.setThreadNamePrefix("tenant-provision-");
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);
-        executor.initialize();
-        return executor;
-    }
-
     @Bean(name = "emailExecutor")
     public Executor emailExecutor(
             @Value("${app.email.executor.core-pool-size:2}") int corePoolSize,

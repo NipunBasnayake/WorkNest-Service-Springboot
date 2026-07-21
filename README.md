@@ -73,22 +73,18 @@ Tenant isolation guarantees in this implementation:
 - Request gate: for `/api/tenant/**`, `X-Tenant-ID` must match JWT `tenantKey`.
 - Connection gate: tenant persistence rejects master/default tenant identifiers for tenant-scoped DB access.
 
-### Startup bootstrap flow
+### Startup validation
 
-Startup sequence is implemented with ordered `CommandLineRunner` components:
+Startup performs production checks without creating or altering business data:
 
 1. `MasterDatabaseStartupValidator` (`@Order(HIGHEST_PRECEDENCE)`) validates master DB connectivity.
-2. `StartupSecretsValidator` (`@Order(5)`) enforces stronger checks when `prod` profile is active.
-3. `BootstrapDataInitializer` (`@Order(10)`) creates a bootstrap `PLATFORM_ADMIN` when required.
-4. `TenantSchemaInitializer` (`@Order(20)`) ensures schema for each ACTIVE tenant.
-5. `DemoTenantDataSeeder` (`@Order(30)`, conditional) seeds demo tenant data when enabled.
-6. `TenantAdminMirrorRepairInitializer` (`@Order(40)`) repairs tenant-admin employee mirrors.
+2. `StartupSecretsValidator` (`@Order(5)`) enforces stronger checks when the `prod` profile is active.
 
 Onboarding provisioning flow:
 
-- `POST /api/platform/onboarding/tenants` accepts registration and emits `TenantProvisioningRequestedEvent`.
-- Async listener (`tenantProvisioningExecutor`) creates DB if missing, applies tenant schema, mirrors tenant admin employee, then marks tenant ACTIVE.
-- Provisioning failure marks tenant SUSPENDED.
+- `POST /api/platform/onboarding/tenants` persists the master registration in an isolated master transaction.
+- `TenantProvisioningService` synchronously creates the tenant database, applies the tenant-only schema, and mirrors the tenant administrator employee.
+- Registration returns only after the tenant status is committed as ACTIVE; provisioning failures mark it INACTIVE and return an error.
 
 Production Warnings:
 
@@ -253,18 +249,14 @@ src/main/java/com/worknest
     MasterDataSourceConfig.java
     MasterJpaConfig.java
     TenantHibernateConfig.java
-    BootstrapDataInitializer.java
-    TenantSchemaInitializer.java
-    DemoTenantDataSeeder.java
     StartupSecretsValidator.java
   controller/             # Tenant REST controllers (HR, project, communication, analytics)
   master/
     controller/           # Platform admin/onboarding APIs
     dto/
     entity/               # PlatformTenant, PlatformUser, RefreshToken
-    event/ listener/      # Async tenant provisioning flow
     repository/
-    service/
+    service/              # Platform lifecycle and synchronous tenant provisioning
   notification/
     email/                # Email notification services
   security/
@@ -345,25 +337,6 @@ Production Warnings:
 
 - Current `docker-compose.yml` exports `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, while Spring Boot datasource properties are `spring.datasource.*`. Use `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` (or map values inside `application.yml`) to avoid startup mismatches.
 - Current repository `application.yml` contains hardcoded credentials and a JWT secret intended for local development only.
-
----
-
-## Demo Data Seeding
-
-Demo seeding is implemented by `DemoTenantDataSeeder` and only runs when enabled.
-
-Required configuration:
-
-- `bootstrap.seed-demo-data=true`
-- `bootstrap.demo-user-password=<non-empty-password>`
-
-Behavior:
-
-- Runs after tenant schema initialization.
-- Seeds only ACTIVE tenants.
-- Skips a tenant if employees already exist.
-- Creates demo employees, teams, projects, tasks, announcements, notifications, and chat conversations.
-- Creates/links corresponding platform users for seeded tenant employees.
 
 ---
 
@@ -449,17 +422,6 @@ This project currently keeps many defaults directly in `application.yml`. For pr
 | Reset token expiry minutes | `app.auth.password-reset.token-expiry-minutes` | `APP_AUTH_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES` |
 | Reset link base URL | `app.auth.password-reset.link-base-url` | `APP_AUTH_PASSWORD_RESET_LINK_BASE_URL` |
 
-### Bootstrap and demo seed controls
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| Enable bootstrap platform admin | `bootstrap.platform-admin.enabled` | `BOOTSTRAP_PLATFORM_ADMIN_ENABLED` |
-| Bootstrap admin name | `bootstrap.platform-admin.name` | `BOOTSTRAP_PLATFORM_ADMIN_NAME` |
-| Bootstrap admin email | `bootstrap.platform-admin.email` | `BOOTSTRAP_PLATFORM_ADMIN_EMAIL` |
-| Bootstrap admin password | `bootstrap.platform-admin.password` | `BOOTSTRAP_PLATFORM_ADMIN_PASSWORD` |
-| Enable demo seeding | `bootstrap.seed-demo-data` | `BOOTSTRAP_SEED_DEMO_DATA` |
-| Demo user password | `bootstrap.demo-user-password` | `BOOTSTRAP_DEMO_USER_PASSWORD` |
-
 ### File storage and upload limits
 
 | Purpose | Spring Property | Recommended Environment Variable |
@@ -487,7 +449,7 @@ Error response standardization note:
 - Phase 2: Authentication and authorization (JWT access tokens, refresh token rotation/revocation, tenant-bound auth checks).
 - Phase 3: HR and delivery core (employees, teams, attendance, leaves, projects, tasks).
 - Phase 4: Communication and governance (announcements, notifications, team/HR chats, read receipts, audit logs, attachments).
-- Phase 5: Operational hardening and delivery readiness (dashboard/analytics APIs, actuator integration, OpenAPI, Dockerization, async provisioning/seeding workflows).
+- Phase 5: Operational hardening and delivery readiness (dashboard/analytics APIs, actuator integration, OpenAPI, Dockerization, deterministic provisioning workflows).
 
 Current production hardening gaps to address before go-live:
 

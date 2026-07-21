@@ -31,8 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -133,16 +135,13 @@ public class HrChatServiceImpl implements HrChatService {
         authorizationService.requirePermission(Permission.CHAT_ACCESS);
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
         if (role.isTenantAdminEquivalent() || role.isHrEquivalent()) {
-            return hrConversationRepository.findAll().stream()
+            List<HrConversation> conversations = hrConversationRepository.findAll().stream()
                     .sorted(Comparator.comparing(HrConversation::getUpdatedAt).reversed())
-                    .map(this::toConversationResponse)
                     .toList();
+            return toConversationResponses(conversations);
         }
         Employee me = getCurrentEmployeeOrThrow();
-        return hrConversationRepository.findByEmployeeIdOrderByUpdatedAtDesc(me.getId())
-                .stream()
-                .map(this::toConversationResponse)
-                .toList();
+        return toConversationResponses(hrConversationRepository.findByEmployeeIdOrderByUpdatedAtDesc(me.getId()));
     }
 
     @Override
@@ -153,9 +152,15 @@ public class HrChatServiceImpl implements HrChatService {
         Employee me = authorizationService.getCurrentEmployeeOrNull();
         ensureConversationAccess(conversation, me);
 
-        return hrMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId)
+        List<HrMessage> messages = hrMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId);
+        var attachmentsByMessageId = fileStorageService.listLinkedFiles(
+                "HR_CHAT_MESSAGE",
+                messages.stream().map(HrMessage::getId).toList());
+        return messages
                 .stream()
-                .map(this::toMessageResponse)
+                .map(message -> toMessageResponse(
+                        message,
+                        attachmentsByMessageId.getOrDefault(message.getId(), List.of())))
                 .toList();
     }
 
@@ -344,6 +349,51 @@ public class HrChatServiceImpl implements HrChatService {
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversation.getId())
                 .orElse(null);
         long unreadCount = getUnreadCount(conversation);
+        return toConversationResponse(conversation, latestMessage, unreadCount);
+    }
+
+    private List<HrConversationResponseDto> toConversationResponses(List<HrConversation> conversations) {
+        if (conversations.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> conversationIds = conversations.stream().map(HrConversation::getId).toList();
+        Map<Long, HrMessage> latestMessages = new HashMap<>();
+        hrMessageRepository.findByConversationIdInOrderByCreatedAtDesc(conversationIds)
+                .forEach(message -> latestMessages.putIfAbsent(message.getConversation().getId(), message));
+
+        Map<Long, Long> unreadCounts = unreadCountsByConversation(conversationIds);
+        return conversations.stream()
+                .map(conversation -> toConversationResponse(
+                        conversation,
+                        latestMessages.get(conversation.getId()),
+                        unreadCounts.getOrDefault(conversation.getId(), 0L)))
+                .toList();
+    }
+
+    private Map<Long, Long> unreadCountsByConversation(List<Long> conversationIds) {
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrNull();
+        PlatformRole role = authorizationService.getCurrentRoleOrThrow();
+        if (currentEmployeeId == null || role.isTenantAdminEquivalent()) {
+            return Map.of();
+        }
+
+        List<Object[]> rows = role.isHrEquivalent()
+                ? hrMessageRepository.countUnreadEmployeeMessagesByConversationIds(conversationIds)
+                : hrMessageRepository.countUnreadMessagesByConversationIdsAndSenderIdNot(
+                        conversationIds,
+                        currentEmployeeId);
+        Map<Long, Long> counts = new HashMap<>();
+        for (Object[] row : rows) {
+            counts.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+        }
+        return counts;
+    }
+
+    private HrConversationResponseDto toConversationResponse(
+            HrConversation conversation,
+            HrMessage latestMessage,
+            long unreadCount) {
 
         return HrConversationResponseDto.builder()
                 .id(conversation.getId())
@@ -362,6 +412,12 @@ public class HrChatServiceImpl implements HrChatService {
     }
 
     private HrMessageResponseDto toMessageResponse(HrMessage message) {
+        return toMessageResponse(message, fileStorageService.listLinkedFiles("HR_CHAT_MESSAGE", message.getId()));
+    }
+
+    private HrMessageResponseDto toMessageResponse(
+            HrMessage message,
+            List<com.worknest.common.storage.StoredFileDto> attachments) {
         Employee sender = message.getSender();
         return HrMessageResponseDto.builder()
                 .id(message.getId())
@@ -373,7 +429,7 @@ public class HrChatServiceImpl implements HrChatService {
                 .message(message.getMessage())
                 .read(message.isRead())
                 .createdAt(message.getCreatedAt())
-                .attachments(fileStorageService.listLinkedFiles("HR_CHAT_MESSAGE", message.getId()))
+                .attachments(attachments)
                 .build();
     }
 

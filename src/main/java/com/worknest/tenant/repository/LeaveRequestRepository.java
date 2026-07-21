@@ -4,6 +4,7 @@ import com.worknest.tenant.entity.LeaveRequest;
 import com.worknest.tenant.enums.LeaveStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,16 +15,20 @@ import java.util.List;
 
 public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long> {
 
+    @EntityGraph(attributePaths = {"employee", "approver"})
     List<LeaveRequest> findByEmployeeIdOrderByCreatedAtDesc(Long employeeId);
 
+    @EntityGraph(attributePaths = {"employee", "approver"})
     List<LeaveRequest> findByStatusOrderByCreatedAtAsc(LeaveStatus status);
 
+    @EntityGraph(attributePaths = {"employee", "approver"})
     Page<LeaveRequest> findByStatusOrderByCreatedAtDesc(LeaveStatus status, Pageable pageable);
 
     long countByStatus(LeaveStatus status);
 
     long countByEmployeeIdAndStatus(Long employeeId, LeaveStatus status);
 
+    @EntityGraph(attributePaths = {"employee", "approver"})
     Page<LeaveRequest> findByEmployeeIdOrderByCreatedAtDesc(Long employeeId, Pageable pageable);
 
     @Query("""
@@ -33,6 +38,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
               AND (:fromDate IS NULL OR lr.startDate >= :fromDate)
               AND (:toDate IS NULL OR lr.endDate <= :toDate)
             """)
+    @EntityGraph(attributePaths = {"employee", "approver"})
     Page<LeaveRequest> search(
             @Param("status") LeaveStatus status,
             @Param("fromDate") LocalDate fromDate,
@@ -47,6 +53,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
               AND (:fromDate IS NULL OR lr.startDate >= :fromDate)
               AND (:toDate IS NULL OR lr.endDate <= :toDate)
             """)
+    @EntityGraph(attributePaths = {"employee", "approver"})
     Page<LeaveRequest> searchMyRequests(
             @Param("employeeId") Long employeeId,
             @Param("status") LeaveStatus status,
@@ -155,6 +162,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
               AND (lr.lastReminderSentForDate IS NULL OR lr.lastReminderSentForDate <> lr.startDate)
             ORDER BY lr.startDate ASC, lr.createdAt ASC
             """)
+    @EntityGraph(attributePaths = "employee")
     List<LeaveRequest> findUpcomingLeavesForReminder(
             @Param("status") LeaveStatus status,
             @Param("fromDate") LocalDate fromDate,

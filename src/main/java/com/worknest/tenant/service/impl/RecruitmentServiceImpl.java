@@ -42,7 +42,9 @@ import java.time.LocalDateTime;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Transactional(transactionManager = "transactionManager")
@@ -519,8 +521,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     public List<InterviewResponseDto> listApplicationInterviews(Long applicationId) {
         requireViewPermission();
         getApplicationOrThrow(applicationId);
-        return interviewRepository.findByApplicationIdOrderByScheduledAtDesc(applicationId).stream()
-                .map(this::toInterviewResponse).toList();
+        return toInterviewResponses(interviewRepository.findByApplicationIdOrderByScheduledAtDesc(applicationId));
     }
 
     @Override
@@ -729,7 +730,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         requireViewPermission();
         LocalDateTime start = from == null ? LocalDateTime.now().minusDays(1) : from;
         LocalDateTime end = to == null ? LocalDateTime.now().plusDays(30) : to;
-        return interviewRepository.findByScheduledAtBetweenOrderByScheduledAtAsc(start, end).stream().map(this::toInterviewResponse).toList();
+        return toInterviewResponses(interviewRepository.findByScheduledAtBetweenOrderByScheduledAtAsc(start, end));
     }
 
     @Override
@@ -1150,6 +1151,25 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private InterviewResponseDto toInterviewResponse(Interview interview) {
+        InterviewFeedback feedback = interviewFeedbackRepository.findByInterviewId(interview.getId()).orElse(null);
+        return toInterviewResponse(interview, feedback);
+    }
+
+    private List<InterviewResponseDto> toInterviewResponses(List<Interview> interviews) {
+        if (interviews.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, InterviewFeedback> feedbackByInterviewId = new HashMap<>();
+        interviewFeedbackRepository.findByInterviewIdIn(interviews.stream().map(Interview::getId).toList())
+                .forEach(feedback -> feedbackByInterviewId.put(feedback.getInterview().getId(), feedback));
+
+        return interviews.stream()
+                .map(interview -> toInterviewResponse(interview, feedbackByInterviewId.get(interview.getId())))
+                .toList();
+    }
+
+    private InterviewResponseDto toInterviewResponse(Interview interview, InterviewFeedback feedback) {
         return InterviewResponseDto.builder()
                 .id(interview.getId())
                 .applicationId(interview.getApplication().getId())
@@ -1162,7 +1182,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .location(interview.getLocation())
                 .meetingLink(interview.getMeetingLink())
                 .notes(interview.getNotes())
-                .feedback(interviewFeedbackRepository.findByInterviewId(interview.getId()).map(this::toInterviewFeedbackResponse).orElse(null))
+                .feedback(feedback == null ? null : toInterviewFeedbackResponse(feedback))
                 .createdAt(interview.getCreatedAt())
                 .updatedAt(interview.getUpdatedAt())
                 .build();

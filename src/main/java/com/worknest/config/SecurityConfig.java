@@ -7,6 +7,7 @@ import com.worknest.tenant.filter.TenantResolutionFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -54,13 +55,26 @@ public class SecurityConfig {
     }
 
     /*
-     * Filters are registered ONLY through the SecurityFilterChain below
-     * (.addFilterBefore).  The @Component-annotated filter classes are excluded
-     * from the servlet-container auto-registration path by NOT declaring any
-     * FilterRegistrationBean.  This avoids the confusing
-     * "was not registered (disabled)" log messages and guarantees a single
-     * filter chain execution order.
+     * These filters belong to Spring Security. Explicitly disable servlet
+     * container registration so each request passes through them once, in the
+     * order declared by the SecurityFilterChain.
      */
+    @Bean
+    public FilterRegistrationBean<TenantResolutionFilter> tenantResolutionFilterRegistration() {
+        FilterRegistrationBean<TenantResolutionFilter> registration =
+                new FilterRegistrationBean<>(tenantResolutionFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> jwtAuthenticationFilterRegistration() {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration =
+                new FilterRegistrationBean<>(jwtAuthenticationFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
@@ -117,7 +131,12 @@ public class SecurityConfig {
                     authorize
                         .requestMatchers("/actuator/metrics", "/actuator/metrics/**")
                         .hasRole("PLATFORM_ADMIN")
-                        .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/change-password", "/api/auth/admin/**")
+                        .requestMatchers(
+                                "/api/auth/logout",
+                                "/api/auth/me",
+                                "/api/auth/change-password",
+                                "/api/auth/change-password-required",
+                                "/api/auth/admin/**")
                         .authenticated()
                         .requestMatchers("/api/platform/**")
                         .hasRole("PLATFORM_ADMIN")

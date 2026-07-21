@@ -404,6 +404,69 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    public LoginResponseDto changeRequiredPassword(
+            ChangePasswordRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        validatePasswordConfirmation(requestDto.getNewPassword(), requestDto.getConfirmPassword());
+
+        PlatformUserPrincipal principal = extractCurrentPrincipal();
+        if (principal == null) {
+            throw new ForbiddenOperationException("No authenticated user found");
+        }
+
+        PlatformUser user = platformUserRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (!user.isPasswordChangeRequired()) {
+            throw new BadRequestException("Password change is not required for this account");
+        }
+        if (!passwordEncoder.matches(requestDto.getCurrentPassword(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException("Current password is invalid");
+        }
+        if (passwordEncoder.matches(requestDto.getNewPassword(), user.getPasswordHash())) {
+            throw new BadRequestException("New password must be different from the current password");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(requestDto.getNewPassword()));
+        user.setPasswordChangeRequired(false);
+        clearPasswordResetToken(user);
+        PlatformUser updatedUser = platformUserRepository.saveAndFlush(user);
+
+        refreshTokenService.revokeAllActiveTokens(updatedUser);
+        AuthSessionContext sessionContext = new AuthSessionContext(
+                resolveDeviceId(request),
+                resolveDeviceName(request),
+                extractUserAgent(request),
+                extractClientIpAddress(request),
+                false,
+                null);
+        RefreshToken refreshToken = refreshTokenService.createToken(updatedUser, sessionContext);
+        PlatformTenant tenant = resolveTenantForUser(updatedUser);
+        String accessToken = tenant != null
+                ? jwtService.generateAccessToken(updatedUser, tenant)
+                : jwtService.generateAccessToken(updatedUser);
+        String csrfToken = generateSecureToken();
+        String refreshTokenValue = resolveRefreshTokenValue(refreshToken);
+
+        authCookieService.issueAuthCookies(
+                response,
+                refreshTokenValue,
+                csrfToken,
+                computeCookieMaxAgeSeconds(refreshToken));
+
+        return LoginResponseDto.builder()
+                .tokenType("Bearer")
+                .accessToken(accessToken)
+                .refreshToken(refreshTokenValue)
+                .accessTokenExpiresAt(jwtService.getAccessTokenExpiryTime())
+                .csrfToken(csrfToken)
+                .sessionId(refreshToken.getId())
+                .passwordChangeRequired(false)
+                .user(mapUser(updatedUser))
+                .build();
+    }
+
+    @Override
     public ForceResetPasswordResponseDto forceResetPassword(Long userId) {
         PlatformUserPrincipal actor = extractCurrentPrincipal();
         if (actor == null) {

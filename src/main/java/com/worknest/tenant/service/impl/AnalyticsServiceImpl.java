@@ -115,7 +115,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         Double employeeGrowth = previousJoins == 0 ? null : round((currentJoins - previousJoins) * 100d / previousJoins);
 
         List<Object[]> projectStatus = projectRepository.countByStatusGroup();
-        List<Object[]> projectChartStatus = projectRepository.countStatusForReport(projectId, startTime, endTime);
+        List<Object[]> projectChartStatus = projectRepository.countStatusForReport(projectId);
         List<Object[]> taskStatusRows = taskRepository.countStatusForReport(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus);
         List<Object[]> taskPriorityRows = taskRepository.countPriorityForReport(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus);
         List<Object[]> dailyAttendanceRows = attendanceRecordRepository.summarizeForReport(start, end, employeeId, normalizedDepartment);

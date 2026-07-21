@@ -349,6 +349,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
               AND t.dueDate BETWEEN :fromDate AND :toDate
             ORDER BY t.dueDate ASC, t.createdAt DESC
             """)
+    @EntityGraph(attributePaths = "project")
     List<Task> findDueSoonTasks(
             @Param("assigneeId") Long assigneeId,
             @Param("excludedStatus") TaskStatus excludedStatus,
@@ -364,6 +365,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
               AND t.dueDate < :beforeDate
             ORDER BY t.dueDate ASC, t.createdAt DESC
             """)
+    @EntityGraph(attributePaths = "project")
     List<Task> findOverdueTasks(
             @Param("assigneeId") Long assigneeId,
             @Param("excludedStatus") TaskStatus excludedStatus,
@@ -398,6 +400,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
               AND (t.lastDueReminderSentForDate IS NULL OR t.lastDueReminderSentForDate <> t.dueDate)
             ORDER BY t.dueDate ASC, t.createdAt DESC
             """)
+    @EntityGraph(attributePaths = "assignee")
     List<Task> findUpcomingDueTasksForReminder(
             @Param("excludedStatus") TaskStatus excludedStatus,
             @Param("fromDate") LocalDate fromDate,

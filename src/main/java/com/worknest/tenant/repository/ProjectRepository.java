@@ -55,9 +55,8 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             """)
     List<Object[]> countByStatusGroup();
 
-    @Query("SELECT p.status, COUNT(p) FROM Project p WHERE (:projectId IS NULL OR p.id = :projectId) AND p.createdAt BETWEEN :fromDate AND :toDate GROUP BY p.status")
-    List<Object[]> countStatusForReport(@Param("projectId") Long projectId, @Param("fromDate") LocalDateTime fromDate,
-            @Param("toDate") LocalDateTime toDate);
+    @Query("SELECT p.status, COUNT(p) FROM Project p WHERE (:projectId IS NULL OR p.id = :projectId) GROUP BY p.status")
+    List<Object[]> countStatusForReport(@Param("projectId") Long projectId);
 
     @Query(value = """
             SELECT DATE_FORMAT(p.created_at, '%Y-%m'), COUNT(*) FROM projects p

@@ -18,7 +18,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Set;
 
 @Service
@@ -151,20 +150,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         }
 
         Set<TeamFunctionalRole> requestedRoles = EnumSet.copyOf(Arrays.asList(roles));
-        List<ProjectTeam> projectTeams = projectTeamRepository.findByProjectId(projectId);
-        if (projectTeams.isEmpty()) {
-            return teamMemberRepository.findByEmployeeIdAndLeftAtIsNull(currentEmployeeId).stream()
-                    .map(TeamMember::getFunctionalRole)
-                    .anyMatch(requestedRoles::contains);
-        }
-
-        return projectTeams.stream()
-                .map(ProjectTeam::getTeam)
-                .map(Team::getId)
-                .anyMatch(teamId -> teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(teamId, currentEmployeeId)
-                        .map(TeamMember::getFunctionalRole)
-                        .map(requestedRoles::contains)
-                        .orElse(false));
+        return teamMemberRepository.existsActiveProjectRole(projectId, currentEmployeeId, requestedRoles);
     }
 
     @Override

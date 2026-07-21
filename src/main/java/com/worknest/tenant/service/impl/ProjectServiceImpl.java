@@ -253,14 +253,10 @@ public class ProjectServiceImpl implements ProjectService {
             Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
             List<Project> readableProjects = listReadableProjectsForEmployee(currentEmployeeId);
             readableProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
-            return readableProjects.stream()
-                    .map(this::toProjectResponse)
-                    .toList();
+            return toProjectResponses(readableProjects);
         }
 
-        return projectRepository.findAll().stream()
-                .map(this::toProjectResponse)
-                .toList();
+        return toProjectResponses(projectRepository.findAll());
     }
 
     @Override
@@ -270,9 +266,7 @@ public class ProjectServiceImpl implements ProjectService {
         Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrThrow();
         List<Project> myProjects = listReadableProjectsForEmployee(currentEmployeeId);
         myProjects.sort(projectComparator("createdAt", Sort.Direction.DESC));
-        return myProjects.stream()
-                .map(this::toProjectResponse)
-                .toList();
+        return toProjectResponses(myProjects);
     }
 
     @Override
@@ -301,7 +295,7 @@ public class ProjectServiceImpl implements ProjectService {
                     PageRequest.of(resolvedPage, resolvedSize, Sort.by(direction, resolvedSortBy)));
 
             return PagedResultDto.<ProjectResponseDto>builder()
-                    .items(resultPage.getContent().stream().map(this::toProjectResponse).toList())
+                    .items(toProjectResponses(resultPage.getContent()))
                     .page(resultPage.getNumber())
                     .size(resultPage.getSize())
                     .totalElements(resultPage.getTotalElements())
@@ -316,7 +310,7 @@ public class ProjectServiceImpl implements ProjectService {
         );
 
         return PagedResultDto.<ProjectResponseDto>builder()
-                .items(resultPage.getContent().stream().map(this::toProjectResponse).toList())
+                .items(toProjectResponses(resultPage.getContent()))
                 .page(resultPage.getNumber())
                 .size(resultPage.getSize())
                 .totalElements(resultPage.getTotalElements())
@@ -443,6 +437,43 @@ public class ProjectServiceImpl implements ProjectService {
                 .stream()
                 .map(this::toAttachmentResponse)
                 .toList();
+
+        return toProjectResponse(project, teamIds, attachments);
+    }
+
+    private List<ProjectResponseDto> toProjectResponses(List<Project> projects) {
+        if (projects.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> projectIds = projects.stream().map(Project::getId).toList();
+        Map<Long, LinkedHashSet<Long>> teamIdsByProject = new HashMap<>();
+        for (ProjectTeam projectTeam : projectTeamRepository.findByProjectIdIn(projectIds)) {
+            teamIdsByProject
+                    .computeIfAbsent(projectTeam.getProject().getId(), ignored -> new LinkedHashSet<>())
+                    .add(projectTeam.getTeam().getId());
+        }
+
+        Map<Long, List<AttachmentResponseDto>> attachmentsByProject = new HashMap<>();
+        for (Attachment attachment : attachmentRepository
+                .findByEntityTypeAndEntityIdInOrderByCreatedAtDesc(AttachmentEntityType.PROJECT, projectIds)) {
+            attachmentsByProject
+                    .computeIfAbsent(attachment.getEntityId(), ignored -> new ArrayList<>())
+                    .add(toAttachmentResponse(attachment));
+        }
+
+        return projects.stream()
+                .map(project -> toProjectResponse(
+                        project,
+                        List.copyOf(teamIdsByProject.getOrDefault(project.getId(), new LinkedHashSet<>())),
+                        attachmentsByProject.getOrDefault(project.getId(), List.of())))
+                .toList();
+    }
+
+    private ProjectResponseDto toProjectResponse(
+            Project project,
+            List<Long> teamIds,
+            List<AttachmentResponseDto> attachments) {
 
         return ProjectResponseDto.builder()
                 .id(project.getId())

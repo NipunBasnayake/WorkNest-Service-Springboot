@@ -3,6 +3,7 @@ package com.worknest.tenant.repository;
 import com.worknest.tenant.entity.Announcement;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,6 +22,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
 
     List<Announcement> findAllByOrderByCreatedAtDesc();
 
+    @EntityGraph(attributePaths = "createdBy")
     List<Announcement> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     List<Announcement> findAllByOrderByPinnedDescCreatedAtDesc();
@@ -56,6 +58,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
                   )
             ORDER BY a.pinned DESC, a.createdAt DESC
             """)
+    @EntityGraph(attributePaths = {"createdBy", "team"})
     List<Announcement> findVisibleAnnouncements(
             @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged);
@@ -101,6 +104,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, Long
                     OR LOWER(a.content) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
+    @EntityGraph(attributePaths = {"createdBy", "team"})
     Page<Announcement> searchVisible(
             @Param("viewerEmployeeId") Long viewerEmployeeId,
             @Param("isPrivileged") boolean isPrivileged,

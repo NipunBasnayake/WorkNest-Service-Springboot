@@ -37,7 +37,7 @@ public class PlatformOnboardingController {
                 idempotencyKey
         );
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(ApiResponse.success("Tenant registration accepted. Provisioning in progress.", responseDto));
+                .body(ApiResponse.success("Tenant registration and provisioning completed successfully.", responseDto));
     }
 
 }

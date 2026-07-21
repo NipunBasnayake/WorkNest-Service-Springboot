@@ -9,11 +9,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @Getter
 @Setter
@@ -58,4 +60,8 @@ public class EmployeeUpdateRequestDto {
     private LocalDate joinedDate;
 
     private UserStatus status;
+
+    @Valid
+    @Size(max = 10, message = "An employee can have at most 10 skills")
+    private List<EmployeeSkillCreateRequestDto> skills;
 }

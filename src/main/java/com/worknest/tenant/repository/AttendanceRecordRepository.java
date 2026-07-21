@@ -2,6 +2,7 @@ package com.worknest.tenant.repository;
 
 import com.worknest.tenant.entity.AttendanceRecord;
 import com.worknest.tenant.enums.AttendanceStatus;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,8 +15,10 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     Optional<AttendanceRecord> findByEmployeeIdAndWorkDate(Long employeeId, LocalDate workDate);
 
+    @EntityGraph(attributePaths = {"employee", "markedByEmployee"})
     List<AttendanceRecord> findByEmployeeIdOrderByWorkDateDesc(Long employeeId);
 
+    @EntityGraph(attributePaths = {"employee", "markedByEmployee"})
     List<AttendanceRecord> findByWorkDateOrderByEmployeeIdAsc(LocalDate workDate);
 
         List<AttendanceRecord> findByWorkDateBetweenOrderByWorkDateAsc(LocalDate from, LocalDate to);

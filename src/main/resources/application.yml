@@ -124,13 +124,6 @@ app:
     expiration: 900000
     refresh-expiration: 604800000
     refresh-rotation-grace-ms: 45000
-  onboarding:
-    provisioning:
-      executor:
-        core-pool-size: 2
-        max-pool-size: 8
-        queue-capacity: 200
-        keep-alive-seconds: 60
   cors:
     allowed-origins:
       - http://localhost:3000
@@ -163,13 +156,6 @@ app:
         - 1
         - 2
         - 3
-bootstrap:
-  platform-admin:
-    name: Platform Admin
-    email: platform.admin@worknest.local
-    password: ChangeMe123!
-  seed-demo-data: false
-
 springdoc:
   api-docs:
     path: /v3/api-docs
@@ -184,3 +170,10 @@ management:
   health:
     mail:
       enabled: ${MAIL_HEALTH_ENABLED:${MAIL_ENABLED:false}}
+
+bootstrap:
+  platform-admin:
+    enabled: ${BOOTSTRAP_PLATFORM_ADMIN_ENABLED:true}
+    name: ${BOOTSTRAP_PLATFORM_ADMIN_NAME:Platform Admin}
+    email: ${BOOTSTRAP_PLATFORM_ADMIN_EMAIL:platform.admin@worknest.local}
+    password: ${BOOTSTRAP_PLATFORM_ADMIN_PASSWORD:ChangeMe123!}

@@ -29,5 +29,10 @@ public interface AuthService {
 
     void changePassword(ChangePasswordRequestDto requestDto);
 
+    LoginResponseDto changeRequiredPassword(
+            ChangePasswordRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response);
+
     ForceResetPasswordResponseDto forceResetPassword(Long userId);
 }

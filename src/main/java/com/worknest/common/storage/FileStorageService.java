@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -635,6 +636,34 @@ public class FileStorageService {
                 .peek(storedFileAccessPolicy::requireRead)
                 .map(metadata -> toDto(tenantSlug, metadata))
                 .toList();
+    }
+
+    public Map<Long, List<StoredFileDto>> listLinkedFiles(
+            String relatedModule,
+            Collection<Long> relatedEntityIds) {
+        String module = trimToNull(relatedModule);
+        if (module == null || relatedEntityIds == null || relatedEntityIds.isEmpty()) return Map.of();
+
+        List<Long> validEntityIds = relatedEntityIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .toList();
+        if (validEntityIds.isEmpty()) return Map.of();
+
+        String tenantSlug = resolveCurrentTenantSlug();
+        Map<Long, List<StoredFileDto>> filesByEntityId = new LinkedHashMap<>();
+        storedFileMetadataRepository
+                .findByRelatedModuleAndRelatedEntityIdInAndActiveTrueOrderByRelatedEntityIdAscUploadedAtAsc(
+                        module,
+                        validEntityIds)
+                .forEach(metadata -> {
+                    storedFileAccessPolicy.requireRead(metadata);
+                    filesByEntityId
+                            .computeIfAbsent(metadata.getRelatedEntityId(), ignored -> new ArrayList<>())
+                            .add(toDto(tenantSlug, metadata));
+                });
+        return filesByEntityId;
     }
 
     private void link(StoredFileMetadata metadata, String relatedModule, Long relatedEntityId, StorageCategory category) {

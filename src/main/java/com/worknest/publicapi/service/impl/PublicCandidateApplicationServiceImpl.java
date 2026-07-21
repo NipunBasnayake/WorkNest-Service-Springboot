@@ -46,6 +46,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -190,11 +191,19 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     }
 
     private JobPosition resolvePublicJob(String jobSlug) {
-        String normalizedSlug = SlugUtils.slugify(jobSlug);
-        if (normalizedSlug == null) {
+        String storedSlug = trimToNull(jobSlug);
+        if (storedSlug == null) {
             throw new ResourceNotFoundException("Job vacancy not found");
         }
-        return jobPositionRepository.findPublishedJobBySlug(normalizedSlug)
+
+        storedSlug = storedSlug.toLowerCase(Locale.ROOT);
+        Optional<JobPosition> match = jobPositionRepository.findPublishedJobBySlug(storedSlug);
+        String canonicalSlug = SlugUtils.slugify(storedSlug);
+        if (match.isEmpty() && canonicalSlug != null && !canonicalSlug.equals(storedSlug)) {
+            match = jobPositionRepository.findPublishedJobBySlug(canonicalSlug);
+        }
+
+        return match
                 .orElseThrow(() -> new ResourceNotFoundException("Job vacancy not found"));
     }
 

@@ -115,11 +115,18 @@ public class TeamChatServiceImpl implements TeamChatService {
             return List.of();
         }
 
-        return teamRepository.findAllById(teamIds).stream()
-                .map(this::getOrCreateTeamChat)
+        List<Team> teams = teamRepository.findAllById(teamIds);
+        Map<Long, TeamChat> chatsByTeamId = new LinkedHashMap<>();
+        teamChatRepository.findByTeamIdInOrderByUpdatedAtDesc(teamIds)
+                .forEach(chat -> chatsByTeamId.put(chat.getTeam().getId(), chat));
+        List<TeamChat> chats = teams.stream()
+                .map(team -> {
+                    TeamChat existing = chatsByTeamId.get(team.getId());
+                    return existing == null ? getOrCreateTeamChat(team) : existing;
+                })
                 .sorted(java.util.Comparator.comparing(TeamChat::getUpdatedAt).reversed())
-                .map(this::toTeamChatResponse)
                 .toList();
+        return toTeamChatResponses(chats);
     }
 
     @Override
@@ -130,9 +137,15 @@ public class TeamChatServiceImpl implements TeamChatService {
         Employee currentEmployee = authorizationService.getCurrentEmployeeOrNull();
         ensureTeamChatAccess(teamChat.getTeam(), currentEmployee);
 
-        return teamChatMessageRepository.findByTeamChatIdOrderByCreatedAtAsc(teamChatId)
+        List<TeamChatMessage> messages = teamChatMessageRepository.findByTeamChatIdOrderByCreatedAtAsc(teamChatId);
+        var attachmentsByMessageId = fileStorageService.listLinkedFiles(
+                "TEAM_CHAT_MESSAGE",
+                messages.stream().map(TeamChatMessage::getId).toList());
+        return messages
                 .stream()
-                .map(this::toMessageResponse)
+                .map(message -> toMessageResponse(
+                        message,
+                        attachmentsByMessageId.getOrDefault(message.getId(), List.of())))
                 .toList();
     }
 
@@ -260,12 +273,52 @@ public class TeamChatServiceImpl implements TeamChatService {
         long unreadCount = currentEmployeeId == null
                 ? 0L
                 : teamChatMessageRepository.countUnreadForEmployee(teamChat.getId(), currentEmployeeId, ChatType.TEAM);
+        return toTeamChatResponse(teamChat, latestMessage, unreadCount, teamParticipants(teamChat.getTeam()));
+    }
+
+    private List<TeamChatResponseDto> toTeamChatResponses(List<TeamChat> chats) {
+        if (chats.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> chatIds = chats.stream().map(TeamChat::getId).toList();
+        Map<Long, TeamChatMessage> latestMessages = new LinkedHashMap<>();
+        teamChatMessageRepository.findByTeamChatIdInOrderByCreatedAtDesc(chatIds)
+                .forEach(message -> latestMessages.putIfAbsent(message.getTeamChat().getId(), message));
+
+        Map<Long, Long> unreadCounts = new LinkedHashMap<>();
+        Long currentEmployeeId = authorizationService.getCurrentEmployeeIdOrNull();
+        if (currentEmployeeId != null) {
+            for (Object[] row : teamChatMessageRepository.countUnreadByTeamChatIdsForEmployee(
+                    chatIds,
+                    currentEmployeeId,
+                    ChatType.TEAM)) {
+                unreadCounts.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+            }
+        }
+
+        Map<Long, List<EmployeeSimpleDto>> participantsByTeamId = teamParticipants(
+                chats.stream().map(TeamChat::getTeam).toList());
+        return chats.stream()
+                .map(chat -> toTeamChatResponse(
+                        chat,
+                        latestMessages.get(chat.getId()),
+                        unreadCounts.getOrDefault(chat.getId(), 0L),
+                        participantsByTeamId.getOrDefault(chat.getTeam().getId(), List.of())))
+                .toList();
+    }
+
+    private TeamChatResponseDto toTeamChatResponse(
+            TeamChat teamChat,
+            TeamChatMessage latestMessage,
+            long unreadCount,
+            List<EmployeeSimpleDto> participants) {
 
         return TeamChatResponseDto.builder()
                 .id(teamChat.getId())
                 .teamId(teamChat.getTeam().getId())
                 .teamName(teamChat.getTeam().getName())
-                .participants(teamParticipants(teamChat.getTeam()))
+                .participants(participants)
                 .lastMessage(latestMessage == null ? null : latestMessage.getMessage())
                 .lastMessageAt(latestMessage == null ? teamChat.getUpdatedAt() : latestMessage.getCreatedAt())
                 .unreadCount(unreadCount)
@@ -275,6 +328,14 @@ public class TeamChatServiceImpl implements TeamChatService {
     }
 
     private TeamChatMessageResponseDto toMessageResponse(TeamChatMessage teamChatMessage) {
+        return toMessageResponse(
+                teamChatMessage,
+                fileStorageService.listLinkedFiles("TEAM_CHAT_MESSAGE", teamChatMessage.getId()));
+    }
+
+    private TeamChatMessageResponseDto toMessageResponse(
+            TeamChatMessage teamChatMessage,
+            List<com.worknest.common.storage.StoredFileDto> attachments) {
         Employee sender = teamChatMessage.getSender();
         return TeamChatMessageResponseDto.builder()
                 .id(teamChatMessage.getId())
@@ -286,7 +347,7 @@ public class TeamChatServiceImpl implements TeamChatService {
                 .senderName(buildFullName(sender))
                 .message(teamChatMessage.getMessage())
                 .createdAt(teamChatMessage.getCreatedAt())
-                .attachments(fileStorageService.listLinkedFiles("TEAM_CHAT_MESSAGE", teamChatMessage.getId()))
+                .attachments(attachments)
                 .build();
     }
 
@@ -316,6 +377,28 @@ public class TeamChatServiceImpl implements TeamChatService {
         return participants.values().stream()
                 .map(tenantDtoMapper::toEmployeeSimple)
                 .toList();
+    }
+
+    private Map<Long, List<EmployeeSimpleDto>> teamParticipants(List<Team> teams) {
+        Map<Long, LinkedHashMap<Long, Employee>> employeesByTeamId = new LinkedHashMap<>();
+        for (Team team : teams) {
+            LinkedHashMap<Long, Employee> participants = employeesByTeamId
+                    .computeIfAbsent(team.getId(), ignored -> new LinkedHashMap<>());
+            if (team.getManager() != null) {
+                participants.put(team.getManager().getId(), team.getManager());
+            }
+        }
+
+        teamMemberRepository.findByTeamIdInAndLeftAtIsNull(teams.stream().map(Team::getId).toList())
+                .forEach(teamMember -> employeesByTeamId
+                        .computeIfAbsent(teamMember.getTeam().getId(), ignored -> new LinkedHashMap<>())
+                        .putIfAbsent(teamMember.getEmployee().getId(), teamMember.getEmployee()));
+
+        Map<Long, List<EmployeeSimpleDto>> participantsByTeamId = new LinkedHashMap<>();
+        employeesByTeamId.forEach((teamId, employees) -> participantsByTeamId.put(
+                teamId,
+                employees.values().stream().map(tenantDtoMapper::toEmployeeSimple).toList()));
+        return participantsByTeamId;
     }
 
     private String buildFullName(Employee employee) {

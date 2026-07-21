@@ -32,8 +32,9 @@ public class MultiTenantConnectionProviderImpl implements MultiTenantConnectionP
 
     @Override
     public Connection getAnyConnection() throws SQLException {
-        // Hibernate bootstrap/session validation may request a generic connection.
-        // Always serve this from the master datasource.
+        // Hibernate requests a generic connection only for JDBC metadata. The
+        // tenant persistence unit has DDL disabled, so this connection can never
+        // create tenant tables in the master schema.
         return masterDataSource.getConnection();
     }
 

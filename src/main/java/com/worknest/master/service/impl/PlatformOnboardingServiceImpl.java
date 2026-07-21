@@ -5,8 +5,8 @@ import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.DuplicateEmailException;
 import com.worknest.common.exception.DuplicateTenantKeyException;
+import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.util.SlugUtils;
-import com.worknest.master.event.TenantProvisioningRequestedEvent;
 import com.worknest.master.dto.TenantRegistrationRequestDto;
 import com.worknest.master.dto.TenantRegistrationResponseDto;
 import com.worknest.master.entity.PlatformTenant;
@@ -17,12 +17,14 @@ import com.worknest.master.repository.PlatformUserRepository;
 import com.worknest.master.repository.TenantOnboardingRequestRepository;
 import com.worknest.master.service.PlatformOnboardingService;
 import com.worknest.master.service.TenantBrandingService;
+import com.worknest.master.service.TenantProvisioningService;
 import com.worknest.tenant.context.MasterTenantContextRunner;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -32,7 +34,6 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 @Service
-@Transactional(transactionManager = "masterTransactionManager")
 public class PlatformOnboardingServiceImpl implements PlatformOnboardingService {
 
     private static final Pattern TENANT_KEY_PATTERN = Pattern.compile("^[a-z0-9_-]{3,50}$");
@@ -43,8 +44,9 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
     private final TenantOnboardingRequestRepository onboardingRequestRepository;
     private final PasswordEncoder passwordEncoder;
     private final MasterTenantContextRunner masterTenantContextRunner;
-    private final ApplicationEventPublisher eventPublisher;
+    private final TenantProvisioningService tenantProvisioningService;
     private final TenantBrandingService tenantBrandingService;
+    private final TransactionTemplate masterTransaction;
     private final String masterDbUrl;
     private final String masterDbUsername;
     private final String masterDbPassword;
@@ -55,8 +57,9 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
             TenantOnboardingRequestRepository onboardingRequestRepository,
             PasswordEncoder passwordEncoder,
             MasterTenantContextRunner masterTenantContextRunner,
-            ApplicationEventPublisher eventPublisher,
+            TenantProvisioningService tenantProvisioningService,
             TenantBrandingService tenantBrandingService,
+            @Qualifier("masterTransactionManager") PlatformTransactionManager masterTransactionManager,
             @Value("${spring.datasource.url}") String masterDbUrl,
             @Value("${spring.datasource.username}") String masterDbUsername,
             @Value("${spring.datasource.password}") String masterDbPassword) {
@@ -65,8 +68,9 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         this.onboardingRequestRepository = onboardingRequestRepository;
         this.passwordEncoder = passwordEncoder;
         this.masterTenantContextRunner = masterTenantContextRunner;
-        this.eventPublisher = eventPublisher;
+        this.tenantProvisioningService = tenantProvisioningService;
         this.tenantBrandingService = tenantBrandingService;
+        this.masterTransaction = new TransactionTemplate(masterTransactionManager);
         this.masterDbUrl = masterDbUrl;
         this.masterDbUsername = masterDbUsername;
         this.masterDbPassword = masterDbPassword;
@@ -95,63 +99,80 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
         String requestHash = requestHash(requestDto, normalizedTenantKey, normalizedAdminEmail);
 
-        return masterTenantContextRunner.runInMasterContext(() -> {
-            if (normalizedIdempotencyKey != null) {
-                TenantOnboardingRequest existing = onboardingRequestRepository
-                        .findByIdempotencyKey(normalizedIdempotencyKey)
-                        .orElse(null);
-                if (existing != null) {
-                    if (!existing.getRequestHash().equals(requestHash)) {
-                        throw new IllegalArgumentException("Idempotency key was already used for a different request");
-                    }
-                    PlatformUser existingAdmin = platformUserRepository
-                            .findFirstByTenantKeyIgnoreCaseAndRoleIn(
-                                    existing.getTenant().getTenantKey(),
-                                    List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN))
-                            .orElse(null);
-                    var branding = tenantBrandingService.getPlatformBranding(existing.getTenant().getTenantKey());
-                    return buildResponse(existing.getTenant(), existingAdmin, branding);
+        Long tenantId = masterTenantContextRunner.runInMasterContext(() -> masterTransaction.execute(status ->
+                persistRegistration(
+                        requestDto,
+                        normalizedTenantKey,
+                        normalizedAdminEmail,
+                        databaseName,
+                        normalizedIdempotencyKey,
+                        requestHash)));
+
+        tenantProvisioningService.provisionTenant(tenantId);
+
+        return masterTenantContextRunner.runInMasterContext(() -> masterTransaction.execute(status ->
+                loadRegistrationResponse(tenantId)));
+    }
+
+    private Long persistRegistration(
+            TenantRegistrationRequestDto requestDto,
+            String normalizedTenantKey,
+            String normalizedAdminEmail,
+            String databaseName,
+            String normalizedIdempotencyKey,
+            String requestHash) {
+        if (normalizedIdempotencyKey != null) {
+            TenantOnboardingRequest existing = onboardingRequestRepository
+                    .findByIdempotencyKey(normalizedIdempotencyKey)
+                    .orElse(null);
+            if (existing != null) {
+                if (!existing.getRequestHash().equals(requestHash)) {
+                    throw new IllegalArgumentException("Idempotency key was already used for a different request");
                 }
+                return existing.getTenant().getId();
             }
-            if (platformTenantRepository.existsByTenantKey(normalizedTenantKey)) {
-                throw new DuplicateTenantKeyException("Tenant key already exists: " + normalizedTenantKey);
-            }
+        }
+        if (platformTenantRepository.existsByTenantKey(normalizedTenantKey)) {
+            throw new DuplicateTenantKeyException("Tenant key already exists: " + normalizedTenantKey);
+        }
 
-            String companyName = requestDto.getCompanyName().trim();
-            if (platformTenantRepository.existsByCompanyNameIgnoreCase(companyName)) {
-                throw new IllegalArgumentException(
-                        "Company is already registered: " + companyName);
-            }
+        String companyName = requestDto.getCompanyName().trim();
+        if (platformTenantRepository.existsByCompanyNameIgnoreCase(companyName)) {
+            throw new IllegalArgumentException("Company is already registered: " + companyName);
+        }
+        if (platformUserRepository.existsByEmailIgnoreCase(normalizedAdminEmail)) {
+            throw new DuplicateEmailException("Email already exists: " + normalizedAdminEmail);
+        }
 
-            if (platformUserRepository.existsByEmailIgnoreCase(normalizedAdminEmail)) {
-                throw new DuplicateEmailException(
-                        "Email already exists: " + normalizedAdminEmail);
-            }
+        PlatformTenant savedTenant = platformTenantRepository.save(
+                buildTenantEntity(requestDto, normalizedTenantKey, databaseName));
+        PlatformUser savedAdmin = platformUserRepository.save(
+                buildTenantAdminEntity(requestDto, normalizedAdminEmail, normalizedTenantKey));
+        tenantBrandingService.createDefaultBranding(
+                savedTenant,
+                requestDto.getPrimaryColor(),
+                savedAdmin.getId());
 
-            PlatformTenant tenant = buildTenantEntity(requestDto, normalizedTenantKey, databaseName);
-            PlatformTenant savedTenant = platformTenantRepository.save(tenant);
+        if (normalizedIdempotencyKey != null) {
+            TenantOnboardingRequest onboardingRequest = new TenantOnboardingRequest();
+            onboardingRequest.setIdempotencyKey(normalizedIdempotencyKey);
+            onboardingRequest.setRequestHash(requestHash);
+            onboardingRequest.setTenant(savedTenant);
+            onboardingRequestRepository.save(onboardingRequest);
+        }
+        return savedTenant.getId();
+    }
 
-            PlatformUser tenantAdmin = buildTenantAdminEntity(
-                    requestDto,
-                    normalizedAdminEmail,
-                    normalizedTenantKey
-            );
-            PlatformUser savedAdmin = platformUserRepository.save(tenantAdmin);
-            var branding = tenantBrandingService.createDefaultBranding(
-                    savedTenant,
-                    requestDto.getPrimaryColor(),
-                    savedAdmin.getId()
-            );
-            if (normalizedIdempotencyKey != null) {
-                TenantOnboardingRequest onboardingRequest = new TenantOnboardingRequest();
-                onboardingRequest.setIdempotencyKey(normalizedIdempotencyKey);
-                onboardingRequest.setRequestHash(requestHash);
-                onboardingRequest.setTenant(savedTenant);
-                onboardingRequestRepository.save(onboardingRequest);
-            }
-            eventPublisher.publishEvent(new TenantProvisioningRequestedEvent(savedTenant.getId()));
-            return buildResponse(savedTenant, savedAdmin, branding);
-        });
+    private TenantRegistrationResponseDto loadRegistrationResponse(Long tenantId) {
+        PlatformTenant tenant = platformTenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found with id: " + tenantId));
+        PlatformUser admin = platformUserRepository
+                .findFirstByTenantKeyIgnoreCaseAndRoleIn(
+                        tenant.getTenantKey(),
+                        List.of(PlatformRole.TENANT_ADMIN, PlatformRole.ADMIN))
+                .orElse(null);
+        var branding = tenantBrandingService.getPlatformBranding(tenant.getTenantKey());
+        return buildResponse(tenant, admin, branding);
     }
 
     private TenantRegistrationResponseDto buildResponse(

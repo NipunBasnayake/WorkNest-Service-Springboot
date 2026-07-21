@@ -83,6 +83,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 validateTenantBinding(request, jwt, principal);
 
+                if (principal.isPasswordChangeRequired() && !isPasswordChangeFlowRequest(request)) {
+                    writeErrorResponse(response, request.getRequestURI(),
+                            HttpStatus.FORBIDDEN,
+                            "Password change is required before continuing",
+                            "PASSWORD_CHANGE_REQUIRED");
+                    return;
+                }
+
                 UsernamePasswordAuthenticationToken authToken =
                         new UsernamePasswordAuthenticationToken(
                                 principal,
@@ -197,6 +205,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         String normalized = value.trim().toLowerCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean isPasswordChangeFlowRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        return "/api/auth/change-password-required".equals(uri)
+                || "/api/auth/me".equals(uri)
+                || "/api/auth/logout".equals(uri)
+                || "/api/auth/refresh".equals(uri);
     }
 
     private void writeErrorResponse(

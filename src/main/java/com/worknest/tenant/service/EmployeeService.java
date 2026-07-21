@@ -43,4 +43,6 @@ public interface EmployeeService {
     List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId);
 
     List<EmployeeSkillResponseDto> listMySkills();
+
+    List<SkillSuggestionResponseDto> searchSkillSuggestions(String search);
 }

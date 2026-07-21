@@ -21,8 +21,14 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
     @EntityGraph(attributePaths = {"candidate", "jobPosition", "hiredEmployee"})
     Page<CandidateApplication> findAll(Specification<CandidateApplication> specification, Pageable pageable);
 
+    @Override
+    @EntityGraph(attributePaths = {"candidate", "jobPosition", "createdBy", "hiredEmployee"})
+    List<CandidateApplication> findAll(org.springframework.data.domain.Sort sort);
+
+    @EntityGraph(attributePaths = {"candidate", "jobPosition", "createdBy", "hiredEmployee"})
     List<CandidateApplication> findByJobPositionIdOrderByAppliedAtDesc(Long jobPositionId);
 
+    @EntityGraph(attributePaths = {"candidate", "jobPosition", "createdBy", "hiredEmployee"})
     List<CandidateApplication> findByStatusOrderByUpdatedAtDesc(CandidatePipelineStatus status);
 
     Page<CandidateApplication> findByCandidateFullNameContainingIgnoreCaseOrCandidateEmailContainingIgnoreCaseOrJobPositionTitleContainingIgnoreCase(
@@ -66,6 +72,7 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
                    OR LOWER(c.email) LIKE LOWER(CONCAT('%', :search, '%'))
                    OR LOWER(j.title) LIKE LOWER(CONCAT('%', :search, '%')))
             """)
+    @EntityGraph(attributePaths = {"candidate", "jobPosition", "createdBy", "hiredEmployee"})
     Page<CandidateApplication> searchApplications(
             @Param("search") String search,
             @Param("status") CandidatePipelineStatus status,

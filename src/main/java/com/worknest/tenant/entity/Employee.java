@@ -10,6 +10,8 @@ import lombok.Setter;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(
@@ -66,6 +68,9 @@ public class Employee {
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "avatar_asset_id")
     private StoredFileMetadata avatarAsset;
+
+    @OneToMany(mappedBy = "employee", fetch = FetchType.LAZY)
+    private List<EmployeeSkill> skills = new ArrayList<>();
 
     @Column(name = "salary", precision = 12, scale = 2)
     private BigDecimal salary;

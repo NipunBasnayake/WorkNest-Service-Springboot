@@ -34,7 +34,7 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     long countByStatus(UserStatus status);
 
-    @Query("""
+    @Query(value = """
             SELECT e.role, COUNT(e)
             FROM Employee e
             GROUP BY e.role
@@ -75,9 +75,10 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     List<Object[]> findReportOptions();
 
     @EntityGraph(attributePaths = "avatarAsset")
-    @Query("""
-            SELECT e
+    @Query(value = """
+            SELECT DISTINCT e
             FROM Employee e
+            LEFT JOIN e.skills employeeSkill
             WHERE (:role IS NULL OR e.role = :role)
               AND (:status IS NULL OR e.status = :status)
               AND (
@@ -89,6 +90,24 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
                     OR LOWER(COALESCE(e.designation, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                     OR LOWER(COALESCE(e.department, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                     OR LOWER(COALESCE(e.phone, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(employeeSkill.skillName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                  )
+            """, countQuery = """
+            SELECT COUNT(DISTINCT e)
+            FROM Employee e
+            LEFT JOIN e.skills employeeSkill
+            WHERE (:role IS NULL OR e.role = :role)
+              AND (:status IS NULL OR e.status = :status)
+              AND (
+                    :search IS NULL OR :search = ''
+                    OR LOWER(e.firstName) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(e.lastName) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(e.email) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(e.employeeCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.designation, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.department, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(e.phone, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(employeeSkill.skillName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
                   )
             """)
     Page<Employee> search(

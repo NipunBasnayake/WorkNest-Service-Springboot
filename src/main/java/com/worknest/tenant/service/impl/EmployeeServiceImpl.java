@@ -29,7 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.security.SecureRandom;
 
 @Service
@@ -37,6 +40,7 @@ import java.security.SecureRandom;
 public class EmployeeServiceImpl implements EmployeeService {
 
     private static final int MAX_EMPLOYEE_CODE_GENERATION_ATTEMPTS = 100;
+    private static final int MAX_SKILLS_PER_EMPLOYEE = 10;
     private static final int TEMP_PASSWORD_LENGTH = 12;
     private static final String TEMP_PASSWORD_CHARSET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
@@ -77,6 +81,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         PlatformRole requestedRole = normalizeRequestedRole(requestDto.getRole());
         validateTenantAssignableRole(requestedRole);
         validateJoinedDate(requestDto.getJoinedDate());
+        Map<String, String> normalizedSkills = normalizeSkillRequests(requestDto.getSkills());
 
         if (employeeRepository.existsByEmailIgnoreCase(email)) {
             throw new DuplicateEmailException("Employee email already exists in this tenant: " + email);
@@ -115,6 +120,8 @@ public class EmployeeServiceImpl implements EmployeeService {
         );
         savedEmployee = linkPlatformUser(savedEmployee, syncedUser);
 
+        replaceEmployeeSkills(savedEmployee, normalizedSkills);
+
         return toEmployeeResponse(savedEmployee);
     }
 
@@ -140,6 +147,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         validateJoinedDate(requestDto.getJoinedDate());
+        Map<String, String> normalizedSkills = normalizeSkillRequests(requestDto.getSkills());
 
         employee.setFirstName(requestDto.getFirstName().trim());
         employee.setLastName(requestDto.getLastName().trim());
@@ -175,6 +183,10 @@ public class EmployeeServiceImpl implements EmployeeService {
                 tenantKey
         );
         updated = linkPlatformUser(updated, syncedUser);
+
+        if (normalizedSkills != null) {
+            replaceEmployeeSkills(updated, normalizedSkills);
+        }
 
         return toEmployeeResponse(updated);
     }
@@ -350,6 +362,10 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee employee = getEmployeeOrThrow(employeeId);
         String normalizedSkillName = normalizeSkillName(requestDto.getSkillName());
 
+        if (employeeSkillRepository.countByEmployeeId(employeeId) >= MAX_SKILLS_PER_EMPLOYEE) {
+            throw new BadRequestException("An employee can have at most 10 skills");
+        }
+
         if (employeeSkillRepository.existsByEmployeeAndSkillNameIgnoreCase(employee, normalizedSkillName)) {
             throw new BadRequestException("Skill already exists for this employee: " + normalizedSkillName);
         }
@@ -357,7 +373,6 @@ public class EmployeeServiceImpl implements EmployeeService {
         EmployeeSkill skill = new EmployeeSkill();
         skill.setEmployee(employee);
         skill.setSkillName(normalizedSkillName);
-        skill.setSkillLevel(requestDto.getSkillLevel());
 
         EmployeeSkill saved = employeeSkillRepository.save(skill);
         auditLogService.logAction(
@@ -384,7 +399,6 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         existingSkill.setSkillName(normalizedSkillName);
-        existingSkill.setSkillLevel(requestDto.getSkillLevel());
 
         EmployeeSkill updated = employeeSkillRepository.save(existingSkill);
         auditLogService.logAction(
@@ -411,7 +425,6 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<EmployeeSkillResponseDto> listSkillsByEmployee(Long employeeId) {
         authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
         getEmployeeOrThrow(employeeId);
@@ -422,13 +435,24 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public List<EmployeeSkillResponseDto> listMySkills() {
         authorizationService.requirePermission(Permission.VIEW_SELF_DATA);
         Employee currentEmployee = resolveCurrentEmployeeOrThrow();
         return employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(currentEmployee.getId())
                 .stream()
                 .map(this::toSkillResponse)
+                .toList();
+    }
+
+    @Override
+    public List<SkillSuggestionResponseDto> searchSkillSuggestions(String search) {
+        authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
+        String normalizedSearch = trimToNull(search);
+        return employeeSkillRepository.findDistinctSkillNames(
+                        normalizedSearch == null ? "" : normalizedSearch,
+                        PageRequest.of(0, 20))
+                .stream()
+                .map(SkillSuggestionResponseDto::new)
                 .toList();
     }
 
@@ -521,8 +545,6 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .id(skill.getId())
                 .employeeId(skill.getEmployee().getId())
                 .skillName(skill.getSkillName())
-                .skillLevel(skill.getSkillLevel())
-                .createdAt(skill.getCreatedAt())
                 .build();
     }
 
@@ -547,7 +569,65 @@ public class EmployeeServiceImpl implements EmployeeService {
         if (normalized == null) {
             throw new BadRequestException("Skill name is required");
         }
-        return normalized;
+        if (normalized.length() > 120) {
+            throw new BadRequestException("Skill name must not exceed 120 characters");
+        }
+        String collapsed = normalized.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        StringBuilder canonicalName = new StringBuilder(collapsed.length());
+        boolean capitalizeNext = true;
+        for (int index = 0; index < collapsed.length(); index++) {
+            char character = collapsed.charAt(index);
+            canonicalName.append(capitalizeNext ? Character.toUpperCase(character) : character);
+            capitalizeNext = Character.isWhitespace(character);
+        }
+        return canonicalName.toString();
+    }
+
+    private Map<String, String> normalizeSkillRequests(List<EmployeeSkillCreateRequestDto> requestedSkills) {
+        if (requestedSkills == null) {
+            return null;
+        }
+        if (requestedSkills.size() > MAX_SKILLS_PER_EMPLOYEE) {
+            throw new BadRequestException("An employee can have at most 10 skills");
+        }
+
+        Map<String, String> normalizedSkills = new LinkedHashMap<>();
+        for (EmployeeSkillCreateRequestDto request : requestedSkills) {
+            if (request == null) {
+                throw new BadRequestException("Each skill requires a name");
+            }
+            String name = normalizeSkillName(request.getSkillName());
+            String key = name.toLowerCase(Locale.ROOT);
+            if (normalizedSkills.putIfAbsent(key, name) != null) {
+                throw new BadRequestException("Duplicate skill: " + name);
+            }
+        }
+        return normalizedSkills;
+    }
+
+    private void replaceEmployeeSkills(Employee employee, Map<String, String> requestedSkills) {
+        List<EmployeeSkill> existingSkills = employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(employee.getId());
+        Map<String, EmployeeSkill> existingByName = new LinkedHashMap<>();
+        for (EmployeeSkill existing : existingSkills) {
+            existingByName.put(normalizeSkillName(existing.getSkillName()).toLowerCase(Locale.ROOT), existing);
+        }
+
+        List<EmployeeSkill> desiredSkills = requestedSkills.entrySet().stream().map(entry -> {
+            EmployeeSkill employeeSkill = existingByName.remove(entry.getKey());
+            if (employeeSkill == null) {
+                employeeSkill = new EmployeeSkill();
+                employeeSkill.setEmployee(employee);
+            }
+            employeeSkill.setSkillName(entry.getValue());
+            return employeeSkill;
+        }).toList();
+
+        if (!existingByName.isEmpty()) {
+            employeeSkillRepository.deleteAll(existingByName.values());
+        }
+        if (!desiredSkills.isEmpty()) {
+            employeeSkillRepository.saveAll(desiredSkills);
+        }
     }
 
     private Employee linkPlatformUser(Employee employee, PlatformUser platformUser) {

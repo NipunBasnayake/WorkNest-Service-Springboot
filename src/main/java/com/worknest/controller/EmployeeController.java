@@ -185,4 +185,13 @@ public class EmployeeController {
         List<EmployeeSkillResponseDto> response = employeeService.listMySkills();
         return ResponseEntity.ok(ApiResponse.success("My skills retrieved successfully", response));
     }
+
+    @GetMapping("/skills/suggestions")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<SkillSuggestionResponseDto>>> searchSkillSuggestions(
+            @RequestParam(value = "search", required = false) String search) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Skill suggestions retrieved successfully",
+                employeeService.searchSkillSuggestions(search)));
+    }
 }

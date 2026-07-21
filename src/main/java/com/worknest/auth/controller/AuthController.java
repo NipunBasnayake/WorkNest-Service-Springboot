@@ -70,6 +70,16 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Password changed successfully."));
     }
 
+    @PostMapping("/change-password-required")
+    public ResponseEntity<ApiResponse<LoginResponseDto>> changeRequiredPassword(
+            @Valid @RequestBody ChangePasswordRequestDto requestDto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Password changed successfully.",
+                authService.changeRequiredPassword(requestDto, request, response)));
+    }
+
     @PostMapping("/admin/users/{id}/force-reset-password")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','HR')")
     public ResponseEntity<ApiResponse<ForceResetPasswordResponseDto>> forceResetPassword(@PathVariable("id") Long id) {

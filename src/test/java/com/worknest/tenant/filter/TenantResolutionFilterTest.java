@@ -43,7 +43,10 @@ class TenantResolutionFilterTest {
                 new ObjectMapper(),
                 "X-Tenant-ID"
         );
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/public/acme/careers");
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/public/acme/careers/devops.engineer-2026-4"
+        );
         MockHttpServletResponse response = new MockHttpServletResponse();
         AtomicReference<String> tenantKeyInRequest = new AtomicReference<>();
         AtomicReference<String> tenantSlugInRequest = new AtomicReference<>();

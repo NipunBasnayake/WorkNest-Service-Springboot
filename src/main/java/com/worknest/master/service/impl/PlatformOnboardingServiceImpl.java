@@ -23,7 +23,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -75,13 +74,12 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
 
     @Override
     public TenantRegistrationResponseDto registerTenant(TenantRegistrationRequestDto requestDto) {
-        return registerTenant(requestDto, null, null);
+        return registerTenant(requestDto, null);
     }
 
     @Override
     public TenantRegistrationResponseDto registerTenant(
             TenantRegistrationRequestDto requestDto,
-            MultipartFile logo,
             String idempotencyKey) {
         String normalizedTenantKey = normalizeTenantKey(requestDto.getTenantKey());
         if (normalizedTenantKey == null || !TENANT_KEY_PATTERN.matcher(normalizedTenantKey).matches()) {
@@ -144,9 +142,6 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
                     requestDto.getPrimaryColor(),
                     savedAdmin.getId()
             );
-            if (logo != null && !logo.isEmpty()) {
-                branding = tenantBrandingService.uploadRegistrationLogo(savedTenant, logo, savedAdmin.getId());
-            }
             if (normalizedIdempotencyKey != null) {
                 TenantOnboardingRequest onboardingRequest = new TenantOnboardingRequest();
                 onboardingRequest.setIdempotencyKey(normalizedIdempotencyKey);
@@ -173,7 +168,6 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
                 .tenantAdminEmail(admin == null ? null : admin.getEmail())
                 .primaryColor(branding.primaryColor())
                 .brandingVersion(branding.brandingVersion())
-                .logoUrl(branding.logo() == null ? null : branding.logo().url())
                 .createdAt(tenant.getCreatedAt())
                 .build();
     }

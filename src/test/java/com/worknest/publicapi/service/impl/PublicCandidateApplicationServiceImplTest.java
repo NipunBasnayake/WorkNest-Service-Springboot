@@ -93,8 +93,6 @@ class PublicCandidateApplicationServiceImplTest {
                         "Residue Solutions",
                         "#2563EB",
                         1L,
-                        1,
-                        null,
                         com.worknest.common.enums.TenantStatus.ACTIVE,
                         LocalDateTime.of(2026, 7, 16, 1, 0)
                 ));

@@ -14,6 +14,9 @@ import com.worknest.tenant.repository.JobPositionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
+import java.util.Optional;
+
 @Service
 @Transactional(transactionManager = "transactionManager", readOnly = true)
 public class PublicCareersServiceImpl implements PublicCareersService {
@@ -44,12 +47,18 @@ public class PublicCareersServiceImpl implements PublicCareersService {
     @Override
     public PublicCareerJobDetailDto getPublishedCareer(String tenantSlug, String jobSlug) {
         PublicCompanyDto company = toCompanyDto(tenantBrandingService.getPublicBranding(tenantSlug));
-        String normalizedSlug = SlugUtils.slugify(jobSlug);
-        if (normalizedSlug == null) {
+        String storedSlug = normalizeStoredSlug(jobSlug);
+        if (storedSlug == null) {
             throw new ResourceNotFoundException("Job vacancy not found");
         }
 
-        JobPosition position = jobPositionRepository.findPublishedJobBySlug(normalizedSlug)
+        Optional<JobPosition> match = jobPositionRepository.findPublishedJobBySlug(storedSlug);
+        String canonicalSlug = SlugUtils.slugify(storedSlug);
+        if (match.isEmpty() && canonicalSlug != null && !canonicalSlug.equals(storedSlug)) {
+            match = jobPositionRepository.findPublishedJobBySlug(canonicalSlug);
+        }
+
+        JobPosition position = match
                 .orElseThrow(() -> new ResourceNotFoundException("Job vacancy not found"));
         return toDetailDto(company, position);
     }
@@ -124,5 +133,10 @@ public class PublicCareersServiceImpl implements PublicCareersService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeStoredSlug(String value) {
+        String normalized = trimToNull(value);
+        return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
     }
 }

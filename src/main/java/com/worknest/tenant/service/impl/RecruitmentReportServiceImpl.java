@@ -246,15 +246,20 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
 
     private Sort buildSort(RecruitmentReportType type, String sortBy, String sortDir) {
         boolean descending = !"asc".equalsIgnoreCase(sortDir);
+        // Map.of rejects null lookup keys. Most report requests intentionally
+        // omit sortBy, so normalize that normal case before selecting a safe
+        // server-controlled property.
+        String requestedSort = trimToNull(sortBy);
+        if (requestedSort == null) requestedSort = "";
         String property = switch (type) {
             case JOB_OPENINGS -> Map.of("job", "title", "department", "department", "status", "status", "publishing", "published", "deadline", "expiresAt", "openings", "openings")
-                    .getOrDefault(sortBy, "createdAt");
+                    .getOrDefault(requestedSort, "createdAt");
             case APPLICATIONS -> Map.of("candidate", "candidate.fullName", "email", "candidate.email", "position", "jobPosition.title", "department", "jobPosition.department", "stage", "status", "applied", "appliedAt")
-                    .getOrDefault(sortBy, "appliedAt");
+                    .getOrDefault(requestedSort, "appliedAt");
             case INTERVIEWS -> Map.of("candidate", "application.candidate.fullName", "position", "application.jobPosition.title", "interviewer", "interviewer.firstName", "scheduled", "scheduledAt", "mode", "mode", "status", "status")
-                    .getOrDefault(sortBy, "scheduledAt");
+                    .getOrDefault(requestedSort, "scheduledAt");
             case HIRING -> Map.of("candidate", "candidate.fullName", "email", "candidate.email", "position", "jobPosition.title", "department", "jobPosition.department", "hiredAt", "hiredAt", "employeeId", "hiredEmployee.employeeCode")
-                    .getOrDefault(sortBy, "hiredAt");
+                    .getOrDefault(requestedSort, "hiredAt");
         };
         return Sort.by(descending ? Sort.Direction.DESC : Sort.Direction.ASC, property);
     }

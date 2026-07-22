@@ -11,6 +11,8 @@ public interface EmployeeService {
 
     EmployeeResponseDto createEmployee(EmployeeCreateRequestDto requestDto);
 
+    EmployeeResponseDto createEmployeeFromRecruitment(EmployeeCreateRequestDto requestDto);
+
     EmployeeResponseDto updateEmployee(Long employeeId, EmployeeUpdateRequestDto requestDto);
 
     EmployeeResponseDto updateEmployeeStatus(Long employeeId, EmployeeStatusUpdateDto requestDto);

@@ -540,7 +540,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         String temporaryPassword = requestedPassword == null ? generateTemporaryPassword() : requestedPassword;
 
         EmployeeCreateRequestDto employeeRequest = buildEmployeeCreateRequest(application, requestDto, temporaryPassword);
-        EmployeeResponseDto employeeResponse = employeeService.createEmployee(employeeRequest);
+        EmployeeResponseDto employeeResponse = employeeService.createEmployeeFromRecruitment(employeeRequest);
         Employee createdEmployee = employeeRepository.findById(employeeResponse.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found after hire conversion"));
 
@@ -1013,6 +1013,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private void validateApplicationCanBeHired(CandidateApplication application) {
+        if (application.getCandidate() == null || application.getCandidate().getId() == null) {
+            throw new ResourceNotFoundException("Candidate not found for application: " + application.getId());
+        }
         if (application.getStatus() == CandidatePipelineStatus.HIRED || application.getHiredAt() != null) {
             throw new BadRequestException("Candidate application is already hired");
         }
@@ -1054,6 +1057,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         employeeRequest.setSalary(requestDto.getSalary() == null ? application.getExpectedSalary() : requestDto.getSalary());
         employeeRequest.setJoinedDate(requestDto.getJoinedDate() == null ? LocalDate.now() : requestDto.getJoinedDate());
         employeeRequest.setStatus(UserStatus.ACTIVE);
+        employeeRequest.setSkills(List.of());
         return employeeRequest;
     }
 

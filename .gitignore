@@ -43,8 +43,8 @@ build/
 .env
 ### WorkNest local file storage ###
 worknest-uploads/
-storage/
-storage/**
+/storage/
+/storage/**
 uploads/**
 !uploads/**/
 !uploads/**/.gitkeep

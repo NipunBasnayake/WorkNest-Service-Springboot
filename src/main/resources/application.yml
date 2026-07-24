@@ -54,7 +54,7 @@ spring:
       max-request-size: 20MB
 
 storage:
-  root: storage
+  root: ${STORAGE_ROOT:storage}
   max-image-size: 2MB
   max-document-size: 10MB
   allowed-image-types:

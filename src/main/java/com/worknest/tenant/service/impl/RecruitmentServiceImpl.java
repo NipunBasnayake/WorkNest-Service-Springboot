@@ -350,7 +350,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         String previousResume = candidate.getResumeFileUrl();
         StoredFileDto storedFile = fileStorageService.store(resumeFile, StorageCategory.CANDIDATE_RESUME);
         String newReference = "wnfileid://" + storedFile.id();
-        registerResumeCleanup(newReference, previousResume);
+        registerPreviousResumeCleanup(previousResume);
         candidate.setResumeFileName(storedFile.originalName());
         candidate.setResumeFileUrl(newReference);
         candidate.setResumeMimeType(storedFile.contentType());
@@ -361,18 +361,14 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return toCandidateResponse(updated);
     }
 
-    private void registerResumeCleanup(String newReference, String previousReference) {
+    private void registerPreviousResumeCleanup(String previousReference) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
         String tenantSlug = TenantContextHolder.getTenantSlug();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
-            public void afterCompletion(int status) {
-                if (status == TransactionSynchronization.STATUS_COMMITTED) {
-                    if (fileStorageService.isLocalReference(previousReference)) {
-                        deleteResumeSafely(tenantSlug, previousReference);
-                    }
-                } else {
-                    deleteResumeSafely(tenantSlug, newReference);
+            public void afterCommit() {
+                if (fileStorageService.isLocalReference(previousReference)) {
+                    deleteResumeSafely(tenantSlug, previousReference);
                 }
             }
         });

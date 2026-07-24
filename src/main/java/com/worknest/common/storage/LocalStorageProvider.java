@@ -2,14 +2,21 @@ package com.worknest.common.storage;
 
 import com.worknest.common.exception.BadRequestException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -21,6 +28,8 @@ import java.util.List;
 
 @Component
 public class LocalStorageProvider implements StorageProvider {
+    private static final Logger log = LoggerFactory.getLogger(LocalStorageProvider.class);
+
     private final Path root;
     private final Path tenantsRoot;
 
@@ -34,7 +43,10 @@ public class LocalStorageProvider implements StorageProvider {
         try {
             Files.createDirectories(root);
             Files.createDirectories(tenantsRoot);
+            verifyWritable(root);
+            log.info("Local file storage initialized at {}", root);
         } catch (IOException exception) {
+            log.error("Unable to initialize local file storage at {}", root, exception);
             throw new IllegalStateException("Unable to initialize storage directory", exception);
         }
     }
@@ -49,7 +61,10 @@ public class LocalStorageProvider implements StorageProvider {
                 requireInside(path, tenantRoot);
                 Files.createDirectories(path);
             }
+            log.debug("Tenant storage directories initialized tenant={} root={}", tenantSlug, tenantRoot);
         } catch (IOException exception) {
+            log.error("Unable to initialize tenant storage directories tenant={} root={}",
+                    tenantSlug, tenantRoot, exception);
             throw new IllegalStateException("Unable to initialize tenant storage directories", exception);
         }
     }
@@ -57,21 +72,64 @@ public class LocalStorageProvider implements StorageProvider {
     @Override
     public void write(String tenantSlug, String relativePath, byte[] content) {
         Path target = resolve(tenantSlug, relativePath);
+        Path temporary = null;
         try {
             Files.createDirectories(target.getParent());
-            Files.write(target, content);
+            temporary = Files.createTempFile(target.getParent(), "." + target.getFileName() + ".", ".tmp");
+            try (FileChannel channel = FileChannel.open(
+                    temporary,
+                    StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
+                ByteBuffer buffer = ByteBuffer.wrap(content);
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
+                channel.force(true);
+            }
+            try {
+                Files.move(
+                        temporary,
+                        target,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            temporary = null;
+            if (!Files.isRegularFile(target) || Files.size(target) != content.length) {
+                Files.deleteIfExists(target);
+                throw new IOException("Stored file verification failed");
+            }
+            log.info("Stored file tenant={} path={} bytes={}", tenantSlug, relativePath, content.length);
         } catch (IOException exception) {
+            log.error("Failed to store file tenant={} path={} bytes={}",
+                    tenantSlug, relativePath, content == null ? 0 : content.length, exception);
             throw new BadRequestException("Failed to store file", exception);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException cleanupException) {
+                    log.warn("Failed to remove temporary storage file {}", temporary, cleanupException);
+                }
+            }
         }
     }
 
     @Override
     public Resource read(String tenantSlug, String relativePath) {
         Path target = resolve(tenantSlug, relativePath);
-        if (!Files.isRegularFile(target)) throw new ResourceNotFoundException("File not found");
+        if (!Files.isRegularFile(target)) {
+            log.warn("Stored file is missing tenant={} path={}", tenantSlug, relativePath);
+            throw new ResourceNotFoundException("File not found");
+        }
         try {
             Resource resource = new UrlResource(target.toUri());
-            if (!resource.isReadable()) throw new ResourceNotFoundException("File not found");
+            if (!resource.isReadable()) {
+                log.warn("Stored file is not readable tenant={} path={}", tenantSlug, relativePath);
+                throw new ResourceNotFoundException("File not found");
+            }
+            log.debug("Reading stored file tenant={} path={}", tenantSlug, relativePath);
             return resource;
         } catch (MalformedURLException exception) {
             throw new BadRequestException("Invalid file path", exception);
@@ -105,8 +163,10 @@ public class LocalStorageProvider implements StorageProvider {
     @Override
     public void delete(String tenantSlug, String relativePath) {
         try {
-            Files.deleteIfExists(resolve(tenantSlug, relativePath));
+            boolean deleted = Files.deleteIfExists(resolve(tenantSlug, relativePath));
+            log.info("Deleted stored file tenant={} path={} existed={}", tenantSlug, relativePath, deleted);
         } catch (IOException exception) {
+            log.error("Failed to delete stored file tenant={} path={}", tenantSlug, relativePath, exception);
             throw new BadRequestException("Failed to delete file", exception);
         }
     }
@@ -137,6 +197,15 @@ public class LocalStorageProvider implements StorageProvider {
     @Override
     public Path localTenantRoot() {
         return tenantsRoot;
+    }
+
+    private void verifyWritable(Path directory) throws IOException {
+        Path probe = Files.createTempFile(directory, ".worknest-storage-probe-", ".tmp");
+        try {
+            Files.write(probe, new byte[] {0x57, 0x4E}, StandardOpenOption.TRUNCATE_EXISTING);
+        } finally {
+            Files.deleteIfExists(probe);
+        }
     }
 
     private Path resolve(String tenantSlug, String relativePath) {

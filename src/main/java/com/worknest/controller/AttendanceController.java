@@ -95,6 +95,17 @@ public class AttendanceController {
         return ResponseEntity.ok(ApiResponse.success("Attendance by date retrieved", response));
     }
 
+    @GetMapping("/range")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<AttendanceResponseDto>>> getByDateRange(
+            @RequestParam("fromDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam("toDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(value = "employeeId", required = false) @Positive Long employeeId,
+            @RequestParam(value = "department", required = false) String department) {
+        List<AttendanceResponseDto> response = attendanceService.getByDateRange(fromDate, toDate, employeeId, department);
+        return ResponseEntity.ok(ApiResponse.success("Attendance date range retrieved", response));
+    }
+
     @GetMapping("/summary/daily")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
     public ResponseEntity<ApiResponse<AttendanceDailySummaryDto>> getDailySummary(

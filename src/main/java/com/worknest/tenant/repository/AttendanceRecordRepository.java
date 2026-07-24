@@ -21,7 +21,19 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
     @EntityGraph(attributePaths = {"employee", "markedByEmployee"})
     List<AttendanceRecord> findByWorkDateOrderByEmployeeIdAsc(LocalDate workDate);
 
-        List<AttendanceRecord> findByWorkDateBetweenOrderByWorkDateAsc(LocalDate from, LocalDate to);
+    List<AttendanceRecord> findByWorkDateBetweenOrderByWorkDateAsc(LocalDate from, LocalDate to);
+
+    @Query("""
+            SELECT ar FROM AttendanceRecord ar
+            WHERE ar.workDate BETWEEN :fromDate AND :toDate
+              AND (:employeeId IS NULL OR ar.employee.id = :employeeId)
+              AND (:department IS NULL OR ar.employee.department = :department)
+            ORDER BY ar.workDate, ar.employee.firstName, ar.employee.lastName
+            """)
+    @EntityGraph(attributePaths = {"employee", "markedByEmployee"})
+    List<AttendanceRecord> findForReport(
+            @Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
+            @Param("employeeId") Long employeeId, @Param("department") String department);
 
     List<AttendanceRecord> findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
             Long employeeId,
@@ -47,9 +59,11 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     @Query("""
             SELECT ar.workDate,
-                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.PRESENT THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.PRESENT AND ar.late = false THEN 1 ELSE 0 END),
                    SUM(CASE WHEN ar.late = true THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.ABSENT THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.ABSENT THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.HALF_DAY THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = com.worknest.tenant.enums.AttendanceStatus.INCOMPLETE THEN 1 ELSE 0 END)
             FROM AttendanceRecord ar
             WHERE ar.workDate BETWEEN :fromDate AND :toDate
               AND (:employeeId IS NULL OR ar.employee.id = :employeeId)
@@ -61,9 +75,11 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     @Query(value = """
             SELECT DATE_FORMAT(ar.work_date, '%x-W%v'),
-                   SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'PRESENT' AND ar.late = false THEN 1 ELSE 0 END),
                    SUM(CASE WHEN ar.late = true THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'HALF_DAY' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'INCOMPLETE' THEN 1 ELSE 0 END)
             FROM attendance_records ar JOIN employees e ON e.id = ar.employee_id
             WHERE ar.work_date BETWEEN :fromDate AND :toDate
               AND (:employeeId IS NULL OR ar.employee_id = :employeeId)
@@ -75,9 +91,11 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     @Query(value = """
             SELECT DATE_FORMAT(ar.work_date, '%Y-%m'),
-                   SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'PRESENT' AND ar.late = false THEN 1 ELSE 0 END),
                    SUM(CASE WHEN ar.late = true THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'HALF_DAY' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ar.status = 'INCOMPLETE' THEN 1 ELSE 0 END)
             FROM attendance_records ar JOIN employees e ON e.id = ar.employee_id
             WHERE ar.work_date BETWEEN :fromDate AND :toDate
               AND (:employeeId IS NULL OR ar.employee_id = :employeeId)

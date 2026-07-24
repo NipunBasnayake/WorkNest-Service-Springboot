@@ -17,6 +17,20 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     @Query("SELECT t.id, t.name FROM Team t ORDER BY t.name")
     List<Object[]> findReportOptions();
 
+    @Query("""
+            SELECT t.id, t.name, COUNT(tm)
+            FROM Team t
+            LEFT JOIN TeamMember tm ON tm.team.id = t.id AND tm.leftAt IS NULL
+              AND (:employeeId IS NULL OR tm.employee.id = :employeeId)
+              AND (:department IS NULL OR tm.employee.department = :department)
+            WHERE (:teamId IS NULL OR t.id = :teamId)
+              AND (:projectId IS NULL OR EXISTS (SELECT pt.id FROM ProjectTeam pt WHERE pt.team.id = t.id AND pt.project.id = :projectId))
+            GROUP BY t.id, t.name
+            ORDER BY COUNT(tm) DESC, t.name
+            """)
+    List<Object[]> countSizesForReport(@Param("teamId") Long teamId, @Param("employeeId") Long employeeId,
+            @Param("department") String department, @Param("projectId") Long projectId);
+
     @Override
     @EntityGraph(attributePaths = {"manager"})
     List<Team> findAll();

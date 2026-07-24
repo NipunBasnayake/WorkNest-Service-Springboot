@@ -55,15 +55,27 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             """)
     List<Object[]> countByStatusGroup();
 
-    @Query("SELECT p.status, COUNT(p) FROM Project p WHERE (:projectId IS NULL OR p.id = :projectId) GROUP BY p.status")
-    List<Object[]> countStatusForReport(@Param("projectId") Long projectId);
+    @Query("""
+            SELECT p.status, COUNT(p) FROM Project p
+            WHERE p.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR p.id = :projectId)
+              AND (:teamId IS NULL OR EXISTS (SELECT pt.id FROM ProjectTeam pt WHERE pt.project.id = p.id AND pt.team.id = :teamId))
+              AND (:employeeId IS NULL OR EXISTS (SELECT task.id FROM Task task WHERE task.project.id = p.id AND task.assignee.id = :employeeId))
+            GROUP BY p.status
+            """)
+    List<Object[]> countStatusForReport(@Param("projectId") Long projectId,
+            @Param("teamId") Long teamId, @Param("employeeId") Long employeeId,
+            @Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate);
 
     @Query(value = """
             SELECT DATE_FORMAT(p.created_at, '%Y-%m'), COUNT(*) FROM projects p
             WHERE p.created_at BETWEEN :fromDate AND :toDate AND (:projectId IS NULL OR p.id = :projectId)
+              AND (:teamId IS NULL OR EXISTS (SELECT 1 FROM project_teams pt WHERE pt.project_id = p.id AND pt.team_id = :teamId))
+              AND (:employeeId IS NULL OR EXISTS (SELECT 1 FROM tasks t WHERE t.project_id = p.id AND t.assignee_id = :employeeId))
             GROUP BY DATE_FORMAT(p.created_at, '%Y-%m') ORDER BY DATE_FORMAT(p.created_at, '%Y-%m')
             """, nativeQuery = true)
-    List<Object[]> countCreatedTrend(@Param("projectId") Long projectId, @Param("fromDate") LocalDateTime fromDate,
+    List<Object[]> countCreatedTrend(@Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("fromDate") LocalDateTime fromDate,
             @Param("toDate") LocalDateTime toDate);
 
     @Query("SELECT p.id, p.name FROM Project p ORDER BY p.name")

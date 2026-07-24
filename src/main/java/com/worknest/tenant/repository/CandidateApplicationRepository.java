@@ -82,23 +82,44 @@ public interface CandidateApplicationRepository extends JpaRepository<CandidateA
     @Query("""
             SELECT ca.status, COUNT(ca) FROM CandidateApplication ca
             WHERE ca.appliedAt BETWEEN :fromDate AND :toDate AND (:status IS NULL OR ca.status = :status)
+              AND (:department IS NULL OR ca.jobPosition.department = :department)
             GROUP BY ca.status
             """)
     List<Object[]> countPipelineForReport(@Param("fromDate") LocalDateTime fromDate,
-            @Param("toDate") LocalDateTime toDate, @Param("status") CandidatePipelineStatus status);
+            @Param("toDate") LocalDateTime toDate, @Param("status") CandidatePipelineStatus status,
+            @Param("department") String department);
 
     @Query("""
             SELECT ca.jobPosition.title, COUNT(ca) FROM CandidateApplication ca
             WHERE ca.appliedAt BETWEEN :fromDate AND :toDate AND (:status IS NULL OR ca.status = :status)
+              AND (:department IS NULL OR ca.jobPosition.department = :department)
             GROUP BY ca.jobPosition.id, ca.jobPosition.title ORDER BY COUNT(ca) DESC
             """)
     List<Object[]> countApplicationsByJobForReport(@Param("fromDate") LocalDateTime fromDate,
-            @Param("toDate") LocalDateTime toDate, @Param("status") CandidatePipelineStatus status);
+            @Param("toDate") LocalDateTime toDate, @Param("status") CandidatePipelineStatus status,
+            @Param("department") String department);
 
     @Query(value = """
             SELECT DATE_FORMAT(ca.updated_at, '%Y-%m'), SUM(CASE WHEN ca.status = 'HIRED' THEN 1 ELSE 0 END)
-            FROM candidate_applications ca WHERE ca.updated_at BETWEEN :fromDate AND :toDate
+            FROM candidate_applications ca JOIN job_positions j ON j.id = ca.job_position_id
+            WHERE ca.updated_at BETWEEN :fromDate AND :toDate
+              AND (:status IS NULL OR ca.status = :status)
+              AND (:department IS NULL OR j.department = :department)
             GROUP BY DATE_FORMAT(ca.updated_at, '%Y-%m') ORDER BY DATE_FORMAT(ca.updated_at, '%Y-%m')
             """, nativeQuery = true)
-    List<Object[]> countHiringTrend(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate);
+    List<Object[]> countHiringTrend(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("status") String status, @Param("department") String department);
+
+    @Query("""
+            SELECT COALESCE(NULLIF(TRIM(COALESCE(ca.source, ca.candidate.source)), ''), 'Unspecified'), COUNT(ca)
+            FROM CandidateApplication ca
+            WHERE ca.appliedAt BETWEEN :fromDate AND :toDate
+              AND (:status IS NULL OR ca.status = :status)
+              AND (:department IS NULL OR ca.jobPosition.department = :department)
+            GROUP BY COALESCE(NULLIF(TRIM(COALESCE(ca.source, ca.candidate.source)), ''), 'Unspecified')
+            ORDER BY COUNT(ca) DESC
+            """)
+    List<Object[]> countSourcesForReport(@Param("fromDate") LocalDateTime fromDate,
+            @Param("toDate") LocalDateTime toDate, @Param("status") CandidatePipelineStatus status,
+            @Param("department") String department);
 }

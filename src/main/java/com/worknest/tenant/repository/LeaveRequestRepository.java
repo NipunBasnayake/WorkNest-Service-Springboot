@@ -85,10 +85,12 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             WHERE lr.startDate <= :toDate AND lr.endDate >= :fromDate
               AND (:employeeId IS NULL OR lr.employee.id = :employeeId)
               AND (:department IS NULL OR lr.employee.department = :department)
+              AND (:leaveType IS NULL OR lr.leaveType = :leaveType)
             GROUP BY lr.leaveType
             """)
     List<Object[]> countTypeForReport(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
-            @Param("employeeId") Long employeeId, @Param("department") String department);
+            @Param("employeeId") Long employeeId, @Param("department") String department,
+            @Param("leaveType") com.worknest.tenant.enums.LeaveType leaveType);
 
     @Query(value = """
             SELECT DATE_FORMAT(lr.start_date, '%Y-%m'), COUNT(*),
@@ -97,10 +99,12 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             WHERE lr.start_date BETWEEN :fromDate AND :toDate
               AND (:employeeId IS NULL OR lr.employee_id = :employeeId)
               AND (:department IS NULL OR e.department = :department)
+              AND (:leaveType IS NULL OR lr.leave_type = :leaveType)
             GROUP BY DATE_FORMAT(lr.start_date, '%Y-%m') ORDER BY DATE_FORMAT(lr.start_date, '%Y-%m')
             """, nativeQuery = true)
     List<Object[]> countTrendForReport(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
-            @Param("employeeId") Long employeeId, @Param("department") String department);
+            @Param("employeeId") Long employeeId, @Param("department") String department,
+            @Param("leaveType") String leaveType);
 
     @Query(value = """
             SELECT COALESCE(AVG(DATEDIFF(lr.end_date, lr.start_date) + 1), 0)
@@ -108,9 +112,11 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
             WHERE lr.start_date <= :toDate AND lr.end_date >= :fromDate
               AND (:employeeId IS NULL OR lr.employee_id = :employeeId)
               AND (:department IS NULL OR e.department = :department)
+              AND (:leaveType IS NULL OR lr.leave_type = :leaveType)
             """, nativeQuery = true)
     double averageLeaveDaysForReport(@Param("fromDate") LocalDate fromDate, @Param("toDate") LocalDate toDate,
-            @Param("employeeId") Long employeeId, @Param("department") String department);
+            @Param("employeeId") Long employeeId, @Param("department") String department,
+            @Param("leaveType") String leaveType);
 
     @Query("""
             SELECT lr.status, COUNT(lr)

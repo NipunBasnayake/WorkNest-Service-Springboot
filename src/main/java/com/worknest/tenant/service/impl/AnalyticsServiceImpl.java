@@ -105,17 +105,16 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         LocalDateTime startTime = start.atStartOfDay();
         LocalDateTime endTime = end.plusDays(1).atStartOfDay().minusNanos(1);
 
-        List<Object[]> employeeStatus = employeeRepository.countByStatusGroup(normalizedDepartment);
-        List<Object[]> employeeJoining = employeeRepository.countJoiningTrend(start, end, normalizedDepartment);
+        List<Object[]> employeeStatus = employeeRepository.countStatusForReport(start, end, normalizedDepartment, employeeId, teamId, projectId);
+        List<Object[]> employeeJoining = employeeRepository.countJoiningTrendForReport(start, end, normalizedDepartment, employeeId, teamId, projectId);
         long rangeDays = ChronoUnit.DAYS.between(start, end) + 1;
         LocalDate previousEnd = start.minusDays(1);
         LocalDate previousStart = previousEnd.minusDays(rangeDays - 1);
         double currentJoins = sum(employeeJoining);
-        double previousJoins = sum(employeeRepository.countJoiningTrend(previousStart, previousEnd, normalizedDepartment));
+        double previousJoins = sum(employeeRepository.countJoiningTrendForReport(previousStart, previousEnd, normalizedDepartment, employeeId, teamId, projectId));
         Double employeeGrowth = previousJoins == 0 ? null : round((currentJoins - previousJoins) * 100d / previousJoins);
 
-        List<Object[]> projectStatus = projectRepository.countByStatusGroup();
-        List<Object[]> projectChartStatus = projectRepository.countStatusForReport(projectId);
+        List<Object[]> projectStatus = projectRepository.countStatusForReport(projectId, teamId, employeeId, startTime, endTime);
         List<Object[]> taskStatusRows = taskRepository.countStatusForReport(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus);
         List<Object[]> taskPriorityRows = taskRepository.countPriorityForReport(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus);
         List<Object[]> dailyAttendanceRows = attendanceRecordRepository.summarizeForReport(start, end, employeeId, normalizedDepartment);
@@ -127,8 +126,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             default -> throw new BadRequestException("attendancePeriod has an unsupported value");
         };
         List<Object[]> leaveStatusRows = leaveRequestRepository.countStatusForReport(start, end, employeeId, normalizedDepartment, selectedLeaveType);
-        List<Object[]> recruitmentRows = candidateApplicationRepository.countPipelineForReport(startTime, endTime, selectedRecruitmentStatus);
-        List<Object[]> teamSizes = teamMemberRepository.countActiveMembersForReport(teamId);
+        List<Object[]> recruitmentRows = canonicalRecruitmentRows(
+                candidateApplicationRepository.countPipelineForReport(startTime, endTime, selectedRecruitmentStatus, normalizedDepartment));
+        List<Object[]> teamSizes = teamRepository.countSizesForReport(teamId, employeeId, normalizedDepartment, projectId);
+        if (employeeId != null || normalizedDepartment != null) {
+            teamSizes = teamSizes.stream().filter(row -> number(row[2]) > 0).toList();
+        }
 
         Map<String, Double> employees = rowMap(employeeStatus);
         Map<String, Double> projects = rowMap(projectStatus);
@@ -139,45 +142,52 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         double totalTasks = tasks.values().stream().mapToDouble(Double::doubleValue).sum();
         double completedTasks = tasks.getOrDefault(TaskStatus.DONE.name(), 0d);
         double taskCompletion = totalTasks == 0 ? 0 : round(completedTasks * 100d / totalTasks);
-        long overdue = taskRepository.countOverdueForReport(LocalDate.now(), projectId, teamId, employeeId);
+        long overdue = taskRepository.countOverdueForReport(LocalDate.now(), startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus);
         Object[] latestAttendance = dailyAttendanceRows.isEmpty() ? null : dailyAttendanceRows.get(dailyAttendanceRows.size() - 1);
         double presentToday = latestAttendance == null ? 0 : number(latestAttendance[1]);
         double lateToday = latestAttendance == null ? 0 : number(latestAttendance[2]);
         double absentToday = latestAttendance == null ? 0 : number(latestAttendance[3]);
-        double attendanceRate = presentToday + absentToday == 0 ? 0 : round(presentToday * 100d / (presentToday + absentToday));
+        double halfDayToday = latestAttendance == null ? 0 : number(latestAttendance[4]);
+        double incompleteToday = latestAttendance == null ? 0 : number(latestAttendance[5]);
+        double attendanceTotal = presentToday + lateToday + absentToday + halfDayToday + incompleteToday;
+        double attendanceRate = attendanceTotal == 0 ? 0 : round((presentToday + lateToday + halfDayToday) * 100d / attendanceTotal);
         double hired = recruitment.getOrDefault(CandidatePipelineStatus.HIRED.name(), 0d);
         double offered = recruitment.getOrDefault(CandidatePipelineStatus.OFFERED.name(), 0d);
         double applications = recruitment.values().stream().mapToDouble(Double::doubleValue).sum();
         double acceptance = offered + hired == 0 ? 0 : round(hired * 100d / (offered + hired));
         double largestTeam = teamSizes.stream().mapToDouble(row -> number(row[2])).max().orElse(0);
-        double smallestTeam = teamSizes.stream().mapToDouble(row -> number(row[2])).min().orElse(0);
         double averageTeam = teamSizes.stream().mapToDouble(row -> number(row[2])).average().orElse(0);
+        double totalProjects = projects.values().stream().mapToDouble(Double::doubleValue).sum();
+        double averageLeaveDays = round(leaveRequestRepository.averageLeaveDaysForReport(
+                start, end, employeeId, normalizedDepartment, selectedLeaveType == null ? null : selectedLeaveType.name()));
+        long openJobs = jobPositionRepository.countByStatusForReport(JobPositionStatus.OPEN, normalizedDepartment);
+        long interviewCount = interviewRepository.countForReport(startTime, endTime, normalizedDepartment, selectedRecruitmentStatus);
 
         List<BusinessIntelligenceReportDto.MetricDto> kpis = List.of(
                 metric("employees", "Employees", totalEmployees, "", employeeGrowth, "purple", "People in the selected scope"),
                 metric("activeEmployees", "Active employees", employees.getOrDefault(UserStatus.ACTIVE.name(), 0d), "", null, "green", "Available workforce"),
                 metric("newEmployees", "New employees", currentJoins, "", employeeGrowth, "blue", "Joined in this period"),
-                metric("projects", "Total projects", projectRepository.count(), "", null, "purple", "Portfolio size"),
+                metric("projects", "Total projects", totalProjects, "", null, "purple", "Projects created in the selected scope"),
                 metric("runningProjects", "Running projects", projects.getOrDefault(ProjectStatus.IN_PROGRESS.name(), 0d), "", null, "blue", "Currently in delivery"),
                 metric("completedProjects", "Completed projects", projects.getOrDefault(ProjectStatus.COMPLETED.name(), 0d), "", null, "green", "Delivered portfolio"),
-                metric("projectHealth", "Project health", taskCompletion, "%", null, taskCompletion >= 75 ? "green" : "amber", "Completion-weighted score"),
+                metric("projectHealth", "Project health", taskCompletion, totalTasks == 0 ? "" : "%", null, taskCompletion >= 75 ? "green" : "amber", totalTasks == 0 ? "No data available" : "Completed tasks divided by total scoped tasks"),
                 metric("openTasks", "Open tasks", totalTasks - completedTasks, "", null, "blue", "Work still in motion"),
                 metric("completedTasks", "Completed tasks", completedTasks, "", null, "green", taskCompletion + "% completion rate"),
                 metric("blockedTasks", "Blocked tasks", tasks.getOrDefault(TaskStatus.BLOCKED.name(), 0d), "", null, "amber", "Needs dependency action"),
                 metric("overdueTasks", "Overdue tasks", overdue, "", null, overdue > 0 ? "red" : "green", "Past the committed due date"),
-                metric("presentToday", "Present today", presentToday, "", null, "green", attendanceRate + "% attendance"),
+                metric("presentToday", "Present on time", presentToday, "", null, "green", attendanceTotal == 0 ? "No data available" : attendanceRate + "% attendance"),
                 metric("lateToday", "Late arrivals", lateToday, "", null, "amber", "Latest reporting day"),
                 metric("absentToday", "Absent", absentToday, "", null, absentToday > 0 ? "red" : "green", "Latest reporting day"),
-                metric("attendanceRate", "Attendance rate", attendanceRate, "%", null, attendanceRate >= 85 ? "green" : "amber", "Latest reporting day"),
+                metric("attendanceRate", "Attendance rate", attendanceRate, attendanceTotal == 0 ? "" : "%", null, attendanceRate >= 85 ? "green" : "amber", attendanceTotal == 0 ? "No data available" : "Present, late, and half-day records divided by all attendance records"),
                 metric("pendingLeave", "Pending leave", leaves.getOrDefault(LeaveStatus.PENDING.name(), 0d), "", null, "amber", "Awaiting a decision"),
                 metric("approvedLeave", "Approved leave", leaves.getOrDefault(LeaveStatus.APPROVED.name(), 0d), "", null, "green", "Selected period"),
-                metric("averageLeave", "Average leave", round(leaveRequestRepository.averageLeaveDaysForReport(start, end, employeeId, normalizedDepartment)), " days", null, "purple", "Per request"),
-                metric("openJobs", "Open jobs", jobPositionRepository.countByStatusAndDeletedFalse(JobPositionStatus.OPEN), "", null, "purple", "Recruitment demand"),
+                metric("averageLeave", "Average leave", averageLeaveDays, leaves.isEmpty() ? "" : " days", null, "purple", leaves.isEmpty() ? "No data available" : "Calendar days per scoped request"),
+                metric("openJobs", "Open jobs", openJobs, "", null, "purple", "Recruitment demand in the selected department"),
                 metric("applications", "Applications", applications, "", null, "blue", "Selected period"),
-                metric("interviews", "Interviews", interviewRepository.countByScheduledAtBetween(startTime, endTime), "", null, "amber", "Scheduled in period"),
+                metric("interviews", "Interviews", interviewCount, "", null, "amber", "Scheduled in the selected recruitment scope"),
                 metric("hires", "Hires", hired, "", null, "green", acceptance + "% offer acceptance"),
-                metric("acceptanceRate", "Acceptance rate", acceptance, "%", null, acceptance >= 60 ? "green" : "amber", "Offers converted to hires"),
-                metric("teams", "Teams", teamRepository.count(), "", null, "purple", "Collaboration units"),
+                metric("acceptanceRate", "Acceptance rate", acceptance, offered + hired == 0 ? "" : "%", null, acceptance >= 60 ? "green" : "amber", offered + hired == 0 ? "No data available" : "Hires divided by candidates currently offered or hired"),
+                metric("teams", "Teams", teamSizes.size(), "", null, "purple", "Collaboration units in the selected scope"),
                 metric("largestTeam", "Largest team", largestTeam, "", null, "blue", "Active members"),
                 metric("averageTeam", "Average team size", round(averageTeam), "", null, "purple", "Across active teams"),
                 metric("notifications", "Notifications", notificationRepository.count(), "", null, "blue", "System-wide volume"),
@@ -187,22 +197,24 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Map<String, List<BusinessIntelligenceReportDto.ChartPointDto>> charts = new LinkedHashMap<>();
         charts.put("employeeGrowth", points(employeeJoining));
-        charts.put("employeesByDepartment", points(employeeRepository.countByDepartment()));
-        charts.put("employeesByDesignation", points(employeeRepository.countByDesignation()));
-        charts.put("employeeStatus", points(employeeStatus));
-        charts.put("projectsByStatus", points(projectChartStatus));
-        charts.put("projectsCreated", points(projectRepository.countCreatedTrend(projectId, startTime, endTime)));
-        charts.put("projectProgress", getProjectProgressSummary().stream().filter(item -> projectId == null || String.valueOf(projectId).equals(String.valueOf(item.getProjectId()))).map(item -> new BusinessIntelligenceReportDto.ChartPointDto(item.getProjectName(), item.getCompletionPercent(), (double) item.getDoneTasks(), (double) item.getTotalTasks(), String.valueOf(item.getProjectId()))).toList());
-        charts.put("tasksByStatus", points(taskStatusRows));
+        charts.put("employeesByDepartment", points(employeeRepository.countDepartmentForReport(start, end, normalizedDepartment, employeeId, teamId, projectId)));
+        charts.put("employeesByRole", orderedPoints(employeeRepository.countRoleForReport(start, end, normalizedDepartment, employeeId, teamId, projectId), List.of("TENANT_ADMIN", "ADMIN", "HR", "MANAGER", "EMPLOYEE")));
+        charts.put("employeesByDesignation", points(employeeRepository.countDesignationForReport(start, end, normalizedDepartment, employeeId, teamId, projectId)));
+        charts.put("employeeStatus", orderedPoints(employeeStatus, List.of("ACTIVE", "INACTIVE", "SUSPENDED")));
+        charts.put("projectsByStatus", orderedPoints(projectStatus, List.of("PLANNED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED")));
+        charts.put("projectsCreated", points(projectRepository.countCreatedTrend(projectId, teamId, employeeId, startTime, endTime)));
+        charts.put("projectProgress", progressPoints(taskRepository.summarizeProjectProgressForReport(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus)));
+        charts.put("tasksByStatus", orderedPoints(taskStatusRows, List.of("TODO", "IN_PROGRESS", "IN_REVIEW", "BLOCKED", "DONE")));
         charts.put("taskPriority", points(taskPriorityRows));
-        charts.put("taskCompletionTrend", triplePoints(taskRepository.countCompletionTrend(startTime, endTime, projectId, teamId, employeeId)));
-        charts.put("teamWorkload", points(taskRepository.countOpenWorkloadByTeam(startTime, endTime, projectId, teamId, employeeId)));
+        charts.put("taskCompletionTrend", triplePoints(taskRepository.countCompletionTrend(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus == null ? null : selectedTaskStatus.name())));
+        charts.put("teamWorkload", points(taskRepository.countOpenWorkloadByTeam(startTime, endTime, projectId, teamId, employeeId, selectedTaskStatus)));
         charts.put("attendanceTrend", triplePoints(attendanceRows));
-        charts.put("leaveTypes", points(leaveRequestRepository.countTypeForReport(start, end, employeeId, normalizedDepartment)));
-        charts.put("leaveTrend", triplePoints(leaveRequestRepository.countTrendForReport(start, end, employeeId, normalizedDepartment)));
-        charts.put("recruitmentPipeline", points(recruitmentRows));
-        charts.put("applicationsByJob", points(candidateApplicationRepository.countApplicationsByJobForReport(startTime, endTime, selectedRecruitmentStatus)));
-        charts.put("hiringTrend", points(candidateApplicationRepository.countHiringTrend(startTime, endTime)));
+        charts.put("leaveTypes", points(leaveRequestRepository.countTypeForReport(start, end, employeeId, normalizedDepartment, selectedLeaveType)));
+        charts.put("leaveTrend", triplePoints(leaveRequestRepository.countTrendForReport(start, end, employeeId, normalizedDepartment, selectedLeaveType == null ? null : selectedLeaveType.name())));
+        charts.put("recruitmentPipeline", orderedPoints(recruitmentRows, List.of("APPLIED", "SHORTLISTED", "INTERVIEW", "OFFERED", "HIRED", "REJECTED")));
+        charts.put("applicationsByJob", points(candidateApplicationRepository.countApplicationsByJobForReport(startTime, endTime, selectedRecruitmentStatus, normalizedDepartment)));
+        charts.put("hiringTrend", points(candidateApplicationRepository.countHiringTrend(startTime, endTime, selectedRecruitmentStatus == null ? null : selectedRecruitmentStatus.name(), normalizedDepartment)));
+        charts.put("recruitmentSources", points(candidateApplicationRepository.countSourcesForReport(startTime, endTime, selectedRecruitmentStatus, normalizedDepartment)));
         charts.put("teamSizes", teamSizes.stream().map(row -> new BusinessIntelligenceReportDto.ChartPointDto(String.valueOf(row[1]), number(row[2]), null, null, String.valueOf(row[0]))).toList());
         charts.put("notificationVolume", points(notificationRepository.countVolumeForReport(startTime, endTime)));
         charts.put("announcementVolume", points(announcementRepository.countCreatedForReport(startTime, endTime)));
@@ -213,6 +225,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         if (blocked > 0) risks.add(new BusinessIntelligenceReportDto.RiskDto("blocked", "warning", "Blocked work is accumulating", "Assign dependency owners and escalation dates.", blocked, "/tasks?status=BLOCKED"));
         if (attendanceRate > 0 && attendanceRate < 85) risks.add(new BusinessIntelligenceReportDto.RiskDto("attendance", "critical", "Attendance below target", "Attendance is below the 85% operating target.", Math.round(100 - attendanceRate), "/attendance"));
         if (largestTeam > Math.max(10, averageTeam * 1.8)) risks.add(new BusinessIntelligenceReportDto.RiskDto("team-load", "warning", "Team capacity imbalance", "The largest team is materially above the company average.", Math.round(largestTeam), "/teams"));
+        Map<String, Long> risksBySeverity = new LinkedHashMap<>();
+        risks.forEach(risk -> risksBySeverity.merge(risk.severity().toUpperCase(Locale.ROOT), 1L, Long::sum));
+        charts.put("riskSeverity", risksBySeverity.entrySet().stream()
+                .map(entry -> new BusinessIntelligenceReportDto.ChartPointDto(entry.getKey(), entry.getValue().doubleValue(), null, null, null))
+                .toList());
 
         List<BusinessIntelligenceReportDto.InsightDto> insights = new ArrayList<>();
         insights.add(new BusinessIntelligenceReportDto.InsightDto("delivery", taskCompletion >= 75 ? "positive" : "warning", taskCompletion >= 75 ? "Delivery momentum is healthy" : "Delivery throughput needs attention", taskCompletion + "% of scoped tasks are complete.", "/tasks"));
@@ -236,6 +253,45 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     private static List<BusinessIntelligenceReportDto.ChartPointDto> points(List<Object[]> rows) {
         return rows.stream().map(row -> new BusinessIntelligenceReportDto.ChartPointDto(String.valueOf(row[0]), number(row[1]), null, null, null)).toList();
+    }
+
+    private static List<BusinessIntelligenceReportDto.ChartPointDto> orderedPoints(List<Object[]> rows, List<String> order) {
+        Map<String, Double> values = rowMap(rows);
+        List<String> labels = new ArrayList<>(values.keySet());
+        labels.sort(Comparator
+                .comparingInt((String label) -> {
+                    int index = order.indexOf(label);
+                    return index < 0 ? Integer.MAX_VALUE : index;
+                })
+                .thenComparing(String::compareTo));
+        return labels.stream()
+                .map(label -> new BusinessIntelligenceReportDto.ChartPointDto(label, values.get(label), null, null, null))
+                .toList();
+    }
+
+    private static List<BusinessIntelligenceReportDto.ChartPointDto> progressPoints(List<Object[]> rows) {
+        return rows.stream().map(row -> {
+            double total = number(row[2]);
+            double completed = number(row[3]);
+            double percentage = total == 0 ? 0 : round(completed * 100d / total);
+            return new BusinessIntelligenceReportDto.ChartPointDto(
+                    String.valueOf(row[1]), percentage, completed, total, String.valueOf(row[0]));
+        }).toList();
+    }
+
+    private static List<Object[]> canonicalRecruitmentRows(List<Object[]> rows) {
+        Map<String, Double> totals = new LinkedHashMap<>();
+        rows.forEach(row -> {
+            String raw = String.valueOf(row[0]);
+            String canonical = switch (raw) {
+                case "SCREENING" -> "SHORTLISTED";
+                case "TECHNICAL", "HR_REVIEW" -> "INTERVIEW";
+                case "WITHDRAWN" -> "REJECTED";
+                default -> raw;
+            };
+            totals.merge(canonical, number(row[1]), Double::sum);
+        });
+        return totals.entrySet().stream().map(entry -> new Object[] { entry.getKey(), entry.getValue() }).toList();
     }
 
     private static List<BusinessIntelligenceReportDto.ChartPointDto> triplePoints(List<Object[]> rows) {
@@ -397,7 +453,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             List<com.worknest.tenant.entity.AttendanceRecord> records = grouped.getOrDefault(cursor, List.of());
             result.add(AttendanceTrendPointDto.builder()
                     .workDate(cursor)
-                    .presentCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.PRESENT).count())
+                    .presentCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.PRESENT && !record.isLate()).count())
                     .lateCount(records.stream().filter(com.worknest.tenant.entity.AttendanceRecord::isLate).count())
                     .halfDayCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.HALF_DAY).count())
                     .incompleteCount(records.stream().filter(record -> record.getStatus() == AttendanceStatus.INCOMPLETE).count())

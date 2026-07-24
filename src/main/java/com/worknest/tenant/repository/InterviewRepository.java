@@ -33,5 +33,17 @@ public interface InterviewRepository extends JpaRepository<Interview, Long>, Jpa
 
     long countByScheduledAtBetween(LocalDateTime from, LocalDateTime to);
 
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT COUNT(i) FROM Interview i
+            WHERE i.scheduledAt BETWEEN :fromDate AND :toDate
+              AND (:department IS NULL OR i.application.jobPosition.department = :department)
+              AND (:applicationStatus IS NULL OR i.application.status = :applicationStatus)
+            """)
+    long countForReport(
+            @org.springframework.data.repository.query.Param("fromDate") LocalDateTime fromDate,
+            @org.springframework.data.repository.query.Param("toDate") LocalDateTime toDate,
+            @org.springframework.data.repository.query.Param("department") String department,
+            @org.springframework.data.repository.query.Param("applicationStatus") com.worknest.tenant.enums.CandidatePipelineStatus applicationStatus);
+
     long countByStatusInAndScheduledAtAfter(List<InterviewStatus> statuses, LocalDateTime scheduledAt);
 }

@@ -12,6 +12,7 @@ import java.util.Map;
 public class RecruitmentReportPageDto {
     private List<Map<String, Object>> rows;
     private Map<String, Long> summary;
+    private List<Map<String, Object>> supportingCharts;
     private int page;
     private int size;
     private long totalElements;

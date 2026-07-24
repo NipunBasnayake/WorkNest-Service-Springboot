@@ -6,6 +6,7 @@ import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.attendance.AttendanceCheckInRequestDto;
 import com.worknest.tenant.dto.attendance.AttendanceCheckOutRequestDto;
 import com.worknest.tenant.dto.attendance.AttendanceResponseDto;
+import com.worknest.tenant.dto.attendance.AttendanceDailySummaryDto;
 import com.worknest.tenant.entity.AttendanceRecord;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.enums.AttendanceStatus;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
@@ -161,6 +163,36 @@ class AttendanceServiceImplTest {
 
         Assertions.assertThat(response.getStatus()).isEqualTo(AttendanceStatus.INCOMPLETE);
         Assertions.assertThat(response.getWorkedMinutes()).isEqualTo(150L);
+    }
+
+    @Test
+    void dateRangeReportUsesTheCompleteFilterScope() {
+        LocalDate from = LocalDate.of(2026, 4, 1);
+        LocalDate to = LocalDate.of(2026, 4, 30);
+        when(attendanceRecordRepository.findForReport(from, to, 11L, "Engineering")).thenReturn(List.of());
+
+        List<AttendanceResponseDto> response = attendanceService.getByDateRange(from, to, 11L, " Engineering ");
+
+        Assertions.assertThat(response).isEmpty();
+        verify(attendanceRecordRepository).findForReport(from, to, 11L, "Engineering");
+    }
+
+    @Test
+    void dailySummaryKeepsLateArrivalsOutOfTheOnTimePresentCount() {
+        LocalDate workDate = LocalDate.of(2026, 4, 14);
+        AttendanceRecord onTime = new AttendanceRecord();
+        onTime.setStatus(AttendanceStatus.PRESENT);
+        onTime.setLate(false);
+        AttendanceRecord late = new AttendanceRecord();
+        late.setStatus(AttendanceStatus.PRESENT);
+        late.setLate(true);
+        when(attendanceRecordRepository.findByWorkDateOrderByEmployeeIdAsc(workDate)).thenReturn(List.of(onTime, late));
+        when(employeeRepository.countByStatus(UserStatus.ACTIVE)).thenReturn(2L);
+
+        AttendanceDailySummaryDto summary = attendanceService.getDailySummary(workDate);
+
+        Assertions.assertThat(summary.getPresentCount()).isEqualTo(1L);
+        Assertions.assertThat(summary.getLateCount()).isEqualTo(1L);
     }
 
     private Employee employee(Long id, String email, UserStatus status) {

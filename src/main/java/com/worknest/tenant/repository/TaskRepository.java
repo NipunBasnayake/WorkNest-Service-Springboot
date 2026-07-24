@@ -42,28 +42,53 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             WHERE t.createdAt BETWEEN :fromDate AND :toDate
               AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
               AND (:employeeId IS NULL OR t.assignee.id = :employeeId) AND t.status <> com.worknest.tenant.enums.TaskStatus.DONE
+              AND (:status IS NULL OR t.status = :status)
             GROUP BY COALESCE(t.assignedTeam.name, 'Unassigned') ORDER BY COUNT(t) DESC
             """)
     List<Object[]> countOpenWorkloadByTeam(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
-            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId,
+            @Param("status") TaskStatus status);
 
     @Query(value = """
             SELECT DATE_FORMAT(t.updated_at, '%Y-%m'), SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END), COUNT(*)
-            FROM tasks t WHERE t.updated_at BETWEEN :fromDate AND :toDate
+            FROM tasks t WHERE t.created_at BETWEEN :fromDate AND :toDate
               AND (:projectId IS NULL OR t.project_id = :projectId) AND (:teamId IS NULL OR t.assigned_team_id = :teamId)
               AND (:employeeId IS NULL OR t.assignee_id = :employeeId)
-            GROUP BY DATE_FORMAT(t.updated_at, '%Y-%m') ORDER BY DATE_FORMAT(t.updated_at, '%Y-%m')
+              AND (:status IS NULL OR t.status = :status)
+            GROUP BY DATE_FORMAT(t.created_at, '%Y-%m') ORDER BY DATE_FORMAT(t.created_at, '%Y-%m')
             """, nativeQuery = true)
     List<Object[]> countCompletionTrend(@Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
-            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId, @Param("employeeId") Long employeeId,
+            @Param("status") String status);
 
     @Query("""
             SELECT COUNT(t) FROM Task t WHERE t.status <> com.worknest.tenant.enums.TaskStatus.DONE AND t.dueDate < :today
+              AND t.createdAt BETWEEN :fromDate AND :toDate
               AND (:projectId IS NULL OR t.project.id = :projectId) AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
               AND (:employeeId IS NULL OR t.assignee.id = :employeeId)
+              AND (:status IS NULL OR t.status = :status)
             """)
-    long countOverdueForReport(@Param("today") LocalDate today, @Param("projectId") Long projectId,
-            @Param("teamId") Long teamId, @Param("employeeId") Long employeeId);
+    long countOverdueForReport(@Param("today") LocalDate today,
+            @Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
+
+    @Query("""
+            SELECT t.project.id, t.project.name, COUNT(t),
+                   SUM(CASE WHEN t.status = com.worknest.tenant.enums.TaskStatus.DONE THEN 1 ELSE 0 END)
+            FROM Task t
+            WHERE t.createdAt BETWEEN :fromDate AND :toDate
+              AND (:projectId IS NULL OR t.project.id = :projectId)
+              AND (:teamId IS NULL OR t.assignedTeam.id = :teamId)
+              AND (:employeeId IS NULL OR t.assignee.id = :employeeId)
+              AND (:status IS NULL OR t.status = :status)
+            GROUP BY t.project.id, t.project.name
+            ORDER BY COUNT(t) DESC
+            """)
+    List<Object[]> summarizeProjectProgressForReport(
+            @Param("fromDate") LocalDateTime fromDate, @Param("toDate") LocalDateTime toDate,
+            @Param("projectId") Long projectId, @Param("teamId") Long teamId,
+            @Param("employeeId") Long employeeId, @Param("status") TaskStatus status);
     @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "assignedBy", "assignedTeam"})
     List<Task> findAllByOrderByCreatedAtDesc();
 

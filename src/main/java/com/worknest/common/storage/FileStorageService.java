@@ -14,6 +14,8 @@ import com.worknest.tenant.entity.StoredFileMetadata;
 import com.worknest.tenant.entity.StoredFileVariant;
 import com.worknest.tenant.repository.StoredFileMetadataRepository;
 import com.worknest.tenant.repository.StoredFileVariantRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -27,9 +29,12 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -41,6 +46,7 @@ import java.util.zip.ZipInputStream;
 
 @Service
 public class FileStorageService {
+    private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
 
     private static final String INTERNAL_PREFIX = "wnfile://";
     private static final String INTERNAL_ID_PREFIX = "wnfileid://";
@@ -85,7 +91,8 @@ public class FileStorageService {
             String storedFileName,
             String contentType,
             byte[] bytes,
-            long size) {
+            long size,
+            String sha256) {
     }
 
     private enum FileKind {
@@ -138,6 +145,8 @@ public class FileStorageService {
         relativeSegments.add(validatedFile.storedFileName());
         String storedName = String.join("/", relativeSegments);
         storageProvider.write(normalizedTenantSlug, storedName, validatedFile.bytes());
+        verifyStoredObject(normalizedTenantSlug, storedName, validatedFile.sha256());
+        registerRollbackCleanup(normalizedTenantSlug, List.of(storedName));
 
         try {
             StoredFileMetadata metadata = new StoredFileMetadata();
@@ -147,13 +156,22 @@ public class FileStorageService {
             metadata.setExtension(validatedFile.extension());
             metadata.setContentType(validatedFile.contentType());
             metadata.setFileSize(validatedFile.size());
+            metadata.setSha256(validatedFile.sha256());
             metadata.setUploadedByUserId(currentUserIdOrNull());
             metadata.setStorageCategory(resolvedCategory);
             metadata.setRelatedModule(resolvedCategory.name());
-            StoredFileMetadata saved = storedFileMetadataRepository.save(metadata);
+            StoredFileMetadata saved = storedFileMetadataRepository.saveAndFlush(metadata);
+            log.info(
+                    "Stored file metadata tenant={} fileId={} category={} path={} bytes={} sha256={}",
+                    normalizedTenantSlug,
+                    saved.getId(),
+                    resolvedCategory,
+                    storedName,
+                    validatedFile.size(),
+                    validatedFile.sha256());
             return toDto(normalizedTenantSlug, saved);
         } catch (RuntimeException exception) {
-            storageProvider.delete(normalizedTenantSlug, storedName);
+            deleteWrittenPaths(normalizedTenantSlug, List.of(storedName));
             throw exception;
         }
     }
@@ -180,17 +198,14 @@ public class FileStorageService {
         Long metadataId = parseMetadataId(storedName);
         if (metadataId != null) {
             StoredFileMetadata metadata = getMetadata(metadataId);
-            storageProvider.delete(normalizedTenantSlug, metadata.getRelativePath());
-            metadata.setActive(false);
-            storedFileMetadataRepository.save(metadata);
+            deactivateAndDelete(normalizedTenantSlug, metadata);
             return;
         }
         String relativePath = normalizeStoredName(storedName);
-        storageProvider.delete(normalizedTenantSlug, relativePath);
-        storedFileMetadataRepository.findByRelativePathAndActiveTrue(relativePath).ifPresent(metadata -> {
-            metadata.setActive(false);
-            storedFileMetadataRepository.save(metadata);
-        });
+        storedFileMetadataRepository.findByRelativePathAndActiveTrue(relativePath)
+                .ifPresentOrElse(
+                        metadata -> deactivateAndDelete(normalizedTenantSlug, metadata),
+                        () -> deletePhysicalSafely(normalizedTenantSlug, relativePath));
     }
 
     public boolean exists(String storedName) {
@@ -215,7 +230,12 @@ public class FileStorageService {
     public StoredFileResource download(String tenantSlug, String storedName) {
         String normalizedTenantSlug = requireActiveTenantSlug(tenantSlug);
         Long metadataId = parseMetadataId(storedName);
-        if (metadataId != null) return resource(normalizedTenantSlug, getMetadata(metadataId));
+        if (metadataId != null) {
+            StoredFileMetadata metadata = getMetadata(metadataId);
+            requireIntegrity(normalizedTenantSlug, metadata.getRelativePath(), metadata.getSha256());
+            logFileRead(normalizedTenantSlug, metadata);
+            return resource(normalizedTenantSlug, metadata);
+        }
         String relativePath = normalizeStoredName(storedName);
         Resource resource = storageProvider.read(normalizedTenantSlug, relativePath);
         String fileName = fileNameFromStoredName(relativePath);
@@ -340,6 +360,7 @@ public class FileStorageService {
         storedFileAccessPolicy.requireRead(metadata);
         String tenantSlug = resolveCurrentTenantSlug();
         requireIntegrity(tenantSlug, metadata.getRelativePath(), metadata.getSha256());
+        logFileRead(tenantSlug, metadata);
         return resource(tenantSlug, metadata);
     }
 
@@ -473,6 +494,7 @@ public class FileStorageService {
             String originalPath = basePath + "/original." + processed.extension();
             storageProvider.write(normalizedTenantSlug, originalPath, processed.bytes());
             writtenPaths.add(originalPath);
+            verifyStoredObject(normalizedTenantSlug, originalPath, processed.sha256());
             StoredImageObjectSet.StoredImageObject original = toStoredImageObject(
                     "original",
                     originalPath,
@@ -489,6 +511,7 @@ public class FileStorageService {
                 String variantPath = basePath + "/" + variant.name() + "." + variant.extension();
                 storageProvider.write(normalizedTenantSlug, variantPath, variant.bytes());
                 writtenPaths.add(variantPath);
+                verifyStoredObject(normalizedTenantSlug, variantPath, variant.sha256());
                 variants.add(toStoredImageObject(
                         variant.name(),
                         variantPath,
@@ -586,6 +609,8 @@ public class FileStorageService {
         String previousPath = current.getRelativePath();
 
         storageProvider.write(tenantSlug, replacementPath, replacement.bytes());
+        verifyStoredObject(tenantSlug, replacementPath, replacement.sha256());
+        registerRollbackCleanup(tenantSlug, List.of(replacementPath));
         try {
             current.setOriginalFilename(replacement.originalName());
             current.setStoredFilename(replacement.storedFileName());
@@ -593,11 +618,22 @@ public class FileStorageService {
             current.setExtension(replacement.extension());
             current.setContentType(replacement.contentType());
             current.setFileSize(replacement.size());
-            StoredFileMetadata saved = storedFileMetadataRepository.save(current);
-            if (!previousPath.equals(replacementPath)) storageProvider.delete(tenantSlug, previousPath);
+            current.setSha256(replacement.sha256());
+            StoredFileMetadata saved = storedFileMetadataRepository.saveAndFlush(current);
+            if (!previousPath.equals(replacementPath)) {
+                deleteAfterCommit(tenantSlug, previousPath);
+            }
+            log.info(
+                    "Replaced stored file tenant={} fileId={} previousPath={} path={} bytes={} sha256={}",
+                    tenantSlug,
+                    saved.getId(),
+                    previousPath,
+                    replacementPath,
+                    replacement.size(),
+                    replacement.sha256());
             return toDto(tenantSlug, saved);
         } catch (RuntimeException exception) {
-            storageProvider.delete(tenantSlug, replacementPath);
+            deleteWrittenPaths(tenantSlug, List.of(replacementPath));
             throw exception;
         }
     }
@@ -686,6 +722,10 @@ public class FileStorageService {
         if (DANGEROUS_EXTENSIONS.contains(extension)) {
             throw new BadRequestException("Executable files are not allowed");
         }
+        if (category == StorageCategory.CANDIDATE_RESUME
+                && !Set.of("pdf", "docx").contains(extension)) {
+            throw new BadRequestException("Only PDF and DOCX resumes are allowed");
+        }
 
         FileKind fileKind = resolveFileKind(extension);
         if (fileKind == FileKind.IMAGE && !category.acceptsImage()) {
@@ -704,7 +744,15 @@ public class FileStorageService {
         String contentType = detectContentType(extension, fileBytes);
         String id = UUID.randomUUID().toString();
         String storedFileName = id + "_" + sanitizeFilename(originalName, extension);
-        return new ValidatedFile(id, originalName, extension, storedFileName, contentType, fileBytes, fileBytes.length);
+        return new ValidatedFile(
+                id,
+                originalName,
+                extension,
+                storedFileName,
+                contentType,
+                fileBytes,
+                fileBytes.length,
+                sha256(fileBytes));
     }
 
     private byte[] readFileBytes(MultipartFile file) {
@@ -832,6 +880,15 @@ public class FileStorageService {
                 || fileBytes[3] != 'F'
                 || fileBytes[4] != '-') {
             throw new BadRequestException("Uploaded file content does not match a PDF document");
+        }
+        int trailerStart = Math.max(0, fileBytes.length - 1024);
+        String trailer = new String(
+                fileBytes,
+                trailerStart,
+                fileBytes.length - trailerStart,
+                StandardCharsets.ISO_8859_1);
+        if (!trailer.contains("%%EOF")) {
+            throw new BadRequestException("Uploaded PDF document is incomplete or corrupt");
         }
     }
 
@@ -968,7 +1025,45 @@ public class FileStorageService {
         if (sha256 == null) return;
         if (!storageProvider.hashMatches(tenantSlug, relativePath, sha256)) {
             observability.recordFallback("stored_object_integrity_failure");
+            log.error(
+                    "Stored object integrity check failed tenant={} path={} expectedSha256={}",
+                    tenantSlug,
+                    relativePath,
+                    sha256);
             throw new ResourceNotFoundException("File not found");
+        }
+    }
+
+    private void logFileRead(String tenantSlug, StoredFileMetadata metadata) {
+        log.info(
+                "Serving stored file tenant={} fileId={} path={} bytes={} contentType={}",
+                tenantSlug,
+                metadata.getId(),
+                metadata.getRelativePath(),
+                metadata.getFileSize(),
+                metadata.getContentType());
+    }
+
+    private void verifyStoredObject(String tenantSlug, String relativePath, String sha256) {
+        if (storageProvider.exists(tenantSlug, relativePath)
+                && storageProvider.hashMatches(tenantSlug, relativePath, sha256)) {
+            return;
+        }
+        observability.recordFallback("stored_object_write_verification_failure");
+        log.error(
+                "Stored object failed post-write verification tenant={} path={} expectedSha256={}",
+                tenantSlug,
+                relativePath,
+                sha256);
+        deleteWrittenPaths(tenantSlug, List.of(relativePath));
+        throw new BadRequestException("Failed to verify stored file");
+    }
+
+    private String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
         }
     }
 
@@ -995,18 +1090,68 @@ public class FileStorageService {
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCompletion(int status) {
-                        if (status != STATUS_COMMITTED) deleteWrittenPaths(tenantSlug, immutablePaths);
+                        if (status != STATUS_COMMITTED) {
+                            log.info(
+                                    "Removing stored objects after transaction rollback tenant={} paths={}",
+                                    tenantSlug,
+                                    immutablePaths);
+                            deleteWrittenPaths(tenantSlug, immutablePaths);
+                        }
                     }
                 }
         );
+    }
+
+    private void deactivateAndDelete(String tenantSlug, StoredFileMetadata metadata) {
+        String relativePath = metadata.getRelativePath();
+        metadata.setActive(false);
+        metadata.setLifecycleState("DELETED");
+        storedFileMetadataRepository.saveAndFlush(metadata);
+        log.info(
+                "Deactivated stored file metadata tenant={} fileId={} path={}",
+                tenantSlug,
+                metadata.getId(),
+                relativePath);
+        deleteAfterCommit(tenantSlug, relativePath);
+    }
+
+    private void deleteAfterCommit(String tenantSlug, String relativePath) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            deletePhysicalSafely(tenantSlug, relativePath);
+            return;
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        deletePhysicalSafely(tenantSlug, relativePath);
+                    }
+                }
+        );
+    }
+
+    private void deletePhysicalSafely(String tenantSlug, String relativePath) {
+        try {
+            storageProvider.delete(tenantSlug, relativePath);
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Stored object cleanup failed tenant={} path={}; metadata remains non-active",
+                    tenantSlug,
+                    relativePath,
+                    exception);
+        }
     }
 
     private void deleteWrittenPaths(String tenantSlug, List<String> paths) {
         for (String path : paths) {
             try {
                 storageProvider.delete(tenantSlug, path);
-            } catch (RuntimeException ignored) {
-                // Reconciliation will retry cleanup if provider deletion fails.
+            } catch (RuntimeException exception) {
+                log.error(
+                        "Stored object rollback cleanup failed tenant={} path={}",
+                        tenantSlug,
+                        path,
+                        exception);
             }
         }
     }

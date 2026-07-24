@@ -9,9 +9,9 @@ import java.util.Map;
 
 @Getter
 @Builder
-public class RecruitmentReportPageDto {
+public class NotificationReportPageDto {
     private List<Map<String, Object>> rows;
-    private Map<String, Long> summary;
+    private Map<String, Object> summary;
     private List<Map<String, Object>> supportingCharts;
     private int page;
     private int size;

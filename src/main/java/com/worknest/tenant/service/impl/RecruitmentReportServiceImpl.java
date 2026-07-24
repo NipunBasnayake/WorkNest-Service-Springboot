@@ -6,12 +6,15 @@ import com.worknest.security.authorization.Permission;
 import com.worknest.tenant.dto.report.RecruitmentReportPageDto;
 import com.worknest.tenant.entity.CandidateApplication;
 import com.worknest.tenant.entity.Interview;
+import com.worknest.tenant.entity.InterviewFeedback;
 import com.worknest.tenant.entity.JobPosition;
 import com.worknest.tenant.enums.CandidatePipelineStatus;
+import com.worknest.tenant.enums.InterviewRecommendation;
 import com.worknest.tenant.enums.InterviewStatus;
 import com.worknest.tenant.enums.JobPositionStatus;
 import com.worknest.tenant.enums.RecruitmentReportType;
 import com.worknest.tenant.repository.CandidateApplicationRepository;
+import com.worknest.tenant.repository.InterviewFeedbackRepository;
 import com.worknest.tenant.repository.InterviewRepository;
 import com.worknest.tenant.repository.JobPositionRepository;
 import com.worknest.tenant.service.RecruitmentReportService;
@@ -27,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
@@ -45,16 +49,19 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
     private final JobPositionRepository jobPositionRepository;
     private final CandidateApplicationRepository candidateApplicationRepository;
     private final InterviewRepository interviewRepository;
+    private final InterviewFeedbackRepository interviewFeedbackRepository;
     private final AuthorizationService authorizationService;
 
     public RecruitmentReportServiceImpl(
             JobPositionRepository jobPositionRepository,
             CandidateApplicationRepository candidateApplicationRepository,
             InterviewRepository interviewRepository,
+            InterviewFeedbackRepository interviewFeedbackRepository,
             AuthorizationService authorizationService) {
         this.jobPositionRepository = jobPositionRepository;
         this.candidateApplicationRepository = candidateApplicationRepository;
         this.interviewRepository = interviewRepository;
+        this.interviewFeedbackRepository = interviewFeedbackRepository;
         this.authorizationService = authorizationService;
     }
 
@@ -136,6 +143,7 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
                         "position", application.getJobPosition().getTitle(),
                         "department", fallback(application.getJobPosition().getDepartment()),
                         "stage", canonicalStage(application.getStatus()).name(),
+                        "source", fallback(firstNonBlank(application.getSource(), application.getCandidate().getSource())),
                         "applied", application.getAppliedAt())
         ).toList();
 
@@ -146,10 +154,12 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
             summary.put("Awaiting account", candidateApplicationRepository.count(specification.and((root, query, cb) -> cb.isNull(root.get("hiredEmployee")))));
         } else {
             summary.put("Applications", result.getTotalElements());
+            summary.put("Applied", candidateApplicationRepository.count(specification.and(applicationStatuses(List.of(CandidatePipelineStatus.APPLIED)))));
             summary.put("Shortlisted", candidateApplicationRepository.count(specification.and(applicationStatuses(shortlistedStatuses()))));
             summary.put("Interviews", candidateApplicationRepository.count(specification.and(applicationStatuses(interviewStatuses()))));
             summary.put("Offers", candidateApplicationRepository.count(specification.and(applicationStatuses(List.of(CandidatePipelineStatus.OFFERED)))));
             summary.put("Hired", candidateApplicationRepository.count(specification.and(applicationStatuses(List.of(CandidatePipelineStatus.HIRED)))));
+            summary.put("Rejected", candidateApplicationRepository.count(specification.and(applicationStatuses(List.of(CandidatePipelineStatus.REJECTED, CandidatePipelineStatus.WITHDRAWN)))));
         }
         return response(result, rows, summary);
     }
@@ -157,21 +167,45 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
     private RecruitmentReportPageDto interviewReport(ReportCriteria criteria, Pageable pageable) {
         Specification<Interview> specification = interviewSpecification(criteria);
         Page<Interview> result = interviewRepository.findAll(specification, pageable);
+        List<Long> pageInterviewIds = result.getContent().stream().map(Interview::getId).toList();
+        Map<Long, InterviewFeedback> pageFeedback = pageInterviewIds.isEmpty()
+                ? Map.of()
+                : interviewFeedbackRepository.findByInterviewIdIn(pageInterviewIds).stream()
+                        .collect(Collectors.toMap(feedback -> feedback.getInterview().getId(), feedback -> feedback));
         List<Map<String, Object>> rows = result.getContent().stream().map(interview -> row(
+                "interviewId", interview.getId(),
                 "candidate", interview.getApplication().getCandidate().getFullName(),
                 "position", interview.getApplication().getJobPosition().getTitle(),
+                "department", fallback(interview.getApplication().getJobPosition().getDepartment()),
+                "employeeId", interview.getInterviewer().getId(),
                 "interviewer", employeeName(interview.getInterviewer()),
                 "scheduled", interview.getScheduledAt(),
                 "mode", interview.getMode().name(),
-                "status", interview.getStatus().name()
+                "status", interview.getStatus().name(),
+                "outcome", recommendationName(pageFeedback.get(interview.getId()))
         )).toList();
+
+        List<Interview> filteredInterviews = interviewRepository.findAll(specification);
+        List<Long> filteredInterviewIds = filteredInterviews.stream().map(Interview::getId).toList();
+        Map<Long, InterviewFeedback> filteredFeedback = filteredInterviewIds.isEmpty()
+                ? Map.of()
+                : interviewFeedbackRepository.findByInterviewIdIn(filteredInterviewIds).stream()
+                        .collect(Collectors.toMap(feedback -> feedback.getInterview().getId(), feedback -> feedback));
+        long recordedOutcomes = filteredFeedback.values().stream()
+                .filter(feedback -> feedback.getRecommendation() != null)
+                .count();
+        long successfulOutcomes = filteredFeedback.values().stream()
+                .filter(feedback -> feedback.getRecommendation() == InterviewRecommendation.HIRE
+                        || feedback.getRecommendation() == InterviewRecommendation.STRONG_HIRE)
+                .count();
 
         Map<String, Long> summary = new LinkedHashMap<>();
         summary.put("Interviews", result.getTotalElements());
-        summary.put("Scheduled", interviewRepository.count(specification.and(interviewStatus(EnumSet.of(InterviewStatus.SCHEDULED, InterviewStatus.RESCHEDULED)))));
+        summary.put("Scheduled", interviewRepository.count(specification.and(interviewStatus(EnumSet.of(InterviewStatus.SCHEDULED)))));
         summary.put("Completed", interviewRepository.count(specification.and(interviewStatus(EnumSet.of(InterviewStatus.COMPLETED)))));
-        summary.put("Cancelled", interviewRepository.count(specification.and(interviewStatus(EnumSet.of(InterviewStatus.CANCELLED)))));
-        return response(result, rows, summary);
+        summary.put("Recorded outcomes", recordedOutcomes);
+        summary.put("Successful outcomes", successfulOutcomes);
+        return response(result, rows, summary, interviewCharts(filteredInterviews, filteredFeedback));
     }
 
     private Specification<JobPosition> jobSpecification(ReportCriteria criteria) {
@@ -196,11 +230,12 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
             var job = root.join("jobPosition");
             List<Predicate> predicates = new ArrayList<>();
             if (hiringOnly) predicates.add(cb.equal(root.get("status"), CandidatePipelineStatus.HIRED));
-            addContainsAny(predicates, cb, criteria.search(), candidate.get("fullName"), candidate.get("email"), job.get("title"), job.get("department"));
+            addContainsAny(predicates, cb, criteria.search(), candidate.get("fullName"), candidate.get("email"), job.get("title"), job.get("department"), root.get("source"), candidate.get("source"));
             addContains(predicates, cb, candidate.get("fullName"), criteria.column("candidate"));
             addContains(predicates, cb, candidate.get("email"), criteria.column("email"));
             addContains(predicates, cb, job.get("title"), criteria.column("position"));
             addContains(predicates, cb, job.get("department"), firstNonBlank(criteria.department(), criteria.column("department")));
+            addContainsAny(predicates, cb, criteria.column("source"), root.get("source"), candidate.get("source"));
             addDateRange(predicates, cb, root.get(hiringOnly ? "hiredAt" : "appliedAt"), criteria.fromDate(), criteria.toDate());
             if (!hiringOnly) {
                 String selectedStatus = firstNonBlank(criteria.status(), criteria.column("stage"));
@@ -222,12 +257,31 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
             addContains(predicates, cb, candidate.get("fullName"), criteria.column("candidate"));
             addContains(predicates, cb, job.get("title"), criteria.column("position"));
             addContainsAny(predicates, cb, criteria.column("interviewer"), interviewer.get("firstName"), interviewer.get("lastName"));
-            addContains(predicates, cb, job.get("department"), criteria.department());
+            addContains(predicates, cb, job.get("department"), firstNonBlank(criteria.department(), criteria.column("department")));
             addDateRange(predicates, cb, root.get("scheduledAt"), criteria.fromDate(), criteria.toDate());
+            String employeeId = criteria.column("employeeId");
+            if (employeeId != null) {
+                try {
+                    predicates.add(cb.equal(interviewer.get("id"), Long.valueOf(employeeId)));
+                } catch (NumberFormatException exception) {
+                    throw new BadRequestException("employeeId has an unsupported value");
+                }
+            }
             String selectedStatus = firstNonBlank(criteria.status(), criteria.column("status"));
             if (selectedStatus != null) predicates.add(cb.equal(root.get("status"), parseEnum(InterviewStatus.class, selectedStatus, "status")));
             String mode = criteria.column("mode");
             if (mode != null) predicates.add(cb.equal(cb.lower(root.get("mode").as(String.class)), mode.toLowerCase(Locale.ROOT)));
+            String outcome = criteria.column("outcome");
+            if (outcome != null) {
+                InterviewRecommendation recommendation = parseEnum(InterviewRecommendation.class, outcome, "outcome");
+                var feedbackQuery = query.subquery(Long.class);
+                var feedback = feedbackQuery.from(InterviewFeedback.class);
+                feedbackQuery.select(feedback.get("interview").get("id"))
+                        .where(
+                                cb.equal(feedback.get("interview").get("id"), root.get("id")),
+                                cb.equal(feedback.get("recommendation"), recommendation));
+                predicates.add(cb.exists(feedbackQuery));
+            }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
     }
@@ -265,15 +319,84 @@ public class RecruitmentReportServiceImpl implements RecruitmentReportService {
     }
 
     private <T> RecruitmentReportPageDto response(Page<T> page, List<Map<String, Object>> rows, Map<String, Long> summary) {
+        return response(page, rows, summary, List.of());
+    }
+
+    private <T> RecruitmentReportPageDto response(
+            Page<T> page,
+            List<Map<String, Object>> rows,
+            Map<String, Long> summary,
+            List<Map<String, Object>> supportingCharts) {
         return RecruitmentReportPageDto.builder()
                 .rows(rows)
                 .summary(summary)
+                .supportingCharts(supportingCharts)
                 .page(page.getNumber())
                 .size(page.getSize())
                 .totalElements(page.getTotalElements())
                 .totalPages(page.getTotalPages())
                 .generatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    private List<Map<String, Object>> interviewCharts(
+            List<Interview> interviews,
+            Map<Long, InterviewFeedback> feedbackByInterviewId) {
+        Map<String, Long> statuses = new LinkedHashMap<>();
+        for (InterviewStatus status : InterviewStatus.values()) statuses.put(status.name(), 0L);
+        Map<String, Long> modes = new LinkedHashMap<>();
+        Map<String, Long> dailySchedule = new java.util.TreeMap<>();
+        Map<String, Long> monthlyInterviews = new java.util.TreeMap<>();
+        Map<String, Long> interviewers = new java.util.HashMap<>();
+        Map<String, Long> outcomes = new LinkedHashMap<>();
+        for (InterviewRecommendation recommendation : InterviewRecommendation.values()) {
+            outcomes.put(recommendation.name(), 0L);
+        }
+
+        for (Interview interview : interviews) {
+            statuses.computeIfPresent(interview.getStatus().name(), (key, count) -> count + 1);
+            modes.merge(interview.getMode().name(), 1L, Long::sum);
+            dailySchedule.merge(interview.getScheduledAt().toLocalDate().toString(), 1L, Long::sum);
+            monthlyInterviews.merge(
+                    interview.getScheduledAt().format(DateTimeFormatter.ofPattern("yyyy-MM")),
+                    1L,
+                    Long::sum);
+            interviewers.merge(employeeName(interview.getInterviewer()), 1L, Long::sum);
+            InterviewFeedback feedback = feedbackByInterviewId.get(interview.getId());
+            if (feedback != null && feedback.getRecommendation() != null) {
+                outcomes.computeIfPresent(feedback.getRecommendation().name(), (key, count) -> count + 1);
+            }
+        }
+
+        List<Map<String, Object>> charts = new ArrayList<>();
+        charts.add(reportChart("Interview Status", "Interviews by exact database status", "donut", statuses));
+        charts.add(reportChart("Interview Type", "Interviews by recorded mode", "bar", modes));
+        charts.add(reportChart("Interview Schedule", "Scheduled interview records by day", "line", dailySchedule));
+        charts.add(reportChart("Interview Outcome", "Recorded interview feedback recommendations", "bar", outcomes));
+        charts.add(reportChart("Interviewer Distribution", "Interviews assigned to each interviewer", "horizontalBar",
+                interviewers.entrySet().stream()
+                        .sorted(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (left, right) -> left, LinkedHashMap::new))));
+        charts.add(reportChart("Monthly Interviews", "Interview records by scheduled month", "line", monthlyInterviews));
+        return charts;
+    }
+
+    private Map<String, Object> reportChart(
+            String title,
+            String subtitle,
+            String variant,
+            Map<String, Long> values) {
+        List<Map<String, Object>> data = values.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
+                .map(entry -> row("label", entry.getKey(), "value", entry.getValue()))
+                .toList();
+        return row("title", title, "subtitle", subtitle, "variant", variant, "data", data);
+    }
+
+    private String recommendationName(InterviewFeedback feedback) {
+        return feedback == null || feedback.getRecommendation() == null
+                ? null
+                : feedback.getRecommendation().name();
     }
 
     private Map<String, Object> row(Object... values) {

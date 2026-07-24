@@ -110,7 +110,10 @@ class PublicCandidateApplicationServiceImplTest {
         when(masterTenantLookupService.findBySlug("residue-solutions")).thenReturn(Optional.of(tenant));
         when(jobPositionRepository.findPublishedJobBySlug("software-engineer")).thenReturn(Optional.of(job));
         when(candidateRepository.findByEmailIgnoreCase("ada@example.com")).thenReturn(Optional.empty());
-        when(fileStorageService.store(request.getResume(), StorageCategory.CANDIDATE_RESUME)).thenReturn(storedResume(fileName));
+        when(fileStorageService.store(
+                "residue-solutions",
+                StorageCategory.CANDIDATE_RESUME,
+                request.getResume())).thenReturn(storedResume(fileName));
         when(candidateRepository.save(any(Candidate.class))).thenAnswer(invocation -> {
             Candidate candidate = invocation.getArgument(0);
             candidate.setId(25L);
@@ -153,7 +156,10 @@ class PublicCandidateApplicationServiceImplTest {
         assertThatThrownBy(() -> service.apply("residue-solutions", "software-engineer", request))
                 .isInstanceOf(DuplicateApplicationException.class)
                 .hasMessage("You already have an active application for this vacancy");
-        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
+        verify(fileStorageService, never()).store(
+                any(String.class),
+                eq(StorageCategory.CANDIDATE_RESUME),
+                any());
     }
 
     @Test
@@ -174,7 +180,10 @@ class PublicCandidateApplicationServiceImplTest {
         assertThatThrownBy(() -> service.apply("residue-solutions", "missing-job", request("resume.pdf")))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessage("Job vacancy not found");
-        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
+        verify(fileStorageService, never()).store(
+                any(String.class),
+                eq(StorageCategory.CANDIDATE_RESUME),
+                any());
     }
 
     @Test
@@ -193,7 +202,10 @@ class PublicCandidateApplicationServiceImplTest {
                 .hasMessage("Only PDF and DOCX resumes are allowed");
 
         verify(jobPositionRepository).findPublishedJobBySlug("business.analyst-2026-7");
-        verify(fileStorageService, never()).store(any(), eq(StorageCategory.CANDIDATE_RESUME));
+        verify(fileStorageService, never()).store(
+                any(String.class),
+                eq(StorageCategory.CANDIDATE_RESUME),
+                any());
     }
 
     @Test

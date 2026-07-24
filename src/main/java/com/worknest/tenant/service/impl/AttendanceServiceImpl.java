@@ -151,11 +151,26 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public List<AttendanceResponseDto> getByDateRange(LocalDate fromDate, LocalDate toDate, Long employeeId, String department) {
+        if (toDate.isBefore(fromDate)) {
+            throw new BadRequestException("toDate cannot be before fromDate");
+        }
+        if (fromDate.plusYears(2).isBefore(toDate)) {
+            throw new BadRequestException("Date range cannot exceed two years");
+        }
+        String normalizedDepartment = department == null || department.isBlank() ? null : department.trim();
+        return attendanceRecordRepository.findForReport(fromDate, toDate, employeeId, normalizedDepartment).stream()
+                .map(this::toAttendanceResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public AttendanceDailySummaryDto getDailySummary(LocalDate workDate) {
         List<AttendanceRecord> records = attendanceRecordRepository.findByWorkDateOrderByEmployeeIdAsc(workDate);
         long activeEmployees = employeeRepository.countByStatus(UserStatus.ACTIVE);
 
-        long presentCount = records.stream().filter(r -> r.getStatus() == AttendanceStatus.PRESENT).count();
+        long presentCount = records.stream().filter(r -> r.getStatus() == AttendanceStatus.PRESENT && !r.isLate()).count();
         long lateCount = records.stream().filter(AttendanceRecord::isLate).count();
         long halfDayCount = records.stream().filter(r -> r.getStatus() == AttendanceStatus.HALF_DAY).count();
         long incompleteCount = records.stream().filter(r -> r.getStatus() == AttendanceStatus.INCOMPLETE).count();
@@ -187,7 +202,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         List<AttendanceRecord> records = attendanceRecordRepository
                 .findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(employeeId, from, to);
 
-        long presentDays = records.stream().filter(r -> r.getStatus() == AttendanceStatus.PRESENT).count();
+        long presentDays = records.stream().filter(r -> r.getStatus() == AttendanceStatus.PRESENT && !r.isLate()).count();
     long lateDays = records.stream().filter(AttendanceRecord::isLate).count();
         long halfDays = records.stream().filter(r -> r.getStatus() == AttendanceStatus.HALF_DAY).count();
         long incompleteDays = records.stream().filter(r -> r.getStatus() == AttendanceStatus.INCOMPLETE).count();

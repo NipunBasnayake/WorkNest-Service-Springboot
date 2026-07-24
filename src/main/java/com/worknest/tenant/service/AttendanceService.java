@@ -15,6 +15,8 @@ public interface AttendanceService {
 
     List<AttendanceResponseDto> getByDate(LocalDate workDate);
 
+    List<AttendanceResponseDto> getByDateRange(LocalDate fromDate, LocalDate toDate, Long employeeId, String department);
+
     AttendanceDailySummaryDto getDailySummary(LocalDate workDate);
 
     AttendanceMonthlySummaryDto getMonthlySummary(Long employeeId, int year, int month);

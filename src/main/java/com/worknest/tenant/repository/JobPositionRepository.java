@@ -32,6 +32,13 @@ public interface JobPositionRepository extends JpaRepository<JobPosition, Long>,
 
     long countByStatusAndDeletedFalse(JobPositionStatus status);
 
+    @Query("""
+            SELECT COUNT(j) FROM JobPosition j
+            WHERE j.status = :status AND j.deleted = false
+              AND (:department IS NULL OR j.department = :department)
+            """)
+    long countByStatusForReport(@Param("status") JobPositionStatus status, @Param("department") String department);
+
     default List<JobPosition> findPublishedJobs() {
         return findPublishedJobs(JobPositionStatus.OPEN, LocalDateTime.now());
     }

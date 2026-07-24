@@ -76,6 +76,17 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public EmployeeResponseDto createEmployee(EmployeeCreateRequestDto requestDto) {
+        return createEmployee(requestDto, false);
+    }
+
+    @Override
+    public EmployeeResponseDto createEmployeeFromRecruitment(EmployeeCreateRequestDto requestDto) {
+        return createEmployee(requestDto, true);
+    }
+
+    private EmployeeResponseDto createEmployee(
+            EmployeeCreateRequestDto requestDto,
+            boolean reconcileExistingPlatformUser) {
         authorizationService.requirePermission(Permission.CREATE_EMPLOYEE);
         String email = normalizeEmail(requestDto.getEmail());
         PlatformRole requestedRole = normalizeRequestedRole(requestDto.getRole());
@@ -113,11 +124,15 @@ public class EmployeeServiceImpl implements EmployeeService {
                 savedEmployee.getId(),
                 "{\"email\":\"" + escapeJson(savedEmployee.getEmail()) + "\"}"
         );
-        PlatformUser syncedUser = platformUserSyncBridgeService.syncOnCreate(
-                savedEmployee,
-                requestDto.getPassword(),
-                tenantKey
-        );
+        PlatformUser syncedUser = reconcileExistingPlatformUser
+                ? platformUserSyncBridgeService.provisionEmployeeAccount(
+                        savedEmployee,
+                        requestDto.getPassword(),
+                        tenantKey)
+                : platformUserSyncBridgeService.syncOnCreate(
+                        savedEmployee,
+                        requestDto.getPassword(),
+                        tenantKey);
         savedEmployee = linkPlatformUser(savedEmployee, syncedUser);
 
         replaceEmployeeSkills(savedEmployee, normalizedSkills);
@@ -585,7 +600,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     private Map<String, String> normalizeSkillRequests(List<EmployeeSkillCreateRequestDto> requestedSkills) {
         if (requestedSkills == null) {
-            return null;
+            return new LinkedHashMap<>();
         }
         if (requestedSkills.size() > MAX_SKILLS_PER_EMPLOYEE) {
             throw new BadRequestException("An employee can have at most 10 skills");
@@ -606,13 +621,14 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     private void replaceEmployeeSkills(Employee employee, Map<String, String> requestedSkills) {
+        Map<String, String> normalizedSkills = requestedSkills == null ? Map.of() : requestedSkills;
         List<EmployeeSkill> existingSkills = employeeSkillRepository.findByEmployeeIdOrderBySkillNameAsc(employee.getId());
         Map<String, EmployeeSkill> existingByName = new LinkedHashMap<>();
         for (EmployeeSkill existing : existingSkills) {
             existingByName.put(normalizeSkillName(existing.getSkillName()).toLowerCase(Locale.ROOT), existing);
         }
 
-        List<EmployeeSkill> desiredSkills = requestedSkills.entrySet().stream().map(entry -> {
+        List<EmployeeSkill> desiredSkills = normalizedSkills.entrySet().stream().map(entry -> {
             EmployeeSkill employeeSkill = existingByName.remove(entry.getKey());
             if (employeeSkill == null) {
                 employeeSkill = new EmployeeSkill();

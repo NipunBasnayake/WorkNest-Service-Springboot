@@ -1,14 +1,19 @@
 package com.worknest.tenant.service.impl;
 
 import com.worknest.common.enums.PlatformRole;
+import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.BadRequestException;
+import com.worknest.common.exception.ResourceNotFoundException;
 import com.worknest.common.storage.FileStorageService;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.security.authorization.AuthorizationService;
+import com.worknest.tenant.dto.employee.EmployeeCreateRequestDto;
+import com.worknest.tenant.dto.employee.EmployeeResponseDto;
 import com.worknest.tenant.dto.recruitment.CandidateApplicationUpdateRequestDto;
 import com.worknest.tenant.dto.recruitment.RecruitmentHireRequestDto;
 import com.worknest.tenant.entity.Candidate;
 import com.worknest.tenant.entity.CandidateApplication;
+import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.JobPosition;
 import com.worknest.tenant.enums.CandidatePipelineStatus;
 import com.worknest.tenant.repository.*;
@@ -17,9 +22,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,7 +85,90 @@ class RecruitmentServiceImplTest {
         assertThatThrownBy(() -> service.hireApplication(1L, request))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("only Employee or Manager");
-        verify(employeeService, never()).createEmployee(any());
+        verify(employeeService, never()).createEmployeeFromRecruitment(any());
+    }
+
+    @Test
+    void hireCandidateWithoutSkillsCreatesEmployeeAndMarksApplicationHired() {
+        CandidateApplication application = application(CandidatePipelineStatus.OFFERED);
+        when(applicationRepository.findById(1L)).thenReturn(Optional.of(application));
+        when(interviewRepository.existsByApplicationId(1L)).thenReturn(true);
+        when(applicationRepository.existsByCandidateIdAndStatusAndIdNot(
+                2L, CandidatePipelineStatus.HIRED, 1L)).thenReturn(false);
+        when(employeeRepository.existsByEmailIgnoreCase("alex@example.com")).thenReturn(false);
+
+        EmployeeResponseDto createdResponse = EmployeeResponseDto.builder()
+                .id(7L)
+                .employeeCode("WN-HIRE-007")
+                .firstName("Alex")
+                .lastName("Perera")
+                .email("alex@example.com")
+                .role(PlatformRole.EMPLOYEE)
+                .status(UserStatus.ACTIVE)
+                .joinedDate(LocalDate.now())
+                .build();
+        when(employeeService.createEmployeeFromRecruitment(any(EmployeeCreateRequestDto.class))).thenReturn(createdResponse);
+
+        Employee createdEmployee = new Employee();
+        createdEmployee.setId(7L);
+        createdEmployee.setEmployeeCode("WN-HIRE-007");
+        createdEmployee.setFirstName("Alex");
+        createdEmployee.setLastName("Perera");
+        createdEmployee.setEmail("alex@example.com");
+        createdEmployee.setRole(PlatformRole.EMPLOYEE);
+        createdEmployee.setStatus(UserStatus.ACTIVE);
+        when(employeeRepository.findById(7L)).thenReturn(Optional.of(createdEmployee));
+        when(applicationRepository.save(any(CandidateApplication.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authorizationService.getCurrentTenantKeyOrThrow()).thenReturn("tenant-key");
+        when(masterTenantLookupService.findByTenantKey("tenant-key")).thenReturn(Optional.empty());
+
+        RecruitmentHireRequestDto request = new RecruitmentHireRequestDto();
+        request.setTemporaryPassword("WorkNest@2026");
+
+        var response = service.hireApplication(1L, request);
+
+        ArgumentCaptor<EmployeeCreateRequestDto> employeeRequest =
+                ArgumentCaptor.forClass(EmployeeCreateRequestDto.class);
+        verify(employeeService).createEmployeeFromRecruitment(employeeRequest.capture());
+        assertThat(employeeRequest.getValue().getSkills()).isEmpty();
+        assertThat(response.getEmployee().getId()).isEqualTo(7L);
+        assertThat(response.getApplication().getStatus()).isEqualTo(CandidatePipelineStatus.HIRED);
+        assertThat(application.getHiredEmployee()).isSameAs(createdEmployee);
+        assertThat(application.getHiredAt()).isNotNull();
+    }
+
+    @Test
+    void hiringCandidateTwiceIsRejectedBeforeEmployeeCreation() {
+        CandidateApplication application = application(CandidatePipelineStatus.HIRED);
+        when(applicationRepository.findById(1L)).thenReturn(Optional.of(application));
+
+        assertThatThrownBy(() -> service.hireApplication(1L, new RecruitmentHireRequestDto()))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Candidate application is already hired");
+        verify(employeeService, never()).createEmployeeFromRecruitment(any());
+    }
+
+    @Test
+    void hiringApplicationWithInvalidCandidateIsRejected() {
+        CandidateApplication application = application(CandidatePipelineStatus.OFFERED);
+        application.setCandidate(null);
+        when(applicationRepository.findById(1L)).thenReturn(Optional.of(application));
+
+        assertThatThrownBy(() -> service.hireApplication(1L, new RecruitmentHireRequestDto()))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessage("Candidate not found for application: 1");
+        verify(employeeService, never()).createEmployeeFromRecruitment(any());
+    }
+
+    @Test
+    void hiringInvalidApplicationIsRejected() {
+        when(applicationRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.hireApplication(999L, new RecruitmentHireRequestDto()))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Application not found");
+        verify(employeeService, never()).createEmployeeFromRecruitment(any());
     }
 
     @Test

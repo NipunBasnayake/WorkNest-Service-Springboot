@@ -111,6 +111,14 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         PublicCompanyDto company = toCompanyDto(tenant);
         JobPosition jobPosition = resolvePublicJob(jobSlug);
         String email = normalizeEmail(requestDto.getEmail());
+        MultipartFile resume = requestDto.getResume();
+        log.info(
+                "Public application received tenant={} job={} resumeName={} resumeContentType={} resumeBytes={}",
+                tenant.getSlug(),
+                jobPosition.getSlug(),
+                resume == null ? null : resume.getOriginalFilename(),
+                resume == null ? null : resume.getContentType(),
+                resume == null ? 0 : resume.getSize());
 
         Candidate candidate = candidateRepository.findByEmailIgnoreCase(email).orElseGet(Candidate::new);
         if (candidate.getId() != null) {
@@ -124,8 +132,16 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         }
 
         String previousResume = candidate.getResumeFileUrl();
-        StoredFileDto storedResume = storeResume(requestDto.getResume());
-        registerResumeCleanup(tenant.getSlug(), "wnfileid://" + storedResume.id(), previousResume);
+        StoredFileDto storedResume = storeResume(tenant.getSlug(), resume);
+        registerPreviousResumeCleanup(tenant.getSlug(), previousResume);
+        log.info(
+                "Public application resume stored tenant={} job={} fileId={} path={} bytes={} contentType={}",
+                tenant.getSlug(),
+                jobPosition.getSlug(),
+                storedResume.id(),
+                storedResume.storedName(),
+                storedResume.size(),
+                storedResume.contentType());
         applyCandidateFields(candidate, requestDto, email, storedResume);
         Candidate savedCandidate = candidateRepository.save(candidate);
         fileStorageService.link(
@@ -156,6 +172,14 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                 tenant.getSlug(),
                 company.getCompanyName(),
                 buildCareersLink(company.getTenantSlug())));
+        log.info(
+                "Public application finalized tenant={} job={} applicationId={} candidateId={} fileId={} reference={}",
+                tenant.getSlug(),
+                jobPosition.getSlug(),
+                finalizedApplication.getId(),
+                savedCandidate.getId(),
+                storedResume.id(),
+                finalizedApplication.getReferenceNumber());
 
         return PublicApplicationResponseDto.builder()
                 .referenceNumber(finalizedApplication.getReferenceNumber())
@@ -207,7 +231,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
                 .orElseThrow(() -> new ResourceNotFoundException("Job vacancy not found"));
     }
 
-    private StoredFileDto storeResume(MultipartFile resume) {
+    private StoredFileDto storeResume(String tenantSlug, MultipartFile resume) {
         if (resume == null || resume.isEmpty()) {
             throw new BadRequestException("Resume is required");
         }
@@ -216,7 +240,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         if (!"pdf".equals(extension) && !"docx".equals(extension)) {
             throw new BadRequestException("Only PDF and DOCX resumes are allowed");
         }
-        return fileStorageService.store(resume, StorageCategory.CANDIDATE_RESUME);
+        return fileStorageService.store(tenantSlug, StorageCategory.CANDIDATE_RESUME, resume);
     }
 
     private void applyCandidateFields(
@@ -241,17 +265,13 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
         candidate.setResumeFileSizeBytes(storedResume.size());
     }
 
-    private void registerResumeCleanup(String tenantSlug, String newReference, String previousReference) {
+    private void registerPreviousResumeCleanup(String tenantSlug, String previousReference) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
-            public void afterCompletion(int status) {
-                if (status == TransactionSynchronization.STATUS_COMMITTED) {
-                    if (fileStorageService.isLocalReference(previousReference)) {
-                        deleteResumeSafely(tenantSlug, previousReference);
-                    }
-                } else {
-                    deleteResumeSafely(tenantSlug, newReference);
+            public void afterCommit() {
+                if (fileStorageService.isLocalReference(previousReference)) {
+                    deleteResumeSafely(tenantSlug, previousReference);
                 }
             }
         });

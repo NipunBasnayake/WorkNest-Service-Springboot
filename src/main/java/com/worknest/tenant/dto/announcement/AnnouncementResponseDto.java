@@ -15,7 +15,6 @@ public class AnnouncementResponseDto {
     private Long id;
     private String title;
     private String content;
-    private String message;
     private Long createdByEmployeeId;
     private String createdByName;
     private EmployeeSimpleDto createdBy;

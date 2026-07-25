@@ -12,6 +12,9 @@ import java.util.Optional;
 
 public interface HrMessageRepository extends JpaRepository<HrMessage, Long> {
 
+    @EntityGraph(attributePaths = {"conversation", "conversation.employee", "conversation.hr", "sender"})
+    Optional<HrMessage> findWithAccessContextById(Long id);
+
     @EntityGraph(attributePaths = {"conversation", "sender"})
     List<HrMessage> findByConversationIdOrderByCreatedAtAsc(Long conversationId);
 

@@ -13,6 +13,14 @@ import java.util.Optional;
 
 public interface TeamChatMessageRepository extends JpaRepository<TeamChatMessage, Long> {
 
+    @EntityGraph(attributePaths = {
+            "teamChat",
+            "teamChat.team",
+            "teamChat.team.manager",
+            "sender"
+    })
+    Optional<TeamChatMessage> findWithAccessContextById(Long id);
+
     @EntityGraph(attributePaths = {"teamChat", "sender"})
     List<TeamChatMessage> findByTeamChatIdOrderByCreatedAtAsc(Long teamChatId);
 

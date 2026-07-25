@@ -273,7 +273,7 @@ public class AttachmentServiceImpl implements AttachmentService {
     }
 
     private void validateAnnouncementAccess(Long announcementId, Employee currentEmployee, boolean write) {
-        Announcement announcement = announcementRepository.findById(announcementId)
+        Announcement announcement = announcementRepository.findWithDetailsById(announcementId)
                 .orElseThrow(() -> new ResourceNotFoundException("Announcement not found with id: " + announcementId));
 
         if (write) {
@@ -286,11 +286,15 @@ public class AttachmentServiceImpl implements AttachmentService {
         }
 
         Team team = announcement.getTeam();
-        boolean isParticipant = (team.getManager() != null && currentEmployee.getId().equals(team.getManager().getId()))
-                || teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), currentEmployee.getId()).isPresent();
+        boolean participant = (team.getManager() != null
+                && currentEmployee.getId().equals(team.getManager().getId()))
+                || teamMemberRepository
+                        .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(
+                                team.getId(),
+                                currentEmployee.getId())
+                        .isPresent();
         PlatformRole role = authorizationService.getCurrentRoleOrThrow();
-        boolean privileged = role.isTenantAdminEquivalent() || role.isHrEquivalent();
-        if (!privileged && !isParticipant) {
+        if (!participant && !role.isTenantAdminEquivalent() && !role.isHrEquivalent()) {
             throw new ForbiddenOperationException("You are not allowed to access attachments for this announcement");
         }
     }

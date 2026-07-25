@@ -8,6 +8,7 @@ import com.worknest.tenant.service.AttachmentService;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -75,6 +76,16 @@ public class AttachmentController {
     @GetMapping("/{id}/download")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
     public ResponseEntity<Resource> downloadAttachment(@PathVariable("id") Long id) {
+        return attachmentResource(id, false);
+    }
+
+    @GetMapping("/{id}/preview")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+    public ResponseEntity<Resource> previewAttachment(@PathVariable("id") Long id) {
+        return attachmentResource(id, true);
+    }
+
+    private ResponseEntity<Resource> attachmentResource(Long id, boolean inline) {
         AttachmentService.AttachmentDownloadResult result = attachmentService.downloadAttachment(id);
         if (result.redirectUrl() != null && !result.redirectUrl().isBlank()) {
             return ResponseEntity.status(HttpStatus.FOUND)
@@ -91,11 +102,17 @@ public class AttachmentController {
             }
         }
 
-        String encodedFileName = UriUtils.encode(result.fileName(), StandardCharsets.UTF_8);
-        String contentDisposition = "attachment; filename*=UTF-8''" + encodedFileName;
+        ContentDisposition contentDisposition = (inline
+                ? ContentDisposition.inline()
+                : ContentDisposition.attachment())
+                .filename(result.fileName(), StandardCharsets.UTF_8)
+                .build();
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition.toString())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store, max-age=0")
+                .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION, "X-Tenant-ID")
+                .header("X-Content-Type-Options", "nosniff")
                 .contentType(mediaType)
                 .body(result.resource());
     }

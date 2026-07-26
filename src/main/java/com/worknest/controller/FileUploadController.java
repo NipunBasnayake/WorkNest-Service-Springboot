@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.storage.StorageCategory;
@@ -27,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 @RestController
 @RequestMapping("/api/{tenantSlug}/files")
 @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+@RequiresFeature(FeatureKey.DOCUMENTS)
 public class FileUploadController {
 
     private final FileStorageService fileStorageService;

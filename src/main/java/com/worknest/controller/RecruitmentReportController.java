@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.report.RecruitmentReportPageDto;
 import com.worknest.tenant.enums.RecruitmentReportType;
@@ -18,6 +20,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/reports/recruitment")
+@RequiresFeature({FeatureKey.REPORTS, FeatureKey.RECRUITMENT})
 public class RecruitmentReportController {
 
     private final RecruitmentReportService recruitmentReportService;

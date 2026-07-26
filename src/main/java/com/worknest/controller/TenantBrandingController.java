@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.common.web.BrandingHttpSupport;
 import com.worknest.common.storage.AssetObservability;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/{tenantSlug}")
 @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+@RequiresFeature(FeatureKey.SETTINGS)
 public class TenantBrandingController {
 
     private final TenantBrandingService tenantBrandingService;

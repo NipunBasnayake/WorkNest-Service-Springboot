@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.publicapi.dto.PublicCareerJobDetailDto;
 import com.worknest.publicapi.dto.PublicCareersResponseDto;
@@ -14,6 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @Validated
 @RequestMapping("/api/public/{tenantSlug}/careers")
+@RequiresFeature(
+        value = FeatureKey.RECRUITMENT,
+        tenantParameter = "tenantSlug")
 public class PublicCareersController {
 
     private final PublicCareersService publicCareersService;

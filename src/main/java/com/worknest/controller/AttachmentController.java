@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.attachment.AttachmentCreateRequestDto;
 import com.worknest.tenant.dto.attachment.AttachmentResponseDto;
@@ -24,6 +26,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/attachments")
+@RequiresFeature(FeatureKey.DOCUMENTS)
 public class AttachmentController {
 
     private final AttachmentService attachmentService;

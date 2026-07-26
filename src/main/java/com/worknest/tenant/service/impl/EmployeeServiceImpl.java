@@ -20,6 +20,9 @@ import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.EmployeeSkillRepository;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.EmployeeService;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -35,6 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.security.SecureRandom;
 
+@Slf4j
 @Service
 @Transactional(transactionManager = "transactionManager")
 public class EmployeeServiceImpl implements EmployeeService {
@@ -87,6 +91,16 @@ public class EmployeeServiceImpl implements EmployeeService {
     private EmployeeResponseDto createEmployee(
             EmployeeCreateRequestDto requestDto,
             boolean reconcileExistingPlatformUser) {
+
+        System.out.println("Employee Service - Create");
+        System.out.println(requestDto.getNic());
+
+        String gender = genderFinder(requestDto.getNic());
+        System.out.println(gender);
+
+        boolean is18Plus = getVerifyAge(requestDto.getNic());
+        System.out.println(is18Plus);
+
         authorizationService.requirePermission(Permission.CREATE_EMPLOYEE);
         String email = normalizeEmail(requestDto.getEmail());
         PlatformRole requestedRole = normalizeRequestedRole(requestDto.getRole());
@@ -104,6 +118,8 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setEmployeeCode(employeeCode);
         employee.setFirstName(requestDto.getFirstName().trim());
         employee.setLastName(requestDto.getLastName().trim());
+        employee.setNicNumber(requestDto.getNic());
+        employee.setGender(gender);
         employee.setEmail(email);
         employee.setPasswordHash(passwordEncoder.encode(requestDto.getPassword()));
         employee.setRole(requestedRole);
@@ -115,30 +131,62 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setJoinedDate(requestDto.getJoinedDate());
         employee.setStatus(requestDto.getStatus() == null ? UserStatus.ACTIVE : requestDto.getStatus());
 
-        Employee savedEmployee = employeeRepository.save(employee);
-        String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
-        auditLogService.logAction(
-                AuditActionType.CREATE,
-                AuditEntityType.EMPLOYEE,
-                savedEmployee.getId(),
-                "{\"email\":\"" + escapeJson(savedEmployee.getEmail()) + "\"}"
-        );
-        PlatformUser syncedUser = reconcileExistingPlatformUser
-                ? platformUserSyncBridgeService.provisionEmployeeAccount(
-                        savedEmployee,
-                        requestDto.getPassword(),
-                        tenantKey)
-                : platformUserSyncBridgeService.syncOnCreate(
-                        savedEmployee,
-                        requestDto.getPassword(),
-                        tenantKey);
-        savedEmployee = linkPlatformUser(savedEmployee, syncedUser);
+        if (is18Plus){
+            Employee savedEmployee = employeeRepository.save(employee);
+            String tenantKey = authorizationService.getCurrentTenantKeyOrThrow();
 
-        replaceEmployeeSkills(savedEmployee, normalizedSkills);
+            auditLogService.logAction(
+                    AuditActionType.CREATE,
+                    AuditEntityType.EMPLOYEE,
+                    savedEmployee.getId(),
+                    "{\"email\":\"" + escapeJson(savedEmployee.getEmail()) + "\"}"
+            );
+            PlatformUser syncedUser = reconcileExistingPlatformUser
+                    ? platformUserSyncBridgeService.provisionEmployeeAccount(
+                    savedEmployee,
+                    requestDto.getPassword(),
+                    tenantKey)
+                    : platformUserSyncBridgeService.syncOnCreate(
+                    savedEmployee,
+                    requestDto.getPassword(),
+                    tenantKey);
+            savedEmployee = linkPlatformUser(savedEmployee, syncedUser);
 
-        return toEmployeeResponse(savedEmployee);
+            replaceEmployeeSkills(savedEmployee, normalizedSkills);
+
+            return toEmployeeResponse(savedEmployee);
+        } else {
+            throw new BadRequestException("Employee will be 18+");
+//            throw new ResourceNotFoundException("Employee will be 18+");
+        }
     }
+
+    private boolean getVerifyAge(@NotBlank(message = "NIC is required") @Size(max = 12, message = "NIC must not exceed 12 characters") String nic) {
+        String getYear = nic.substring(0,4);
+        System.out.println("get year - " + getYear );
+
+        Integer age = 2026 - Integer.parseInt(getYear);
+        System.out.println(age);
+
+        boolean is18Plus;
+        if (age>18){
+            is18Plus = true;
+        }else is18Plus= false;
+        return is18Plus;
+    }
+
+    private String genderFinder(@NotBlank(message = "NIC is required") @Size(max = 12, message = "NIC must not exceed 12 characters") String nic) {
+        String genderPart = nic.substring(5,7);
+        String gender;
+        if (Integer.parseInt(genderPart)<500){
+            gender = "m";
+        }else {
+            gender = "f";
+        }
+        return gender;
+    }
+
 
     @Override
     public EmployeeResponseDto updateEmployee(Long employeeId, EmployeeUpdateRequestDto requestDto) {
@@ -468,6 +516,17 @@ public class EmployeeServiceImpl implements EmployeeService {
                         PageRequest.of(0, 20))
                 .stream()
                 .map(SkillSuggestionResponseDto::new)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true, transactionManager = "transactionManager")
+    public List<EmployeeResponseDto> getEmployeeSalaryReport() {
+        authorizationService.requirePermission(Permission.VIEW_EMPLOYEE);
+
+        return employeeRepository.findSalaryReport()
+                .stream()
+                .map(this::toEmployeeResponse)
                 .toList();
     }
 

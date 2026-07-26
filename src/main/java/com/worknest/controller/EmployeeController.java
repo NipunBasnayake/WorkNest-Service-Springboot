@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.enums.UserStatus;
@@ -8,6 +10,7 @@ import com.worknest.tenant.dto.employee.*;
 import com.worknest.tenant.service.EmployeeService;
 import com.worknest.tenant.service.EmployeeAvatarService;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -17,8 +20,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import org.springframework.web.multipart.MultipartFile;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/{tenantSlug}/employees")
+@RequiresFeature(FeatureKey.EMPLOYEE)
 public class EmployeeController {
 
     private final EmployeeService employeeService;
@@ -34,6 +39,8 @@ public class EmployeeController {
     public ResponseEntity<ApiResponse<EmployeeResponseDto>> createEmployee(
             @Valid @RequestBody EmployeeCreateRequestDto requestDto) {
         EmployeeResponseDto responseDto = employeeService.createEmployee(requestDto);
+//        System.out.println("Employee Controller - Create");
+//        System.out.println(requestDto.getNic());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Employee created successfully", responseDto));
     }
@@ -193,5 +200,14 @@ public class EmployeeController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Skill suggestions retrieved successfully",
                 employeeService.searchSkillSuggestions(search)));
+    }
+
+    @GetMapping("/report/employeesalary")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','HR')")
+    public ResponseEntity<ApiResponse<List<EmployeeResponseDto>>> getEmployeeSalaryReport(){
+        return ResponseEntity.ok(ApiResponse.success(
+                "Employee-Salary report retrieved successfully",
+                employeeService.getEmployeeSalaryReport()
+        ));
     }
 }

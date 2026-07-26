@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.announcement.AnnouncementCreateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
@@ -25,6 +27,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/announcements")
+@RequiresFeature(FeatureKey.ANNOUNCEMENTS)
 public class AnnouncementController {
 
     private final AnnouncementService announcementService;

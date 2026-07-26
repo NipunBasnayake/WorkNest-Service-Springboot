@@ -156,6 +156,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.FORBIDDEN, "FORBIDDEN_OPERATION", ex.getMessage(), request, ex, false);
     }
 
+    @ExceptionHandler(SubscriptionFeatureAccessException.class)
+    public ResponseEntity<ErrorResponse> handleSubscriptionFeatureAccessException(
+            SubscriptionFeatureAccessException ex, HttpServletRequest request) {
+        return build(HttpStatus.FORBIDDEN, "SUBSCRIPTION_FEATURE_DISABLED", ex.getMessage(), request, ex, false);
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDeniedException(
             AccessDeniedException ex, HttpServletRequest request) {

@@ -47,4 +47,6 @@ public interface EmployeeService {
     List<EmployeeSkillResponseDto> listMySkills();
 
     List<SkillSuggestionResponseDto> searchSkillSuggestions(String search);
+
+    List<EmployeeResponseDto> getEmployeeSalaryReport();
 }

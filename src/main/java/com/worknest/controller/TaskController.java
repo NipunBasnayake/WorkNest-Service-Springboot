@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.task.*;
@@ -22,6 +24,7 @@ import java.util.List;
 @RestController
 @Validated
 @RequestMapping("/api/{tenantSlug}/tasks")
+@RequiresFeature(FeatureKey.TASKS)
 public class TaskController {
 
     private final TaskService taskService;

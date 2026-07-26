@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.publicapi.dto.PublicApplicationRequestDto;
 import com.worknest.publicapi.dto.PublicApplicationResponseDto;
@@ -20,6 +22,9 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @Validated
 @RequestMapping("/api/public/{tenantSlug}")
+@RequiresFeature(
+        value = FeatureKey.RECRUITMENT,
+        tenantParameter = "tenantSlug")
 public class PublicApplicationsController {
 
     private final PublicCandidateApplicationService publicCandidateApplicationService;

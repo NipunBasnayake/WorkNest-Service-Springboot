@@ -16,6 +16,7 @@ import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.repository.PlatformUserRepository;
 import com.worknest.master.repository.TenantOnboardingRequestRepository;
 import com.worknest.master.service.PlatformOnboardingService;
+import com.worknest.master.service.SubscriptionService;
 import com.worknest.master.service.TenantBrandingService;
 import com.worknest.master.service.TenantProvisioningService;
 import com.worknest.tenant.context.MasterTenantContextRunner;
@@ -46,6 +47,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
     private final MasterTenantContextRunner masterTenantContextRunner;
     private final TenantProvisioningService tenantProvisioningService;
     private final TenantBrandingService tenantBrandingService;
+    private final SubscriptionService subscriptionService;
     private final TransactionTemplate masterTransaction;
     private final String masterDbUrl;
     private final String masterDbUsername;
@@ -59,6 +61,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
             MasterTenantContextRunner masterTenantContextRunner,
             TenantProvisioningService tenantProvisioningService,
             TenantBrandingService tenantBrandingService,
+            SubscriptionService subscriptionService,
             @Qualifier("masterTransactionManager") PlatformTransactionManager masterTransactionManager,
             @Value("${spring.datasource.url}") String masterDbUrl,
             @Value("${spring.datasource.username}") String masterDbUsername,
@@ -70,6 +73,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
         this.masterTenantContextRunner = masterTenantContextRunner;
         this.tenantProvisioningService = tenantProvisioningService;
         this.tenantBrandingService = tenantBrandingService;
+        this.subscriptionService = subscriptionService;
         this.masterTransaction = new TransactionTemplate(masterTransactionManager);
         this.masterDbUrl = masterDbUrl;
         this.masterDbUsername = masterDbUsername;
@@ -146,6 +150,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
 
         PlatformTenant savedTenant = platformTenantRepository.save(
                 buildTenantEntity(requestDto, normalizedTenantKey, databaseName));
+        subscriptionService.assignDefaultPlan(savedTenant);
         PlatformUser savedAdmin = platformUserRepository.save(
                 buildTenantAdminEntity(requestDto, normalizedAdminEmail, normalizedTenantKey));
         tenantBrandingService.createDefaultBranding(

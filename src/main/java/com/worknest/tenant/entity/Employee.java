@@ -43,6 +43,12 @@ public class Employee {
     @Column(name = "last_name", nullable = false, length = 100)
     private String lastName;
 
+    @Column(name = "nic_number", length = 12)
+    private String nicNumber;
+
+    @Column(name = "gender", length = 10)
+    private String gender;
+
     @Column(name = "email", nullable = false, length = 255)
     private String email;
 

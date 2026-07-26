@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.dashboard.EmployeeDashboardDto;
 import com.worknest.tenant.dto.dashboard.HrDashboardDto;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/dashboard")
+@RequiresFeature(FeatureKey.DASHBOARD)
 public class DashboardController {
 
     private final DashboardService dashboardService;

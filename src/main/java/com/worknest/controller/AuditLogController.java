@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.common.PagedResultDto;
 import com.worknest.tenant.dto.audit.AuditLogResponseDto;
@@ -19,6 +21,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/audit-logs")
+@RequiresFeature(FeatureKey.AUDIT)
 public class AuditLogController {
 
     private final AuditLogService auditLogService;

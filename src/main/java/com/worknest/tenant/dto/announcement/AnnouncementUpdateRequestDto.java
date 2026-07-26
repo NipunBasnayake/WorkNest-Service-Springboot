@@ -1,6 +1,7 @@
 package com.worknest.tenant.dto.announcement;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -13,16 +14,12 @@ public class AnnouncementUpdateRequestDto {
     @Size(max = 200, message = "Title must not exceed 200 characters")
     private String title;
 
+    @NotBlank(message = "Content is required")
     @Size(max = 5000, message = "Content must not exceed 5000 characters")
     private String content;
 
-    @Deprecated
-    @Size(max = 5000, message = "Message must not exceed 5000 characters")
-    private String message;
-
     private boolean pinned;
 
-    public String resolveContent() {
-        return content != null ? content : message;
-    }
+    @Positive(message = "Team ID must be positive")
+    private Long teamId;
 }

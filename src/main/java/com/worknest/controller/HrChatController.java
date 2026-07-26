@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.chat.HrConversationCreateRequestDto;
 import com.worknest.tenant.dto.chat.HrConversationResponseDto;
@@ -17,6 +19,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/chats/hr")
+@RequiresFeature(FeatureKey.CHAT)
 public class HrChatController {
 
     private final HrChatService hrChatService;

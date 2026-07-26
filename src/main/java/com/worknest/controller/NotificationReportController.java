@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.report.NotificationReportPageDto;
 import com.worknest.tenant.service.NotificationReportService;
@@ -16,6 +18,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/reports/notifications")
+@RequiresFeature({FeatureKey.REPORTS, FeatureKey.NOTIFICATIONS})
 public class NotificationReportController {
 
     private final NotificationReportService notificationReportService;

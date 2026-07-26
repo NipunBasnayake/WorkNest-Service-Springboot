@@ -3,25 +3,25 @@ package com.worknest.tenant.service.impl;
 import com.worknest.common.enums.PlatformRole;
 import com.worknest.common.enums.UserStatus;
 import com.worknest.common.exception.ForbiddenOperationException;
+import com.worknest.notification.email.EmailNotificationService;
 import com.worknest.security.authorization.AuthorizationService;
 import com.worknest.security.authorization.Permission;
-import com.worknest.security.util.SecurityUtils;
 import com.worknest.security.model.PlatformUserPrincipal;
+import com.worknest.security.util.SecurityUtils;
 import com.worknest.tenant.dto.announcement.AnnouncementCreateRequestDto;
-import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
 import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
+import com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto;
 import com.worknest.tenant.entity.Announcement;
 import com.worknest.tenant.entity.Employee;
 import com.worknest.tenant.entity.Team;
-import com.worknest.tenant.enums.AuditEntityType;
-import com.worknest.tenant.enums.NotificationType;
+import com.worknest.tenant.enums.AttachmentEntityType;
 import com.worknest.tenant.repository.AnnouncementRepository;
 import com.worknest.tenant.repository.EmployeeRepository;
 import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamRepository;
+import com.worknest.tenant.service.AttachmentService;
 import com.worknest.tenant.service.AuditLogService;
 import com.worknest.tenant.service.NotificationService;
-import com.worknest.tenant.service.AttachmentService;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,10 +36,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -73,7 +70,7 @@ class AnnouncementServiceImplTest {
     private TenantRealtimePublisher tenantRealtimePublisher;
 
     @Mock
-    private com.worknest.notification.email.EmailNotificationService emailNotificationService;
+    private EmailNotificationService emailNotificationService;
 
     @Mock
     private SecurityUtils securityUtils;
@@ -97,294 +94,207 @@ class AnnouncementServiceImplTest {
                 tenantRealtimePublisher,
                 emailNotificationService,
                 securityUtils,
-                attachmentService
-        );
+                attachmentService);
 
-        lenient().doNothing().when(authorizationService).requirePermission(any(Permission.class));
-        lenient().when(authorizationService.getCurrentTenantKeyOrThrow()).thenReturn("acme");
-        lenient().when(notificationService.createSystemNotification(anyLong(), any(), any(), any(), any())).thenReturn(null);
-        lenient().when(attachmentService.listAttachments(any(), anyLong())).thenReturn(List.of());
-        lenient().when(securityUtils.getCurrentUserEmailOrThrow()).thenReturn("current@worknest.test");
-        PlatformUserPrincipal principal = org.mockito.Mockito.mock(PlatformUserPrincipal.class);
+        lenient().doNothing()
+                .when(authorizationService)
+                .requirePermission(any(Permission.class));
+        lenient().when(authorizationService.getCurrentTenantKeyOrThrow())
+                .thenReturn("acme");
+        lenient().when(notificationService.createSystemNotification(
+                        anyLong(), any(), any(), any(), any()))
+                .thenReturn(null);
+        lenient().when(attachmentService.listAttachments(any(), anyLong()))
+                .thenReturn(List.of());
+        lenient().when(securityUtils.getCurrentUserEmailOrThrow())
+                .thenReturn("current@worknest.test");
+        PlatformUserPrincipal principal = org.mockito.Mockito.mock(
+                PlatformUserPrincipal.class);
         lenient().when(principal.getId()).thenReturn(100L);
-        lenient().when(securityUtils.getCurrentPrincipalOrThrow()).thenReturn(principal);
-        lenient().when(securityUtils.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
+        lenient().when(securityUtils.getCurrentPrincipalOrThrow())
+                .thenReturn(principal);
+        lenient().when(authorizationService.getCurrentRoleOrThrow())
+                .thenReturn(PlatformRole.HR);
     }
 
     @Test
-    void createAnnouncementSavesEntityAndCreatesAnnouncementLinkedNotifications() {
-        Employee creator = employee(1L, "creator@worknest.test", PlatformRole.HR);
-        Employee recipientA = employee(2L, "emp.a@worknest.test", PlatformRole.EMPLOYEE);
-        Employee recipientB = employee(3L, "emp.b@worknest.test", PlatformRole.EMPLOYEE);
-
-        when(authorizationService.getCurrentEmployeeOrThrow()).thenReturn(creator);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(creator);
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
-        when(employeeRepository.findByStatus(UserStatus.ACTIVE)).thenReturn(List.of(creator, recipientA, recipientB));
-        when(announcementRepository.save(any(Announcement.class))).thenAnswer(invocation -> {
-            Announcement saved = invocation.getArgument(0);
-            saved.setId(99L);
-            saved.setCreatedAt(LocalDateTime.of(2026, 4, 18, 10, 0));
-            saved.setUpdatedAt(LocalDateTime.of(2026, 4, 18, 10, 0));
-            return saved;
-        });
+    void createUsesOnlySimplifiedAnnouncementFields() {
+        Employee creator = employee(1L, PlatformRole.HR);
+        when(authorizationService.getCurrentEmployeeOrThrow())
+                .thenReturn(creator);
+        when(authorizationService.getCurrentEmployeeOrNull())
+                .thenReturn(creator);
+        when(employeeRepository.findByStatus(UserStatus.ACTIVE))
+                .thenReturn(List.of(creator));
+        when(announcementRepository.save(any(Announcement.class)))
+                .thenAnswer(invocation -> persist(invocation.getArgument(0), 99L));
 
         AnnouncementCreateRequestDto request = new AnnouncementCreateRequestDto();
-        request.setTitle("  Workspace policy update  ");
-        request.setContent("  Please submit timesheets by Friday.  ");
+        request.setTitle("  Workspace update  ");
+        request.setContent("  Office opens at nine.  ");
         request.setPinned(true);
 
-        AnnouncementResponseDto response = announcementService.createAnnouncement(request);
+        AnnouncementResponseDto response =
+                announcementService.createAnnouncement(request);
 
         Assertions.assertThat(response.getId()).isEqualTo(99L);
-        Assertions.assertThat(response.getTitle()).isEqualTo("Workspace policy update");
-        Assertions.assertThat(response.getContent()).isEqualTo("Please submit timesheets by Friday.");
-        Assertions.assertThat(response.getMessage()).isEqualTo("Please submit timesheets by Friday.");
+        Assertions.assertThat(response.getTitle()).isEqualTo("Workspace update");
+        Assertions.assertThat(response.getContent()).isEqualTo("Office opens at nine.");
         Assertions.assertThat(response.isPinned()).isTrue();
-        Assertions.assertThat(response.getCreatedByEmployeeId()).isEqualTo(creator.getId());
-        Assertions.assertThat(response.getCreatedByName()).isEqualTo("Test User");
-        Assertions.assertThat(response.isOwnedByCurrentUser()).isTrue();
-        Assertions.assertThat(response.isCanEdit()).isTrue();
-        Assertions.assertThat(response.isCanDelete()).isTrue();
+        Assertions.assertThat(response.getTeamId()).isNull();
 
-        ArgumentCaptor<Announcement> announcementCaptor = ArgumentCaptor.forClass(Announcement.class);
-        verify(announcementRepository).save(announcementCaptor.capture());
-        Announcement persisted = announcementCaptor.getValue();
-        Assertions.assertThat(persisted.getTitle()).isEqualTo("Workspace policy update");
-        Assertions.assertThat(persisted.getContent()).isEqualTo("Please submit timesheets by Friday.");
-        Assertions.assertThat(persisted.isPinned()).isTrue();
-        Assertions.assertThat(persisted.getCreatedBy().getId()).isEqualTo(creator.getId());
-        Assertions.assertThat(persisted.getCreatedByName()).isEqualTo("Test User");
-
-        verify(notificationService, never()).createSystemNotification(
-                eq(1L),
-                any(),
-                anyString(),
-                anyString(),
-                any()
-        );
-        verify(notificationService).createSystemNotification(
-                eq(2L),
-                eq(NotificationType.ANNOUNCEMENT),
-                eq("New announcement: Workspace policy update"),
-                eq(AuditEntityType.ANNOUNCEMENT.name()),
-                eq(99L)
-        );
-        verify(notificationService).createSystemNotification(
-                eq(3L),
-                eq(NotificationType.ANNOUNCEMENT),
-                eq("New announcement: Workspace policy update"),
-                eq(AuditEntityType.ANNOUNCEMENT.name()),
-                eq(99L)
-        );
+        ArgumentCaptor<Announcement> captor =
+                ArgumentCaptor.forClass(Announcement.class);
+        verify(announcementRepository).save(captor.capture());
+        Announcement saved = captor.getValue();
+        Assertions.assertThat(saved.getLegacyMessage())
+                .isEqualTo("Office opens at nine.");
+        Assertions.assertThat(saved.getCreatedBy()).isSameAs(creator);
     }
 
     @Test
-    void tenantAdminSeesTenantAnnouncementsAndCanManageAnyVisibleAnnouncement() {
-        Employee tenantAdmin = employee(20L, "admin@worknest.test", PlatformRole.TENANT_ADMIN);
-        Employee hrAuthor = employee(21L, "hr@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(44L, "Policy update", "Updated policy", hrAuthor);
+    void listUsesOnlyTeamVisibilityAndPinOrdering() {
+        Employee viewer = employee(10L, PlatformRole.EMPLOYEE);
+        Announcement regular = announcement(1L, "Regular", viewer);
+        regular.setCreatedAt(LocalDateTime.of(2026, 4, 20, 9, 0));
+        Announcement pinned = announcement(2L, "Pinned", viewer);
+        pinned.setPinned(true);
+        pinned.setCreatedAt(LocalDateTime.of(2026, 4, 18, 9, 0));
 
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.TENANT_ADMIN);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(tenantAdmin);
-        when(announcementRepository.findVisibleAnnouncements(20L, true)).thenReturn(List.of(announcement));
+        when(authorizationService.getCurrentRoleOrThrow())
+                .thenReturn(PlatformRole.EMPLOYEE);
+        when(authorizationService.getCurrentEmployeeOrNull())
+                .thenReturn(viewer);
+        when(announcementRepository.findVisibleAnnouncements(10L, false))
+                .thenReturn(List.of(regular, pinned));
 
-        List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
+        List<AnnouncementResponseDto> results =
+                announcementService.listAnnouncements();
 
-        Assertions.assertThat(results).hasSize(1);
-        Assertions.assertThat(results.getFirst().getId()).isEqualTo(44L);
-        Assertions.assertThat(results.getFirst().isOwnedByCurrentUser()).isFalse();
-        Assertions.assertThat(results.getFirst().isCanEdit()).isTrue();
-        Assertions.assertThat(results.getFirst().isCanDelete()).isTrue();
-        verify(announcementRepository).findVisibleAnnouncements(20L, true);
-    }
-
-    @Test
-    void hrSeesAnnouncementsButCanManageOnlyTheirOwn() {
-        Employee hrUser = employee(30L, "hr@worknest.test", PlatformRole.HR);
-        Employee otherAuthor = employee(31L, "author@worknest.test", PlatformRole.HR);
-        Announcement ownAnnouncement = announcement(61L, "Own notice", "HR-created update", hrUser);
-        Announcement otherAnnouncement = announcement(62L, "Shared notice", "Another HR update", otherAuthor);
-
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hrUser);
-        when(announcementRepository.findVisibleAnnouncements(30L, true)).thenReturn(List.of(ownAnnouncement, otherAnnouncement));
-
-        List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
-
-        Assertions.assertThat(results).hasSize(2);
-        Assertions.assertThat(results.get(0).isOwnedByCurrentUser()).isTrue();
-        Assertions.assertThat(results.get(0).isCanEdit()).isTrue();
-        Assertions.assertThat(results.get(1).isOwnedByCurrentUser()).isFalse();
-        Assertions.assertThat(results.get(1).isCanEdit()).isFalse();
-        Assertions.assertThat(results.get(1).isCanDelete()).isFalse();
-    }
-
-    @Test
-    void listAnnouncementsUsesVisibilityContextForRegularEmployee() {
-        Employee me = employee(10L, "me@worknest.test", PlatformRole.EMPLOYEE);
-        Employee hrAuthor = employee(11L, "hr@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(44L, "Team update", "Sprint review at 4 PM", hrAuthor);
-
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(me);
-        when(announcementRepository.findVisibleAnnouncements(10L, false)).thenReturn(List.of(announcement));
-
-        List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
-
-        Assertions.assertThat(results).hasSize(1);
-        Assertions.assertThat(results.getFirst().getId()).isEqualTo(44L);
-        Assertions.assertThat(results.getFirst().isCanEdit()).isFalse();
-        Assertions.assertThat(results.getFirst().isCanDelete()).isFalse();
+        Assertions.assertThat(results)
+                .extracting(AnnouncementResponseDto::getId)
+                .containsExactly(2L, 1L);
         verify(announcementRepository).findVisibleAnnouncements(10L, false);
     }
 
     @Test
-    void listAnnouncementsOrdersPinnedFirstThenLatestFirst() {
-        Employee me = employee(10L, "me@worknest.test", PlatformRole.EMPLOYEE);
-        Employee hrAuthor = employee(11L, "hr@worknest.test", PlatformRole.HR);
-        Announcement oldPinned = announcement(1L, "Pinned old", "Pinned old content", hrAuthor);
-        oldPinned.setPinned(true);
-        oldPinned.setCreatedAt(LocalDateTime.of(2026, 4, 18, 9, 0));
-        Announcement newRegular = announcement(2L, "Regular new", "Regular new content", hrAuthor);
-        newRegular.setCreatedAt(LocalDateTime.of(2026, 4, 20, 9, 0));
-        Announcement newerPinned = announcement(3L, "Pinned new", "Pinned new content", hrAuthor);
-        newerPinned.setPinned(true);
-        newerPinned.setCreatedAt(LocalDateTime.of(2026, 4, 21, 9, 0));
-
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(me);
-        when(announcementRepository.findVisibleAnnouncements(10L, false))
-                .thenReturn(List.of(newRegular, oldPinned, newerPinned));
-
-        List<AnnouncementResponseDto> results = announcementService.listAnnouncements();
-
-        Assertions.assertThat(results).extracting(AnnouncementResponseDto::getId)
-                .containsExactly(3L, 1L, 2L);
-    }
-
-    @Test
-    void getAnnouncementReturnsDetailWhenAccessible() {
-        Employee me = employee(12L, "reader@worknest.test", PlatformRole.EMPLOYEE);
-        Announcement announcement = announcement(55L, "Office closed", "Holiday on Monday", me);
-
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(me);
-        when(announcementRepository.findById(55L)).thenReturn(Optional.of(announcement));
-
-        AnnouncementResponseDto result = announcementService.getAnnouncement(55L);
-
-        Assertions.assertThat(result.getId()).isEqualTo(55L);
-        Assertions.assertThat(result.getTitle()).isEqualTo("Office closed");
-        Assertions.assertThat(result.getContent()).isEqualTo("Holiday on Monday");
-        Assertions.assertThat(result.isOwnedByCurrentUser()).isTrue();
-    }
-
-    @Test
-    void hrCanUpdateAndDeleteOwnAnnouncement() {
-        Employee hrUser = employee(40L, "hr@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(71L, "Own notice", "Created by the HR user", hrUser);
+    void updateChangesTitleContentPinAndTeam() {
+        Employee hr = employee(20L, PlatformRole.HR);
+        Team team = team(7L, "Engineering", hr);
+        Announcement announcement = announcement(3L, "Old", hr);
         AnnouncementUpdateRequestDto request = new AnnouncementUpdateRequestDto();
-        request.setTitle("Updated own notice");
-        request.setContent("Updated content for the HR-owned announcement.");
+        request.setTitle("Updated");
+        request.setContent("Updated content");
         request.setPinned(true);
+        request.setTeamId(7L);
 
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hrUser);
-        when(announcementRepository.findById(71L)).thenReturn(Optional.of(announcement));
-        when(announcementRepository.save(any(Announcement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hr);
+        when(announcementRepository.findById(3L))
+                .thenReturn(Optional.of(announcement));
+        when(teamRepository.findById(7L)).thenReturn(Optional.of(team));
+        when(announcementRepository.save(announcement))
+                .thenReturn(announcement);
 
-        AnnouncementResponseDto response = announcementService.updateAnnouncement(71L, request);
-        announcementService.deleteAnnouncement(71L);
+        AnnouncementResponseDto response =
+                announcementService.updateAnnouncement(3L, request);
 
-        Assertions.assertThat(response.getTitle()).isEqualTo("Updated own notice");
-        Assertions.assertThat(response.getContent()).isEqualTo("Updated content for the HR-owned announcement.");
+        Assertions.assertThat(response.getTitle()).isEqualTo("Updated");
+        Assertions.assertThat(response.getContent()).isEqualTo("Updated content");
         Assertions.assertThat(response.isPinned()).isTrue();
-        verify(announcementRepository).delete(announcement);
+        Assertions.assertThat(response.getTeamId()).isEqualTo(7L);
     }
 
     @Test
-    void tenantAdminCanUpdateAndDeleteAnyTenantAnnouncement() {
-        Employee tenantAdmin = employee(20L, "admin@worknest.test", PlatformRole.TENANT_ADMIN);
-        Employee hrAuthor = employee(21L, "hr@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(44L, "Policy update", "Updated policy", hrAuthor);
-        AnnouncementUpdateRequestDto request = new AnnouncementUpdateRequestDto();
-        request.setTitle("Admin update");
-        request.setContent("Tenant admin can manage any announcement.");
+    void pinUpdatesOnlyPinnedState() {
+        Employee hr = employee(30L, PlatformRole.HR);
+        Announcement announcement = announcement(4L, "Notice", hr);
+        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hr);
+        when(announcementRepository.findById(4L))
+                .thenReturn(Optional.of(announcement));
+        when(announcementRepository.save(announcement))
+                .thenReturn(announcement);
 
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.TENANT_ADMIN);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(tenantAdmin);
-        when(announcementRepository.findById(44L)).thenReturn(Optional.of(announcement));
-        when(announcementRepository.save(any(Announcement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AnnouncementResponseDto response =
+                announcementService.setPinned(4L, true);
 
-        AnnouncementResponseDto response = announcementService.updateAnnouncement(44L, request);
-        announcementService.deleteAnnouncement(44L);
-
-        Assertions.assertThat(response.getTitle()).isEqualTo("Admin update");
-        Assertions.assertThat(response.isCanEdit()).isTrue();
-        Assertions.assertThat(response.isCanDelete()).isTrue();
-        verify(announcementRepository).delete(announcement);
+        Assertions.assertThat(response.isPinned()).isTrue();
+        Assertions.assertThat(announcement.getTitle()).isEqualTo("Notice");
+        verify(announcementRepository).save(announcement);
     }
 
     @Test
-    void employeeCannotCreateUpdateOrDeleteAnnouncement() {
+    void deleteRemovesAttachmentsAndAnnouncementInsteadOfSoftDeleting() {
+        Employee hr = employee(40L, PlatformRole.HR);
+        Announcement announcement = announcement(5L, "Delete me", hr);
+        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hr);
+        when(announcementRepository.findById(5L))
+                .thenReturn(Optional.of(announcement));
+
+        announcementService.deleteAnnouncement(5L);
+
+        verify(attachmentService)
+                .listAttachments(AttachmentEntityType.ANNOUNCEMENT, 5L);
+        verify(announcementRepository).delete(announcement);
+        verify(announcementRepository, never()).save(announcement);
+    }
+
+    @Test
+    void employeeCannotCreateUpdateDeleteOrPin() {
         doThrow(new ForbiddenOperationException("Forbidden"))
                 .when(authorizationService)
                 .requirePermission(Permission.SEND_ANNOUNCEMENT);
 
-        AnnouncementCreateRequestDto request = new AnnouncementCreateRequestDto();
-        request.setTitle("Policy");
-        request.setContent("This employee should not be able to publish.");
-
-        Assertions.assertThatThrownBy(() -> announcementService.createAnnouncement(request))
+        Assertions.assertThatThrownBy(() ->
+                        announcementService.createAnnouncement(
+                                new AnnouncementCreateRequestDto()))
                 .isInstanceOf(ForbiddenOperationException.class);
-        Assertions.assertThatThrownBy(() -> announcementService.updateAnnouncement(10L, new com.worknest.tenant.dto.announcement.AnnouncementUpdateRequestDto()))
+        Assertions.assertThatThrownBy(() ->
+                        announcementService.updateAnnouncement(
+                                10L,
+                                new AnnouncementUpdateRequestDto()))
                 .isInstanceOf(ForbiddenOperationException.class);
-        Assertions.assertThatThrownBy(() -> announcementService.deleteAnnouncement(10L))
+        Assertions.assertThatThrownBy(() ->
+                        announcementService.deleteAnnouncement(10L))
                 .isInstanceOf(ForbiddenOperationException.class);
-    }
-
-    @Test
-    void hrCannotUpdateOrDeleteAnnouncementCreatedByAnotherUser() {
-        Employee hrUser = employee(40L, "hr@worknest.test", PlatformRole.HR);
-        Employee otherAuthor = employee(41L, "other@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(71L, "Other notice", "Created by another HR user", otherAuthor);
-
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.HR);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(hrUser);
-        when(announcementRepository.findById(71L)).thenReturn(Optional.of(announcement));
-
-        AnnouncementUpdateRequestDto request = new AnnouncementUpdateRequestDto();
-        request.setTitle("Updated");
-        request.setContent("Updated by someone else");
-
-        Assertions.assertThatThrownBy(() -> announcementService.updateAnnouncement(71L, request))
-                .isInstanceOf(ForbiddenOperationException.class);
-        Assertions.assertThatThrownBy(() -> announcementService.deleteAnnouncement(71L))
+        Assertions.assertThatThrownBy(() ->
+                        announcementService.setPinned(10L, true))
                 .isInstanceOf(ForbiddenOperationException.class);
     }
 
     @Test
-    void employeeCannotReadTeamAnnouncementOutsideTheirAudience() {
-        Employee outsider = employee(50L, "outsider@worknest.test", PlatformRole.EMPLOYEE);
-        Employee teamManager = employee(51L, "manager@worknest.test", PlatformRole.MANAGER);
-        Employee hrAuthor = employee(52L, "hr@worknest.test", PlatformRole.HR);
-        Announcement announcement = announcement(81L, "Team only", "Private team update", hrAuthor);
-        announcement.setTeam(team(900L, "Engineering", teamManager));
+    void employeeCannotReadAnotherTeamsAnnouncement() {
+        Employee outsider = employee(50L, PlatformRole.EMPLOYEE);
+        Employee manager = employee(51L, PlatformRole.MANAGER);
+        Employee author = employee(52L, PlatformRole.HR);
+        Announcement announcement = announcement(6L, "Team only", author);
+        announcement.setTeam(team(8L, "Engineering", manager));
 
-        when(authorizationService.getCurrentRoleOrThrow()).thenReturn(PlatformRole.EMPLOYEE);
-        when(authorizationService.getCurrentEmployeeOrNull()).thenReturn(outsider);
-        when(announcementRepository.findById(81L)).thenReturn(Optional.of(announcement));
-        when(teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(900L, 50L)).thenReturn(Optional.empty());
+        when(authorizationService.getCurrentRoleOrThrow())
+                .thenReturn(PlatformRole.EMPLOYEE);
+        when(authorizationService.getCurrentEmployeeOrNull())
+                .thenReturn(outsider);
+        when(announcementRepository.findById(6L))
+                .thenReturn(Optional.of(announcement));
+        when(teamMemberRepository
+                .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(8L, 50L))
+                .thenReturn(Optional.empty());
 
-        Assertions.assertThatThrownBy(() -> announcementService.getAnnouncement(81L))
+        Assertions.assertThatThrownBy(() ->
+                        announcementService.getAnnouncement(6L))
                 .isInstanceOf(ForbiddenOperationException.class);
     }
 
-    private Employee employee(Long id, String email, PlatformRole role) {
+    private Announcement persist(Announcement announcement, Long id) {
+        announcement.setId(id);
+        announcement.setCreatedAt(LocalDateTime.of(2026, 4, 18, 10, 0));
+        announcement.setUpdatedAt(LocalDateTime.of(2026, 4, 18, 10, 0));
+        return announcement;
+    }
+
+    private Employee employee(Long id, PlatformRole role) {
         Employee employee = new Employee();
         employee.setId(id);
-        employee.setEmail(email);
+        employee.setEmail("user" + id + "@worknest.test");
         employee.setFirstName("Test");
         employee.setLastName("User");
         employee.setEmployeeCode("EMP-" + id);
@@ -393,13 +303,13 @@ class AnnouncementServiceImplTest {
         return employee;
     }
 
-    private Announcement announcement(Long id, String title, String message, Employee creator) {
+    private Announcement announcement(Long id, String title, Employee creator) {
         Announcement announcement = new Announcement();
         announcement.setId(id);
         announcement.setTitle(title);
-        announcement.setContent(message);
+        announcement.setContent(title + " content");
         announcement.setCreatedBy(creator);
-        announcement.setCreatedByName(creator == null ? "Unknown" : creator.getFirstName() + " " + creator.getLastName());
+        announcement.setCreatedByName("Test User");
         announcement.setCreatedAt(LocalDateTime.of(2026, 4, 18, 9, 0));
         announcement.setUpdatedAt(LocalDateTime.of(2026, 4, 18, 9, 0));
         return announcement;

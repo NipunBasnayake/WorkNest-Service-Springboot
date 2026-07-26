@@ -11,13 +11,22 @@ public interface AnnouncementService {
 
     AnnouncementResponseDto createAnnouncement(AnnouncementCreateRequestDto requestDto);
 
-    AnnouncementResponseDto updateAnnouncement(Long announcementId, AnnouncementUpdateRequestDto requestDto);
+    AnnouncementResponseDto updateAnnouncement(
+            Long announcementId,
+            AnnouncementUpdateRequestDto requestDto);
 
     void deleteAnnouncement(Long announcementId);
 
     List<AnnouncementResponseDto> listAnnouncements();
 
-    PagedResultDto<AnnouncementResponseDto> listAnnouncementsPaged(String search, int page, int size, String sortBy, String sortDir);
+    PagedResultDto<AnnouncementResponseDto> listAnnouncementsPaged(
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir);
 
     AnnouncementResponseDto getAnnouncement(Long announcementId);
+
+    AnnouncementResponseDto setPinned(Long announcementId, boolean pinned);
 }

@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.common.storage.FileStorageService;
 import com.worknest.common.storage.StorageCategory;
@@ -7,6 +9,7 @@ import com.worknest.common.storage.StoredFileDto;
 import jakarta.validation.constraints.Positive;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,13 +23,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/files")
 @PreAuthorize("hasAnyRole('TENANT_ADMIN','ADMIN','MANAGER','HR','EMPLOYEE')")
+@RequiresFeature(FeatureKey.DOCUMENTS)
 public class FileUploadController {
 
     private final FileStorageService fileStorageService;
@@ -91,14 +94,18 @@ public class FileUploadController {
         } catch (IllegalArgumentException exception) {
             mediaType = MediaType.APPLICATION_OCTET_STREAM;
         }
-        String disposition = (inline ? "inline" : "attachment") + "; filename*=UTF-8''"
-                + UriUtils.encode(file.fileName(), StandardCharsets.UTF_8);
+        ContentDisposition disposition = (inline
+                ? ContentDisposition.inline()
+                : ContentDisposition.attachment())
+                .filename(file.fileName(), StandardCharsets.UTF_8)
+                .build();
         ResponseEntity.BodyBuilder response = ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION, "X-Tenant-ID")
                 .header(HttpHeaders.CACHE_CONTROL, immutable
                         ? "private, max-age=31536000, immutable"
-                        : "private, max-age=300")
+                        : "private, no-store, max-age=0")
                 .contentType(mediaType);
         if (file.etag() != null) response.eTag(file.etag());
         return response.body(file.resource());

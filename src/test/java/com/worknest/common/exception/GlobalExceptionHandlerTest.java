@@ -6,6 +6,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -59,5 +60,21 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getCode()).isEqualTo("RESOURCE_NOT_FOUND");
         assertThat(response.getBody().getMessage()).isEqualTo("Resource not found");
+    }
+
+    @Test
+    void methodSecurityAccessDeniedReturnsForbiddenInsteadOfInternalServerError() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/residue-solutions/announcements");
+
+        ResponseEntity<ErrorResponse> response = handler.handleAccessDeniedException(
+                new AccessDeniedException("Access Denied"),
+                request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo("FORBIDDEN");
+        assertThat(response.getBody().getMessage()).isEqualTo("Access denied");
     }
 }

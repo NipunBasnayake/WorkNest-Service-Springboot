@@ -1,6 +1,5 @@
 package com.worknest.tenant.service.impl;
 
-import com.worknest.tenant.dto.announcement.AnnouncementResponseDto;
 import com.worknest.tenant.dto.chat.HrMessageResponseDto;
 import com.worknest.tenant.dto.chat.TeamChatMessageResponseDto;
 import com.worknest.tenant.dto.notification.NotificationResponseDto;
@@ -17,7 +16,7 @@ public class TenantRealtimePublisher {
         this.messagingTemplate = messagingTemplate;
     }
 
-    public void publishAnnouncement(String tenantKey, AnnouncementResponseDto payload) {
+    public void publishAnnouncement(String tenantKey, Object payload) {
         messagingTemplate.convertAndSend("/topic/tenant/" + tenantKey + "/announcements", payload);
     }
 

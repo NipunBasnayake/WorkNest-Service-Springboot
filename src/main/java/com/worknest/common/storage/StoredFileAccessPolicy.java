@@ -23,6 +23,7 @@ import com.worknest.tenant.repository.TeamMemberRepository;
 import com.worknest.tenant.repository.TeamChatMessageRepository;
 import com.worknest.tenant.repository.HrMessageRepository;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class StoredFileAccessPolicy {
@@ -57,10 +58,12 @@ public class StoredFileAccessPolicy {
         this.hrMessageRepository = hrMessageRepository;
     }
 
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public void requireRead(StoredFileMetadata file) {
         requireAccess(file, false);
     }
 
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     public void requireWrite(StoredFileMetadata file) {
         requireAccess(file, true);
     }
@@ -144,17 +147,19 @@ public class StoredFileAccessPolicy {
     }
 
     private void requireAnnouncementAccess(Long announcementId, boolean write) {
-        Announcement announcement = announcementRepository.findById(announcementId).orElseThrow(() -> new ResourceNotFoundException("Announcement not found"));
+        Announcement announcement = announcementRepository.findWithDetailsById(announcementId)
+                .orElseThrow(() -> new ResourceNotFoundException("Announcement not found"));
         if (write) {
             requirePermission(Permission.SEND_ANNOUNCEMENT);
             return;
         }
-        Team team = announcement.getTeam();
-        if (team == null) return;
+        if (announcement.getTeam() == null) return;
         Employee current = authorizationService.getCurrentEmployeeOrNull();
-        boolean participant = current != null && ((team.getManager() != null && current.getId().equals(team.getManager().getId()))
-                || teamMemberRepository.findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), current.getId()).isPresent());
-        if (!participant && !authorizationService.getCurrentRoleOrThrow().isHrEquivalent()) throw denied();
+        boolean participant = current != null
+                && isTeamParticipant(announcement.getTeam(), current.getId());
+        if (!participant && !authorizationService.getCurrentRoleOrThrow().isHrEquivalent()) {
+            throw denied();
+        }
     }
 
     private void requireChatAccess(StoredFileMetadata file, boolean write) {
@@ -163,7 +168,8 @@ public class StoredFileAccessPolicy {
         if (current == null) throw denied();
         String module = file.getRelatedModule();
         if ("TEAM_CHAT_MESSAGE".equals(module)) {
-            com.worknest.tenant.entity.TeamChatMessage message = teamChatMessageRepository.findById(file.getRelatedEntityId())
+            com.worknest.tenant.entity.TeamChatMessage message = teamChatMessageRepository
+                    .findWithAccessContextById(file.getRelatedEntityId())
                     .orElseThrow(() -> new ResourceNotFoundException("Chat message not found"));
             Team team = message.getTeamChat().getTeam();
             boolean participant = (team.getManager() != null && current.getId().equals(team.getManager().getId()))
@@ -172,7 +178,8 @@ public class StoredFileAccessPolicy {
             return;
         }
         if ("HR_CHAT_MESSAGE".equals(module)) {
-            com.worknest.tenant.entity.HrMessage message = hrMessageRepository.findById(file.getRelatedEntityId())
+            com.worknest.tenant.entity.HrMessage message = hrMessageRepository
+                    .findWithAccessContextById(file.getRelatedEntityId())
                     .orElseThrow(() -> new ResourceNotFoundException("Chat message not found"));
             PlatformRole role = authorizationService.getCurrentRoleOrThrow();
             boolean participant = role.isTenantAdminEquivalent() || role.isHrEquivalent()
@@ -185,6 +192,14 @@ public class StoredFileAccessPolicy {
 
     private void requirePermission(Permission permission) {
         if (!authorizationService.hasPermission(permission)) throw denied();
+    }
+
+    private boolean isTeamParticipant(Team team, Long employeeId) {
+        if (team == null || employeeId == null) return false;
+        return (team.getManager() != null && employeeId.equals(team.getManager().getId()))
+                || teamMemberRepository
+                .findFirstByTeamIdAndEmployeeIdAndLeftAtIsNull(team.getId(), employeeId)
+                .isPresent();
     }
 
     private ForbiddenOperationException denied() {

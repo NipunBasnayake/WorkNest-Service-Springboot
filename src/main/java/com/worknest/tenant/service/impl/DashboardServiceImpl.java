@@ -392,8 +392,14 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private List<DashboardAnnouncementItemDto> getRecentAnnouncements() {
-        return announcementRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(0, RECENT_ITEMS_LIMIT))
+        Optional<Employee> viewer = getCurrentEmployeeOptional();
+        com.worknest.common.enums.PlatformRole role = securityUtils.getCurrentRoleOrThrow();
+        boolean privileged = role.isTenantAdminEquivalent() || role.isHrEquivalent();
+        return announcementRepository.findVisibleAnnouncements(
+                        viewer.map(Employee::getId).orElse(null),
+                        privileged)
                 .stream()
+                .limit(RECENT_ITEMS_LIMIT)
                 .map(this::toDashboardAnnouncementItem)
                 .toList();
     }

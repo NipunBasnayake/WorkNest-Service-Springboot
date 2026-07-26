@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.chat.ChatReadReceiptMarkRequestDto;
 import com.worknest.tenant.dto.chat.ChatReadReceiptResponseDto;
@@ -15,6 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/chats/read-receipts")
+@RequiresFeature(FeatureKey.CHAT)
 public class ChatReadReceiptController {
 
     private final ChatReadReceiptService chatReadReceiptService;

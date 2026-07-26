@@ -1,5 +1,7 @@
 package com.worknest.controller;
 
+import com.worknest.master.enums.FeatureKey;
+import com.worknest.security.subscription.RequiresFeature;
 import com.worknest.common.api.ApiResponse;
 import com.worknest.tenant.dto.analytics.*;
 import com.worknest.tenant.dto.dashboard.ProjectTaskProgressDto;
@@ -18,6 +20,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/{tenantSlug}/analytics")
+@RequiresFeature(FeatureKey.ANALYTICS)
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;

@@ -19,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -84,6 +85,14 @@ public class SubscriptionController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Subscription plan status updated successfully",
                 subscriptionService.setPlanActive(planId, request.active())));
+    }
+
+    @DeleteMapping("/plans/{planId}")
+    public ResponseEntity<ApiResponse<Void>> deletePlan(@PathVariable Long planId) {
+        subscriptionService.deletePlan(planId);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Subscription plan deleted successfully",
+                null));
     }
 
     @GetMapping("/features")

@@ -39,7 +39,7 @@ public class MasterDatabaseStartupValidator implements CommandLineRunner {
         } catch (Exception ex) {
             Throwable root = rootCause(ex);
             String detail = root == null ? ex.getMessage() : root.getMessage();
-            log.error("Master DB connectivity check failed. Verify DB_URL/DB_USERNAME/DB_PASSWORD and MySQL access. url='{}' user='{}' detail='{}'",
+            log.error("Master DB connectivity check failed. Verify DB_URL/DB_USERNAME/DB_PASSWORD and PostgreSQL access. url='{}' user='{}' detail='{}'",
                     sanitizeUrl(dbUrl), dbUsername, detail);
             throw new IllegalStateException("Master database connection failed during startup. Check datasource credentials and access.", ex);
         }

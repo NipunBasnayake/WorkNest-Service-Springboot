@@ -4,7 +4,7 @@ import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.TenantNotFoundException;
 import com.worknest.common.exception.TenantResolutionException;
 import com.worknest.common.util.AppConstants;
-import com.worknest.config.MySqlDataSourceSupport;
+import com.worknest.config.DatabaseDataSourceSupport;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.tenant.datasource.TenantDataSourceService;
@@ -47,6 +47,8 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     private final long poolMaxLifetimeMs;
     private final long poolValidationTimeoutMs;
     private final long poolLeakDetectionThresholdMs;
+    private final String driverClassName;
+    private final String connectionInitSql;
 
     private final ConcurrentMap<String, TenantPoolHolder> tenantDataSources = new ConcurrentHashMap<>();
 
@@ -62,7 +64,9 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
             @Value("${app.tenant.datasource.pool.idle-timeout-ms:300000}") long poolIdleTimeoutMs,
             @Value("${app.tenant.datasource.pool.max-lifetime-ms:1800000}") long poolMaxLifetimeMs,
             @Value("${app.tenant.datasource.pool.validation-timeout-ms:5000}") long poolValidationTimeoutMs,
-            @Value("${app.tenant.datasource.pool.leak-detection-threshold-ms:0}") long poolLeakDetectionThresholdMs) {
+            @Value("${app.tenant.datasource.pool.leak-detection-threshold-ms:0}") long poolLeakDetectionThresholdMs,
+            @Value("${spring.datasource.driver-class-name}") String driverClassName,
+            @Value("${app.datasource.connection-init-sql:}") String connectionInitSql) {
         this.masterDataSource = masterDataSource;
         this.masterTenantLookupService = masterTenantLookupService;
         this.defaultTenant = defaultTenant;
@@ -75,6 +79,8 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         this.poolMaxLifetimeMs = poolMaxLifetimeMs;
         this.poolValidationTimeoutMs = poolValidationTimeoutMs;
         this.poolLeakDetectionThresholdMs = poolLeakDetectionThresholdMs;
+        this.driverClassName = driverClassName;
+        this.connectionInitSql = connectionInitSql;
     }
 
     @Override
@@ -125,10 +131,10 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     @Override
     public DataSource createDataSource(PlatformTenant tenant) {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(MySqlDataSourceSupport.withSafeZeroDateHandling(tenant.getDbUrl()));
+        config.setJdbcUrl(tenant.getDbUrl());
         config.setUsername(tenant.getDbUsername());
         config.setPassword(tenant.getDbPassword());
-        config.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        config.setDriverClassName(driverClassName);
 
         config.setMaximumPoolSize(poolMaximumSize);
         config.setMinimumIdle(poolMinimumIdle);
@@ -141,7 +147,10 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
         }
         config.setPoolName("WorkNestTenantPool-" + tenant.getTenantKey());
         config.setRegisterMbeans(false);
-        config.setConnectionInitSql(MySqlDataSourceSupport.STRICT_DATE_CONNECTION_INIT_SQL);
+        String resolvedConnectionInitSql = DatabaseDataSourceSupport.trimToNull(connectionInitSql);
+        if (resolvedConnectionInitSql != null) {
+            config.setConnectionInitSql(resolvedConnectionInitSql);
+        }
 
         return new HikariDataSource(config);
     }

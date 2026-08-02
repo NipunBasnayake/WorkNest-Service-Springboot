@@ -1,0 +1,35 @@
+spring:
+  output:
+    ansi:
+      enabled: NEVER
+
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    org.springframework: ${LOG_LEVEL_SPRING:WARN}
+    org.hibernate.SQL: ${LOG_LEVEL_HIBERNATE_SQL:WARN}
+    org.hibernate.type.descriptor.sql: ${LOG_LEVEL_HIBERNATE_BIND:WARN}
+    org.springframework.security: ${LOG_LEVEL_SECURITY:INFO}
+    org.springframework.web.socket: ${LOG_LEVEL_WEBSOCKET:INFO}
+    org.springframework.messaging: ${LOG_LEVEL_MESSAGING:INFO}
+    com.worknest: ${LOG_LEVEL_WORKNEST:INFO}
+
+app:
+  security:
+    public-health-enabled: ${PUBLIC_HEALTH_ENABLED:true}
+    swagger-public-enabled: ${SWAGGER_PUBLIC_ENABLED:false}
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS:health,info,metrics}
+  endpoint:
+    health:
+      show-details: ${MANAGEMENT_HEALTH_SHOW_DETAILS:never}

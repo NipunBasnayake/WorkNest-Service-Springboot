@@ -236,7 +236,7 @@ public class PlatformOnboardingServiceImpl implements PlatformOnboardingService 
                 : masterDbUrl;
         String queryPart = queryStartIndex > -1
                 ? masterDbUrl.substring(queryStartIndex)
-                : "?createDatabaseIfNotExist=true";
+                : "";
 
         int lastSlashIndex = basePart.lastIndexOf('/');
         if (lastSlashIndex == -1) {

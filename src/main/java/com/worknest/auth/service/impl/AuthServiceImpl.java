@@ -82,7 +82,7 @@ public class AuthServiceImpl implements AuthService {
             EmailNotificationService emailNotificationService,
             @Value("${app.tenant.header:X-Tenant-Slug}") String tenantHeaderName,
             @Value("${app.auth.password-reset.token-expiry-minutes:20}") int passwordResetTokenExpiryMinutes,
-            @Value("${app.auth.password-reset.link-base-url:http://localhost:3000/reset-password}")
+            @Value("${app.auth.password-reset.link-base-url}")
             String passwordResetLinkBaseUrl) {
         this.platformUserService = platformUserService;
         this.refreshTokenService = refreshTokenService;

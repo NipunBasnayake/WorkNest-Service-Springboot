@@ -6,17 +6,19 @@ import java.util.List;
 import java.util.Locale;
 
 public enum StorageCategory {
-    WORKSPACE_BANNER(List.of("companies", "banners"), FileFamily.IMAGE),
-    EMPLOYEE_AVATAR(List.of("employees", "photos"), FileFamily.IMAGE),
-    IMAGE(List.of("images"), FileFamily.IMAGE),
-    PROJECT_ATTACHMENT(List.of("projects", "attachments"), FileFamily.ANY),
-    TASK_ATTACHMENT(List.of("tasks", "attachments"), FileFamily.ANY),
-    ANNOUNCEMENT_ATTACHMENT(List.of("announcements", "attachments"), FileFamily.ANY),
-    LEAVE_ATTACHMENT(List.of("leave", "attachments"), FileFamily.ANY),
-    CHAT_ATTACHMENT(List.of("chat", "attachments"), FileFamily.ANY),
-    CANDIDATE_RESUME(List.of("recruitment", "resumes"), FileFamily.DOCUMENT),
-    DOCUMENT(List.of("documents"), FileFamily.DOCUMENT),
-    TEMPORARY(List.of("temporary"), FileFamily.ANY);
+    WORKSPACE_BANNER(List.of("company-logos"), FileFamily.IMAGE),
+    EMPLOYEE_AVATAR(List.of("avatars"), FileFamily.IMAGE),
+    IMAGE(List.of("future", "images"), FileFamily.IMAGE),
+    PROJECT_ATTACHMENT(List.of("project-files"), FileFamily.ANY),
+    TASK_ATTACHMENT(List.of("task-attachments"), FileFamily.ANY),
+    ANNOUNCEMENT_ATTACHMENT(List.of("announcements"), FileFamily.ANY),
+    LEAVE_ATTACHMENT(List.of("employee-documents", "leave"), FileFamily.ANY),
+    CHAT_ATTACHMENT(List.of("chat-files"), FileFamily.ANY),
+    CANDIDATE_RESUME(List.of("candidate-cvs"), FileFamily.DOCUMENT),
+    OFFER_LETTER(List.of("offer-letters"), FileFamily.DOCUMENT),
+    DOCUMENT(List.of("employee-documents"), FileFamily.DOCUMENT),
+    TEMPORARY(List.of("temp"), FileFamily.ANY),
+    FUTURE(List.of("future"), FileFamily.ANY);
 
     private final List<String> directorySegments;
     private final FileFamily fileFamily;

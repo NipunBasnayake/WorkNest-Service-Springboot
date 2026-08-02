@@ -37,6 +37,12 @@ public class StoredFileVariant {
     @Column(name = "relative_path", nullable = false, unique = true, length = 700)
     private String relativePath;
 
+    @Column(name = "storage_bucket", length = 120)
+    private String storageBucket;
+
+    @Column(name = "storage_object_key", length = 900)
+    private String storageObjectKey;
+
     @Column(name = "extension", nullable = false, length = 10)
     private String extension;
 

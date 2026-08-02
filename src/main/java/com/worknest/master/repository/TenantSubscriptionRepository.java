@@ -20,6 +20,10 @@ public interface TenantSubscriptionRepository extends JpaRepository<TenantSubscr
 
     boolean existsByTenantId(Long tenantId);
 
+    boolean existsBySubscriptionPlanId(Long subscriptionPlanId);
+
+    long countByActiveTrue();
+
     @EntityGraph(attributePaths = {"tenant", "subscriptionPlan"})
     List<TenantSubscription> findAllByOrderByTenantCompanyNameAsc();
 

@@ -25,6 +25,8 @@ public interface PlanFeatureRepository extends JpaRepository<PlanFeature, Long> 
 
     boolean existsByPlanIdAndFeatureId(Long planId, Long featureId);
 
+    void deleteByPlanId(Long planId);
+
     @Query("""
             select case when count(ts) > 0 then true else false end
             from TenantSubscription ts

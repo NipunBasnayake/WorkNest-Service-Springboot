@@ -7,6 +7,7 @@ import com.worknest.master.dto.subscription.SubscriptionOverviewDto;
 import com.worknest.master.dto.subscription.SubscriptionPlanRequestDto;
 import com.worknest.master.dto.subscription.SubscriptionPlanResponseDto;
 import com.worknest.master.dto.subscription.SubscriptionStatisticsDto;
+import com.worknest.master.dto.subscription.TenantPackageCatalogDto;
 import com.worknest.master.dto.subscription.TenantPlanAssignmentRequestDto;
 import com.worknest.master.dto.subscription.TenantSubscriptionResponseDto;
 import com.worknest.master.entity.PlatformTenant;
@@ -26,6 +27,8 @@ public interface SubscriptionService {
     SubscriptionPlanResponseDto updatePlan(Long planId, SubscriptionPlanRequestDto request);
 
     SubscriptionPlanResponseDto setPlanActive(Long planId, boolean active);
+
+    void deletePlan(Long planId);
 
     List<SubscriptionFeatureResponseDto> getFeatures();
 
@@ -49,6 +52,10 @@ public interface SubscriptionService {
     TenantSubscriptionResponseDto deactivateTenantSubscription(String tenantKey);
 
     CurrentSubscriptionAccessDto getCurrentAccess(String tenantKey);
+
+    TenantPackageCatalogDto getTenantPackageCatalog(String tenantKey);
+
+    TenantSubscriptionResponseDto selectTenantPackage(String tenantKey, String planCode);
 
     SubscriptionStatisticsDto getStatistics();
 

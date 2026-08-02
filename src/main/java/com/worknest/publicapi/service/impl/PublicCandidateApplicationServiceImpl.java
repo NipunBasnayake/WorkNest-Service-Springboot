@@ -77,7 +77,7 @@ public class PublicCandidateApplicationServiceImpl implements PublicCandidateApp
     private final TenantBrandingService tenantBrandingService;
     private final RecruitmentApplicationEventRepository applicationEventRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
-    @Value("${app.public-web-base-url:http://localhost:5173}")
+    @Value("${app.public-web-base-url}")
     private String publicWebBaseUrl;
 
     public PublicCandidateApplicationServiceImpl(

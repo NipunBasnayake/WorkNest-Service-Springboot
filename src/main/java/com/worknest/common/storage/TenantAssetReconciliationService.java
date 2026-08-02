@@ -18,7 +18,7 @@ import java.util.Set;
 @Service
 public class TenantAssetReconciliationService {
 
-    private static final String AVATAR_PREFIX = "employees/photos";
+    private static final String AVATAR_PREFIX = "avatars";
 
     private final StoredFileMetadataRepository metadataRepository;
     private final StoredFileVariantRepository variantRepository;

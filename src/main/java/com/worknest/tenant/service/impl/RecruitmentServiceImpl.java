@@ -77,7 +77,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final SecureRandom secureRandom;
     @Autowired(required = false)
     private TenantRealtimePublisher tenantRealtimePublisher;
-    @Value("${app.public-web-base-url:http://localhost:5173}")
+    @Value("${app.public-web-base-url}")
     private String publicWebBaseUrl;
 
     public RecruitmentServiceImpl(

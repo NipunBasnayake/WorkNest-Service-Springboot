@@ -50,12 +50,15 @@ public class MasterDataSourceConfig {
     @Value("${app.master.datasource.pool.leak-detection-threshold-ms:0}")
     private long leakDetectionThresholdMs;
 
+    @Value("${app.datasource.connection-init-sql:}")
+    private String connectionInitSql;
+
     @Bean(name = "masterDataSource")
     @Primary
     public DataSource masterDataSource() {
         validateMasterDataSourceProperties();
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(MySqlDataSourceSupport.withSafeZeroDateHandling(masterDbUrl));
+        config.setJdbcUrl(masterDbUrl);
         config.setUsername(masterDbUsername);
         config.setPassword(masterDbPassword);
         config.setDriverClassName(driverClassName);
@@ -71,7 +74,10 @@ public class MasterDataSourceConfig {
         }
         config.setPoolName("WorkNestMasterPool");
         config.setRegisterMbeans(false);
-        config.setConnectionInitSql(MySqlDataSourceSupport.STRICT_DATE_CONNECTION_INIT_SQL);
+        String resolvedConnectionInitSql = DatabaseDataSourceSupport.trimToNull(connectionInitSql);
+        if (resolvedConnectionInitSql != null) {
+            config.setConnectionInitSql(resolvedConnectionInitSql);
+        }
 
         return new HikariDataSource(config);
     }
@@ -94,6 +100,9 @@ public class MasterDataSourceConfig {
         }
         if ("root".equalsIgnoreCase(masterDbUsername)) {
             log.warn("Master DB is configured with root user. Prefer a dedicated least-privileged DB account.");
+        }
+        if ("postgres".equalsIgnoreCase(masterDbUsername)) {
+            log.warn("Master DB is configured with the postgres superuser. Prefer a dedicated least-privileged DB account.");
         }
     }
 }

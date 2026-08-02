@@ -3,6 +3,7 @@ package com.worknest.master.service.impl;
 import com.worknest.common.enums.TenantStatus;
 import com.worknest.common.exception.DownstreamCommunicationException;
 import com.worknest.common.exception.ResourceNotFoundException;
+import com.worknest.config.DatabaseDataSourceSupport;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.repository.PlatformTenantRepository;
 import com.worknest.master.service.TenantProvisioningService;
@@ -13,10 +14,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 @Service
@@ -31,6 +34,7 @@ public class TenantProvisioningServiceImpl implements TenantProvisioningService 
     private final JdbcTemplate masterJdbcTemplate;
     private final MasterTenantContextRunner masterTenantContextRunner;
     private final TransactionTemplate masterTransaction;
+    private final String masterDbUrl;
 
     public TenantProvisioningServiceImpl(
             PlatformTenantRepository platformTenantRepository,
@@ -38,13 +42,15 @@ public class TenantProvisioningServiceImpl implements TenantProvisioningService 
             TenantAdminEmployeeMirrorService tenantAdminEmployeeMirrorService,
             @Qualifier("masterJdbcTemplate") JdbcTemplate masterJdbcTemplate,
             MasterTenantContextRunner masterTenantContextRunner,
-            @Qualifier("masterTransactionManager") PlatformTransactionManager masterTransactionManager) {
+            @Qualifier("masterTransactionManager") PlatformTransactionManager masterTransactionManager,
+            @Value("${spring.datasource.url}") String masterDbUrl) {
         this.platformTenantRepository = platformTenantRepository;
         this.tenantSchemaService = tenantSchemaService;
         this.tenantAdminEmployeeMirrorService = tenantAdminEmployeeMirrorService;
         this.masterJdbcTemplate = masterJdbcTemplate;
         this.masterTenantContextRunner = masterTenantContextRunner;
         this.masterTransaction = new TransactionTemplate(masterTransactionManager);
+        this.masterDbUrl = masterDbUrl;
     }
 
     @Override
@@ -56,7 +62,7 @@ public class TenantProvisioningServiceImpl implements TenantProvisioningService 
 
         try {
             validateDatabaseName(tenant.getDatabaseName());
-            masterJdbcTemplate.execute("CREATE DATABASE IF NOT EXISTS `" + tenant.getDatabaseName() + "`");
+            createTenantDatabaseIfMissing(tenant.getDatabaseName());
             tenantSchemaService.ensureTenantSchema(tenant);
             tenantAdminEmployeeMirrorService.ensureTenantAdminEmployeeMirror(tenant.getTenantKey());
             updateStatus(tenantId, TenantStatus.ACTIVE);
@@ -90,5 +96,26 @@ public class TenantProvisioningServiceImpl implements TenantProvisioningService 
         if (databaseName == null || !DATABASE_NAME_PATTERN.matcher(databaseName).matches()) {
             throw new IllegalArgumentException("Generated tenant database name is invalid");
         }
+    }
+
+    private void createTenantDatabaseIfMissing(String databaseName) {
+        if (!DatabaseDataSourceSupport.isPostgreSqlUrl(masterDbUrl)) {
+            throw new IllegalStateException("Tenant provisioning requires a PostgreSQL datasource URL.");
+        }
+
+        Integer count = masterJdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_database WHERE datname = ?",
+                Integer.class,
+                databaseName);
+        if (Objects.requireNonNullElse(count, 0) > 0) {
+            return;
+        }
+
+        masterJdbcTemplate.execute("CREATE DATABASE " + quoteIdentifier(databaseName)
+                + " WITH ENCODING 'UTF8' TEMPLATE template0");
+    }
+
+    private String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 }

@@ -51,6 +51,12 @@ public class StoredFileMetadata {
     @Column(name = "relative_path", nullable = false, length = 700)
     private String relativePath;
 
+    @Column(name = "storage_bucket", length = 120)
+    private String storageBucket;
+
+    @Column(name = "storage_object_key", length = 900)
+    private String storageObjectKey;
+
     @Column(name = "extension", nullable = false, length = 20)
     private String extension;
 

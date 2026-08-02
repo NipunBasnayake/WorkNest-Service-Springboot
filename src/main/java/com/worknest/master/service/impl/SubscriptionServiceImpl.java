@@ -11,6 +11,7 @@ import com.worknest.master.dto.subscription.SubscriptionOverviewDto;
 import com.worknest.master.dto.subscription.SubscriptionPlanRequestDto;
 import com.worknest.master.dto.subscription.SubscriptionPlanResponseDto;
 import com.worknest.master.dto.subscription.SubscriptionStatisticsDto;
+import com.worknest.master.dto.subscription.TenantPackageCatalogDto;
 import com.worknest.master.dto.subscription.TenantPlanAssignmentRequestDto;
 import com.worknest.master.dto.subscription.TenantSubscriptionResponseDto;
 import com.worknest.master.entity.PlanFeature;
@@ -34,6 +35,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -185,6 +187,23 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     @Override
+    @Transactional(transactionManager = "masterTransactionManager")
+    @CacheEvict(cacheNames = "platformOperations", allEntries = true)
+    public void deletePlan(Long planId) {
+        SubscriptionPlan plan = findPlan(planId);
+        if (FREE_PLAN_CODE.equals(plan.getCode())) {
+            throw new BadRequestException("The FREE plan cannot be deleted because it is the registration default");
+        }
+        if (tenantSubscriptionRepository.existsBySubscriptionPlanId(planId)) {
+            throw new BadRequestException("Packages assigned to tenants cannot be deleted. Deactivate the package instead.");
+        }
+        planFeatureRepository.deleteByPlanId(planId);
+        subscriptionRepository.delete(plan);
+        audit(null, plan, SubscriptionAuditAction.PLAN_UPDATED, plan.getCode(), null,
+                SubscriptionChangeSource.MANUAL, currentActor(), "Plan deleted");
+    }
+
+    @Override
     public List<SubscriptionFeatureResponseDto> getFeatures() {
         return featureRepository.findAllByOrderByFeatureKeyAsc().stream()
                 .map(feature -> new SubscriptionFeatureResponseDto(
@@ -242,6 +261,18 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 tenantKey,
                 request.planCode(),
                 request.expiresAt(),
+                SubscriptionChangeSource.MANUAL,
+                currentActor());
+    }
+
+    @Override
+    @Transactional(transactionManager = "masterTransactionManager")
+    @CacheEvict(cacheNames = "platformOperations", allEntries = true)
+    public TenantSubscriptionResponseDto selectTenantPackage(String tenantKey, String planCode) {
+        return changeTenantPlan(
+                tenantKey,
+                planCode,
+                null,
                 SubscriptionChangeSource.MANUAL,
                 currentActor());
     }
@@ -325,6 +356,18 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     @Override
+    public TenantPackageCatalogDto getTenantPackageCatalog(String tenantKey) {
+        CurrentSubscriptionAccessDto currentAccess = getCurrentAccess(tenantKey);
+        List<SubscriptionPlanResponseDto> activePlans = getPlans().stream()
+                .filter(SubscriptionPlanResponseDto::active)
+                .toList();
+        return new TenantPackageCatalogDto(
+                currentAccess,
+                activePlans,
+                buildFeatureMatrix(activePlans));
+    }
+
+    @Override
     public SubscriptionStatisticsDto getStatistics() {
         List<TenantSubscription> subscriptions =
                 tenantSubscriptionRepository.findAllByOrderByTenantCompanyNameAsc();
@@ -334,12 +377,21 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         subscriptions.forEach(subscription -> distribution.compute(
                 subscription.getSubscriptionPlan().getCode(),
                 (ignored, count) -> count == null ? 1L : count + 1));
+        String mostPopularPackage = distribution.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .filter(entry -> entry.getValue() > 0)
+                .map(Map.Entry::getKey)
+                .orElse(null);
 
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime thirtyDaysAgo = now.minusDays(30);
         return new SubscriptionStatisticsDto(
+                subscriptionRepository.count(),
+                subscriptionRepository.countByActiveTrue(),
                 tenantRepository.count(),
+                tenantSubscriptionRepository.countByActiveTrue(),
                 distribution,
+                mostPopularPackage,
                 auditRepository.countByActionAndOccurredAtAfter(
                         SubscriptionAuditAction.UPGRADED,
                         thirtyDaysAgo),
@@ -373,23 +425,45 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     public void bootstrapDefaults() {
         List<SubscriptionPlanSeed> seeds = List.of(
                 new SubscriptionPlanSeed("Free", FREE_PLAN_CODE,
-                        "Core WorkNest capabilities with unlimited duration.", 10),
+                        "Core WorkNest capabilities with unlimited duration.",
+                        BigDecimal.ZERO, BigDecimal.ZERO, "MONTHLY", "Free forever",
+                        false, "#64748b", "sparkles", 10,
+                        Set.of(FeatureKey.DASHBOARD, FeatureKey.EMPLOYEE, FeatureKey.PROJECTS,
+                                FeatureKey.TASKS, FeatureKey.NOTIFICATIONS, FeatureKey.SETTINGS)),
                 new SubscriptionPlanSeed("Starter", "STARTER",
-                        "A foundation for growing teams.", 20),
+                        "A foundation for growing teams.",
+                        BigDecimal.ZERO, BigDecimal.ZERO, "MONTHLY", "Starter",
+                        false, "#2563eb", "rocket", 20,
+                        Set.of(FeatureKey.DASHBOARD, FeatureKey.EMPLOYEE, FeatureKey.TEAMS,
+                                FeatureKey.PROJECTS, FeatureKey.TASKS, FeatureKey.ATTENDANCE,
+                                FeatureKey.LEAVE, FeatureKey.NOTIFICATIONS, FeatureKey.SETTINGS)),
                 new SubscriptionPlanSeed("Professional", "PROFESSIONAL",
-                        "Advanced capabilities for established organizations.", 30),
+                        "Advanced capabilities for established organizations.",
+                        BigDecimal.ZERO, BigDecimal.ZERO, "MONTHLY", "Recommended",
+                        true, "#7c3aed", "briefcase", 30,
+                        Set.of(FeatureKey.DASHBOARD, FeatureKey.EMPLOYEE, FeatureKey.TEAMS,
+                                FeatureKey.PROJECTS, FeatureKey.TASKS, FeatureKey.ATTENDANCE,
+                                FeatureKey.LEAVE, FeatureKey.RECRUITMENT, FeatureKey.REPORTS,
+                                FeatureKey.NOTIFICATIONS, FeatureKey.CHAT, FeatureKey.ANALYTICS,
+                                FeatureKey.ANNOUNCEMENTS, FeatureKey.SETTINGS)),
                 new SubscriptionPlanSeed("Enterprise", "ENTERPRISE",
-                        "Flexible enterprise-grade workspace capabilities.", 40));
+                        "Flexible enterprise-grade workspace capabilities.",
+                        BigDecimal.ZERO, BigDecimal.ZERO, "YEARLY", "Enterprise",
+                        false, "#059669", "shield", 40,
+                        Set.of(FeatureKey.values())));
 
         for (SubscriptionPlanSeed seed : seeds) {
             subscriptionRepository.findByCodeIgnoreCase(seed.code())
+                    .map(plan -> {
+                        applySeedMetadata(plan, seed);
+                        return subscriptionRepository.save(plan);
+                    })
                     .orElseGet(() -> {
                         SubscriptionPlan plan = new SubscriptionPlan();
                         plan.setName(seed.name());
                         plan.setCode(seed.code());
-                        plan.setDescription(seed.description());
                         plan.setActive(true);
-                        plan.setDisplayOrder(seed.displayOrder());
+                        applySeedMetadata(plan, seed);
                         return subscriptionRepository.save(plan);
                     });
         }
@@ -412,7 +486,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     PlanFeature planFeature = new PlanFeature();
                     planFeature.setPlan(plan);
                     planFeature.setFeature(feature);
-                    planFeature.setEnabled(true);
+                    planFeature.setEnabled(seedFeatures(plan.getCode()).contains(feature.getFeatureKey()));
                     planFeatureRepository.save(planFeature);
                 }
             }
@@ -454,6 +528,13 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         plan.setName(request.name());
         plan.setCode(normalizeCode(request.code()));
         plan.setDescription(request.description());
+        plan.setMonthlyPrice(request.monthlyPrice() == null ? BigDecimal.ZERO : request.monthlyPrice());
+        plan.setYearlyPrice(request.yearlyPrice() == null ? BigDecimal.ZERO : request.yearlyPrice());
+        plan.setBillingPeriod(defaultString(request.billingPeriod(), "MONTHLY"));
+        plan.setBadge(blankToNull(request.badge()));
+        plan.setRecommended(Boolean.TRUE.equals(request.recommended()));
+        plan.setColor(defaultString(request.color(), "#2563eb"));
+        plan.setIcon(defaultString(request.icon(), "package"));
         plan.setActive(Boolean.TRUE.equals(request.active()));
         plan.setDisplayOrder(request.displayOrder());
         return plan;
@@ -477,6 +558,13 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 plan.getName(),
                 plan.getCode(),
                 plan.getDescription(),
+                plan.getMonthlyPrice(),
+                plan.getYearlyPrice(),
+                plan.getBillingPeriod(),
+                plan.getBadge(),
+                plan.isRecommended(),
+                plan.getColor(),
+                plan.getIcon(),
                 plan.isActive(),
                 plan.getDisplayOrder(),
                 enabledFeatureCount,
@@ -619,10 +707,76 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 .collect(Collectors.joining(" "));
     }
 
+    private void applySeedMetadata(SubscriptionPlan plan, SubscriptionPlanSeed seed) {
+        plan.setDescription(seed.description());
+        plan.setMonthlyPrice(seed.monthlyPrice());
+        plan.setYearlyPrice(seed.yearlyPrice());
+        plan.setBillingPeriod(seed.billingPeriod());
+        plan.setBadge(seed.badge());
+        plan.setRecommended(seed.recommended());
+        plan.setColor(seed.color());
+        plan.setIcon(seed.icon());
+        plan.setDisplayOrder(seed.displayOrder());
+    }
+
+    private Set<FeatureKey> seedFeatures(String planCode) {
+        return switch (normalizeCode(planCode)) {
+            case FREE_PLAN_CODE -> Set.of(
+                    FeatureKey.DASHBOARD,
+                    FeatureKey.EMPLOYEE,
+                    FeatureKey.PROJECTS,
+                    FeatureKey.TASKS,
+                    FeatureKey.NOTIFICATIONS,
+                    FeatureKey.SETTINGS);
+            case "STARTER" -> Set.of(
+                    FeatureKey.DASHBOARD,
+                    FeatureKey.EMPLOYEE,
+                    FeatureKey.TEAMS,
+                    FeatureKey.PROJECTS,
+                    FeatureKey.TASKS,
+                    FeatureKey.ATTENDANCE,
+                    FeatureKey.LEAVE,
+                    FeatureKey.NOTIFICATIONS,
+                    FeatureKey.SETTINGS);
+            case "PROFESSIONAL" -> Set.of(
+                    FeatureKey.DASHBOARD,
+                    FeatureKey.EMPLOYEE,
+                    FeatureKey.TEAMS,
+                    FeatureKey.PROJECTS,
+                    FeatureKey.TASKS,
+                    FeatureKey.ATTENDANCE,
+                    FeatureKey.LEAVE,
+                    FeatureKey.RECRUITMENT,
+                    FeatureKey.REPORTS,
+                    FeatureKey.NOTIFICATIONS,
+                    FeatureKey.CHAT,
+                    FeatureKey.ANALYTICS,
+                    FeatureKey.ANNOUNCEMENTS,
+                    FeatureKey.SETTINGS);
+            default -> Set.of(FeatureKey.values());
+        };
+    }
+
+    private String defaultString(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     private record SubscriptionPlanSeed(
             String name,
             String code,
             String description,
-            int displayOrder) {
+            BigDecimal monthlyPrice,
+            BigDecimal yearlyPrice,
+            String billingPeriod,
+            String badge,
+            boolean recommended,
+            String color,
+            String icon,
+            int displayOrder,
+            Set<FeatureKey> features) {
     }
 }

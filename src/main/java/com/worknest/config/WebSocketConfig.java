@@ -30,7 +30,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public WebSocketConfig(
             StompJwtChannelInterceptor stompJwtChannelInterceptor,
             @Qualifier("messageBrokerTaskScheduler") ObjectProvider<TaskScheduler> messageBrokerTaskScheduler,
-            @Value("${app.websocket.allowed-origins:http://localhost:3000,http://localhost:5173}") String allowedOriginsRaw) {
+            @Value("${app.websocket.allowed-origins:}") String allowedOriginsRaw) {
         this.stompJwtChannelInterceptor = stompJwtChannelInterceptor;
         this.messageBrokerTaskScheduler = messageBrokerTaskScheduler;
         this.allowedOrigins = Arrays.stream(allowedOriginsRaw.split(","))

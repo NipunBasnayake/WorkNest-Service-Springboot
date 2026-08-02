@@ -12,18 +12,23 @@ import com.worknest.tenant.repository.StoredFileVariantRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,21 +45,17 @@ import static org.mockito.Mockito.when;
 
 class FileStorageServiceTest {
 
-    @TempDir
-    Path temporaryDirectory;
-
     private final Map<Long, StoredFileMetadata> metadataById = new LinkedHashMap<>();
     private final AtomicLong ids = new AtomicLong(100);
 
-    private LocalStorageProvider storageProvider;
+    private InMemoryStorageProvider storageProvider;
     private StoredFileMetadataRepository metadataRepository;
     private FileStorageService service;
 
     @BeforeEach
     void setUp() {
         StorageProperties properties = new StorageProperties();
-        properties.setRoot(temporaryDirectory.resolve("storage").toString());
-        storageProvider = new LocalStorageProvider(properties);
+        storageProvider = new InMemoryStorageProvider();
 
         metadataRepository = mock(StoredFileMetadataRepository.class);
         when(metadataRepository.saveAndFlush(any(StoredFileMetadata.class))).thenAnswer(invocation -> {
@@ -174,7 +175,7 @@ class FileStorageServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("database write failed");
 
-        assertThat(storageProvider.listObjects("acme", "recruitment/resumes")).isEmpty();
+        assertThat(storageProvider.listObjects("acme", "candidate-cvs")).isEmpty();
     }
 
     @Test
@@ -255,10 +256,7 @@ class FileStorageServiceTest {
                 StorageCategory.CANDIDATE_RESUME,
                 upload("resume.pdf", "application/pdf", validPdf()));
         StoredFileMetadata metadata = metadataById.get(Long.valueOf(stored.id()));
-        Path physicalFile = storageProvider.localTenantRoot()
-                .resolve("acme")
-                .resolve(metadata.getRelativePath());
-        Files.writeString(physicalFile, "%PDF-1.7\nchanged\n%%EOF\n");
+        storageProvider.corrupt("acme", metadata.getRelativePath(), "%PDF-1.7\nchanged\n%%EOF\n".getBytes(StandardCharsets.US_ASCII));
 
         assertThatThrownBy(() -> service.download("acme", "wnfileid://" + stored.id()))
                 .isInstanceOf(ResourceNotFoundException.class)
@@ -298,5 +296,119 @@ class FileStorageServiceTest {
 
     private String sha256(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private static class InMemoryStorageProvider implements StorageProvider {
+        private final Map<String, StoredObject> objects = new LinkedHashMap<>();
+
+        @Override
+        public void initialize(java.util.Collection<List<String>> categoryDirectories) {
+        }
+
+        @Override
+        public void initializeTenant(String tenantSlug, java.util.Collection<List<String>> categoryDirectories) {
+        }
+
+        @Override
+        public String bucketForPath(String relativePath) {
+            String root = relativePath.split("/", 2)[0];
+            return switch (root) {
+                case "avatars" -> "avatars";
+                case "candidate-cvs" -> "recruitment";
+                case "chat-files" -> "chat";
+                case "project-files" -> "projects";
+                case "company-logos" -> "logos";
+                default -> "documents";
+            };
+        }
+
+        @Override
+        public String objectKey(String tenantSlug, String relativePath) {
+            String[] segments = relativePath.split("/", 2);
+            return segments.length == 1
+                    ? segments[0] + "/" + tenantSlug
+                    : segments[0] + "/" + tenantSlug + "/" + segments[1];
+        }
+
+        @Override
+        public void write(String tenantSlug, String relativePath, byte[] content) {
+            objects.put(key(tenantSlug, relativePath), new StoredObject(Arrays.copyOf(content, content.length), Instant.now()));
+        }
+
+        @Override
+        public Resource read(String tenantSlug, String relativePath) {
+            StoredObject object = objects.get(key(tenantSlug, relativePath));
+            if (object == null) throw new ResourceNotFoundException("File not found");
+            return new ByteArrayResource(Arrays.copyOf(object.bytes(), object.bytes().length));
+        }
+
+        @Override
+        public boolean exists(String tenantSlug, String relativePath) {
+            return objects.containsKey(key(tenantSlug, relativePath));
+        }
+
+        @Override
+        public boolean hashMatches(String tenantSlug, String relativePath, String expectedSha256) {
+            StoredObject object = objects.get(key(tenantSlug, relativePath));
+            if (object == null) return false;
+            try {
+                return MessageDigest.isEqual(
+                        HexFormat.of().parseHex(expectedSha256),
+                        MessageDigest.getInstance("SHA-256").digest(object.bytes()));
+            } catch (Exception exception) {
+                return false;
+            }
+        }
+
+        @Override
+        public void delete(String tenantSlug, String relativePath) {
+            objects.remove(key(tenantSlug, relativePath));
+        }
+
+        @Override
+        public String getPublicUrl(String tenantSlug, String relativePath) {
+            return "https://storage.example.test/" + objectKey(tenantSlug, relativePath);
+        }
+
+        @Override
+        public String getSignedUrl(String tenantSlug, String relativePath, Duration expiresIn) {
+            return getPublicUrl(tenantSlug, relativePath) + "?signed=true";
+        }
+
+        @Override
+        public void move(String tenantSlug, String sourceRelativePath, String destinationRelativePath) {
+            copy(tenantSlug, sourceRelativePath, destinationRelativePath);
+            delete(tenantSlug, sourceRelativePath);
+        }
+
+        @Override
+        public void copy(String tenantSlug, String sourceRelativePath, String destinationRelativePath) {
+            StoredObject object = objects.get(key(tenantSlug, sourceRelativePath));
+            if (object == null) throw new ResourceNotFoundException("File not found");
+            objects.put(key(tenantSlug, destinationRelativePath), new StoredObject(Arrays.copyOf(object.bytes(), object.bytes().length), Instant.now()));
+        }
+
+        @Override
+        public List<StoredObjectDescriptor> listObjects(String tenantSlug, String relativePrefix) {
+            List<StoredObjectDescriptor> result = new ArrayList<>();
+            String prefix = tenantSlug + "/" + relativePrefix;
+            objects.forEach((path, object) -> {
+                if (path.startsWith(prefix)) {
+                    result.add(new StoredObjectDescriptor(path.substring(tenantSlug.length() + 1), object.bytes().length, object.updatedAt()));
+                }
+            });
+            return result;
+        }
+
+        void corrupt(String tenantSlug, String relativePath, byte[] content) {
+            write(tenantSlug, relativePath, content);
+        }
+
+        private String key(String tenantSlug, String relativePath) {
+            return tenantSlug + "/" + relativePath;
+        }
+
+        private record StoredObject(byte[] bytes, Instant updatedAt) {
+        }
     }
 }

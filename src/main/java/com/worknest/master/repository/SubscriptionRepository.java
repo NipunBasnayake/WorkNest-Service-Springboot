@@ -16,4 +16,8 @@ public interface SubscriptionRepository extends JpaRepository<SubscriptionPlan, 
     boolean existsByCodeIgnoreCaseAndIdNot(String code, Long id);
 
     List<SubscriptionPlan> findAllByOrderByDisplayOrderAscNameAsc();
+
+    List<SubscriptionPlan> findByActiveTrueOrderByDisplayOrderAscNameAsc();
+
+    long countByActiveTrue();
 }

@@ -28,14 +28,14 @@ class TenantAssetReconciliationServiceTest {
         StoredFileMetadata metadata = new StoredFileMetadata();
         metadata.setId(10L);
         metadata.setStorageCategory(StorageCategory.EMPLOYEE_AVATAR);
-        metadata.setRelativePath("employees/photos/1/a/original.jpg");
+        metadata.setRelativePath("avatars/1/a/original.jpg");
         metadata.setSha256("a".repeat(64));
         metadata.setFileSize(100L);
         metadata.setLifecycleState("ACTIVE");
         metadata.setActive(true);
         metadata.setUploadedAt(LocalDateTime.now());
         StoredFileVariant variant = new StoredFileVariant();
-        variant.setRelativePath("employees/photos/1/a/128.jpg");
+        variant.setRelativePath("avatars/1/a/128.jpg");
         variant.setSha256("b".repeat(64));
         variant.setFileSize(40L);
 
@@ -44,7 +44,7 @@ class TenantAssetReconciliationServiceTest {
         when(storageProvider.exists("acme", metadata.getRelativePath())).thenReturn(true);
         when(storageProvider.hashMatches("acme", metadata.getRelativePath(), metadata.getSha256())).thenReturn(true);
         when(storageProvider.exists("acme", variant.getRelativePath())).thenReturn(false);
-        when(storageProvider.listObjects("acme", "employees/photos")).thenReturn(List.of());
+        when(storageProvider.listObjects("acme", "avatars")).thenReturn(List.of());
 
         AssetObservability.InventorySnapshot snapshot = service.reconcile(
                 "acme", Duration.ofDays(7), Duration.ofHours(24));

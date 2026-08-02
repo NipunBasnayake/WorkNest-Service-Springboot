@@ -28,7 +28,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -50,10 +49,10 @@ public class FileStorageService {
 
     private static final String INTERNAL_PREFIX = "wnfile://";
     private static final String INTERNAL_ID_PREFIX = "wnfileid://";
-    private static final String STORAGE_BUCKET = "worknest-local";
     private static final Set<String> ALLOWED_ROOT_DIRECTORIES = Set.of(
-            "companies", "workspace", "employees", "recruitment", "projects", "tasks", "announcements",
-            "leave", "chat", "documents", "temporary", "images", "docs"
+            "avatars", "employee-documents", "candidate-cvs", "offer-letters", "company-logos",
+            "project-files", "task-attachments", "chat-files", "announcements", "temp", "future",
+            "documents"
     );
     private static final Set<String> DANGEROUS_EXTENSIONS = Set.of(
             "ade", "adp", "apk", "app", "bat", "bin", "cmd", "com", "cpl", "dll", "dmg", "elf",
@@ -122,10 +121,6 @@ public class FileStorageService {
         createDirectories();
     }
 
-    public Path getTenantsRootPath() {
-        return storageProvider.localTenantRoot();
-    }
-
     public StoredFileResult storeForUpload(MultipartFile file, StorageCategory category) {
         return toUploadResult(store(file, category));
     }
@@ -153,6 +148,8 @@ public class FileStorageService {
             metadata.setOriginalFilename(validatedFile.originalName());
             metadata.setStoredFilename(validatedFile.storedFileName());
             metadata.setRelativePath(storedName);
+            metadata.setStorageBucket(storageProvider.bucketForPath(storedName));
+            metadata.setStorageObjectKey(storageProvider.objectKey(normalizedTenantSlug, storedName));
             metadata.setExtension(validatedFile.extension());
             metadata.setContentType(validatedFile.contentType());
             metadata.setFileSize(validatedFile.size());
@@ -247,7 +244,7 @@ public class FileStorageService {
         Long metadataId = parseMetadataId(storedName);
         if (metadataId != null) return buildFileApiUrl(normalizedTenantSlug, metadataId, "preview");
         String relativePath = normalizeStoredName(storedName);
-        return "/files/" + encodePathSegment(normalizedTenantSlug) + "/" + encodeRelativePath(relativePath);
+        return storageProvider.getSignedUrl(normalizedTenantSlug, relativePath, null);
     }
 
     public void validate(MultipartFile file, StorageCategory category) {
@@ -310,9 +307,6 @@ public class FileStorageService {
         if (parsedPublicReference != null) {
             return INTERNAL_PREFIX + parsedPublicReference;
         }
-        if (normalized.startsWith("/uploads/")) {
-            return INTERNAL_PREFIX + normalizeRelativePath(normalized.substring("/uploads/".length()));
-        }
         throw new BadRequestException("Only local WorkNest file references are supported");
     }
 
@@ -344,7 +338,7 @@ public class FileStorageService {
                 storedFile.originalName(),
                 storedFile.contentType(),
                 storedFile.size(),
-                STORAGE_BUCKET,
+                storageProvider.bucketForPath(storedFile.storedName()),
                 storedFile.uploadedAt().toString()
         );
     }
@@ -415,6 +409,8 @@ public class FileStorageService {
             metadata.setOriginalFilename(stored.originalFilename());
             metadata.setStoredFilename("original." + original.extension());
             metadata.setRelativePath(original.relativePath());
+            metadata.setStorageBucket(storageProvider.bucketForPath(original.relativePath()));
+            metadata.setStorageObjectKey(storageProvider.objectKey(tenantSlug, original.relativePath()));
             metadata.setExtension(original.extension());
             metadata.setContentType(original.contentType());
             metadata.setFileSize(original.fileSize());
@@ -434,6 +430,8 @@ public class FileStorageService {
                 variant.setSourceFile(metadata);
                 variant.setVariantName(storedVariant.name());
                 variant.setRelativePath(storedVariant.relativePath());
+                variant.setStorageBucket(storageProvider.bucketForPath(storedVariant.relativePath()));
+                variant.setStorageObjectKey(storageProvider.objectKey(tenantSlug, storedVariant.relativePath()));
                 variant.setExtension(storedVariant.extension());
                 variant.setContentType(storedVariant.contentType());
                 variant.setFileSize(storedVariant.fileSize());
@@ -615,6 +613,8 @@ public class FileStorageService {
             current.setOriginalFilename(replacement.originalName());
             current.setStoredFilename(replacement.storedFileName());
             current.setRelativePath(replacementPath);
+            current.setStorageBucket(storageProvider.bucketForPath(replacementPath));
+            current.setStorageObjectKey(storageProvider.objectKey(tenantSlug, replacementPath));
             current.setExtension(replacement.extension());
             current.setContentType(replacement.contentType());
             current.setFileSize(replacement.size());
@@ -1196,15 +1196,6 @@ public class FileStorageService {
 
     private String parsePublicFileUrl(String value) {
         String path = extractUriPath(value);
-        if (path.startsWith("/files/")) {
-            String remainder = path.substring("/files/".length());
-            int slashIndex = remainder.indexOf('/');
-            if (slashIndex <= 0 || slashIndex == remainder.length() - 1) {
-                throw new BadRequestException("Invalid file URL");
-            }
-            normalizeTenantSlug(remainder.substring(0, slashIndex));
-            return normalizeRelativePath(remainder.substring(slashIndex + 1));
-        }
         if (path.startsWith("/api/public/")) {
             String remainder = path.substring("/api/public/".length());
             int filesIndex = remainder.indexOf("/files/");

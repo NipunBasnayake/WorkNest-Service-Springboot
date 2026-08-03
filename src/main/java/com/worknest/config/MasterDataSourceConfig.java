@@ -1,10 +1,9 @@
 package com.worknest.config;
 
-import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -15,94 +14,40 @@ import javax.sql.DataSource;
 @Configuration
 public class MasterDataSourceConfig {
 
-    private static final Logger log = LoggerFactory.getLogger(MasterDataSourceConfig.class);
-
-    @Value("${spring.datasource.url}")
-    private String masterDbUrl;
-
-    @Value("${spring.datasource.username}")
-    private String masterDbUsername;
-
-    @Value("${spring.datasource.password}")
-    private String masterDbPassword;
-
-    @Value("${spring.datasource.driver-class-name}")
-    private String driverClassName;
-
-    @Value("${app.master.datasource.pool.maximum-pool-size:15}")
-    private int maximumPoolSize;
-
-    @Value("${app.master.datasource.pool.minimum-idle:2}")
-    private int minimumIdle;
-
-    @Value("${app.master.datasource.pool.connection-timeout-ms:30000}")
-    private long connectionTimeoutMs;
-
-    @Value("${app.master.datasource.pool.idle-timeout-ms:300000}")
-    private long idleTimeoutMs;
-
-    @Value("${app.master.datasource.pool.max-lifetime-ms:1800000}")
-    private long maxLifetimeMs;
-
-    @Value("${app.master.datasource.pool.validation-timeout-ms:5000}")
-    private long validationTimeoutMs;
-
-    @Value("${app.master.datasource.pool.leak-detection-threshold-ms:0}")
-    private long leakDetectionThresholdMs;
-
-    @Value("${app.datasource.connection-init-sql:}")
-    private String connectionInitSql;
+    @Bean
+    @Primary
+    @ConfigurationProperties("spring.datasource")
+    public DataSourceProperties masterDataSourceProperties() {
+        return new DataSourceProperties();
+    }
 
     @Bean(name = "masterDataSource")
     @Primary
-    public DataSource masterDataSource() {
-        validateMasterDataSourceProperties();
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(masterDbUrl);
-        config.setUsername(masterDbUsername);
-        config.setPassword(masterDbPassword);
-        config.setDriverClassName(driverClassName);
-
-        config.setMaximumPoolSize(maximumPoolSize);
-        config.setMinimumIdle(minimumIdle);
-        config.setConnectionTimeout(connectionTimeoutMs);
-        config.setIdleTimeout(idleTimeoutMs);
-        config.setMaxLifetime(maxLifetimeMs);
-        config.setValidationTimeout(validationTimeoutMs);
-        if (leakDetectionThresholdMs > 0) {
-            config.setLeakDetectionThreshold(leakDetectionThresholdMs);
-        }
-        config.setPoolName("WorkNestMasterPool");
-        config.setRegisterMbeans(false);
-        String resolvedConnectionInitSql = DatabaseDataSourceSupport.trimToNull(connectionInitSql);
-        if (resolvedConnectionInitSql != null) {
-            config.setConnectionInitSql(resolvedConnectionInitSql);
-        }
-
-        return new HikariDataSource(config);
+    @ConfigurationProperties("spring.datasource.hikari")
+    public HikariDataSource masterDataSource(
+            @Qualifier("masterDataSourceProperties") DataSourceProperties properties) {
+        validateMasterDataSourceProperties(properties);
+        DatabaseDataSourceSupport.requireMySqlUrl(properties.getUrl());
+        return properties.initializeDataSourceBuilder()
+                .type(HikariDataSource.class)
+                .build();
     }
 
     @Bean(name = "masterJdbcTemplate")
-    public JdbcTemplate masterJdbcTemplate() {
-        return new JdbcTemplate(masterDataSource());
+    public JdbcTemplate masterJdbcTemplate(
+            @Qualifier("masterDataSource") DataSource masterDataSource) {
+        return new JdbcTemplate(masterDataSource);
     }
 
-    private void validateMasterDataSourceProperties() {
-        if (masterDbUrl == null || masterDbUrl.isBlank()) {
+    private void validateMasterDataSourceProperties(DataSourceProperties properties) {
+        if (properties.getUrl() == null || properties.getUrl().isBlank()) {
             throw new IllegalStateException("spring.datasource.url must be configured for master database connectivity");
         }
-        if (masterDbUsername == null || masterDbUsername.isBlank()) {
+        if (properties.getUsername() == null || properties.getUsername().isBlank()) {
             throw new IllegalStateException("spring.datasource.username must be configured for master database connectivity");
         }
-
-        if (masterDbPassword == null || masterDbPassword.isBlank()) {
-            log.warn("Master DB password is blank. Set DB_PASSWORD for secured environments.");
-        }
-        if ("root".equalsIgnoreCase(masterDbUsername)) {
-            log.warn("Master DB is configured with root user. Prefer a dedicated least-privileged DB account.");
-        }
-        if ("postgres".equalsIgnoreCase(masterDbUsername)) {
-            log.warn("Master DB is configured with the postgres superuser. Prefer a dedicated least-privileged DB account.");
+        if (properties.getPassword() == null || properties.getPassword().isBlank()) {
+            throw new IllegalStateException("spring.datasource.password must be configured for master database connectivity");
         }
     }
 }

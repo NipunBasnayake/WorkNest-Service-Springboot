@@ -22,11 +22,15 @@ spring:
     enabled: false
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://worknest-postgres:5432/platform_master}
-    username: ${DB_USERNAME:worknest_app}
-    password: ${DB_PASSWORD:}
-    driver-class-name: ${DB_DRIVER:org.postgresql.Driver}
     hikari:
+      maximum-pool-size: ${MASTER_DB_POOL_MAX_SIZE:15}
+      minimum-idle: ${MASTER_DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:300000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1800000}
+      validation-timeout: ${DB_POOL_VALIDATION_TIMEOUT_MS:5000}
+      leak-detection-threshold: ${DB_POOL_LEAK_DETECTION_MS:0}
+      pool-name: WorkNestMasterPool
       register-mbeans: false
 
   mail:
@@ -45,11 +49,8 @@ spring:
           writetimeout: ${MAIL_WRITE_TIMEOUT_MS:5000}
 
   jpa:
-    hibernate:
-      ddl-auto: ${JPA_DDL_AUTO:update}
     show-sql: ${JPA_SHOW_SQL:false}
     open-in-view: false
-    database-platform: ${HIBERNATE_DIALECT:org.hibernate.dialect.PostgreSQLDialect}
     properties:
       hibernate:
         format_sql: ${HIBERNATE_FORMAT_SQL:false}
@@ -97,12 +98,12 @@ storage:
     request-timeout: ${SUPABASE_REQUEST_TIMEOUT:30s}
     signed-url-ttl: ${SUPABASE_SIGNED_URL_TTL:10m}
     buckets:
-      avatars: ${SUPABASE_BUCKET_AVATARS:}
-      documents: ${SUPABASE_BUCKET_DOCUMENTS:}
-      recruitment: ${SUPABASE_BUCKET_RECRUITMENT:}
-      chat: ${SUPABASE_BUCKET_CHAT:}
-      projects: ${SUPABASE_BUCKET_PROJECTS:}
-      logos: ${SUPABASE_BUCKET_LOGOS:}
+      avatars: ${SUPABASE_BUCKET_AVATARS:${SUPABASE_BUCKET:}}
+      documents: ${SUPABASE_BUCKET_DOCUMENTS:${SUPABASE_BUCKET:}}
+      recruitment: ${SUPABASE_BUCKET_RECRUITMENT:${SUPABASE_BUCKET:}}
+      chat: ${SUPABASE_BUCKET_CHAT:${SUPABASE_BUCKET:}}
+      projects: ${SUPABASE_BUCKET_PROJECTS:${SUPABASE_BUCKET:}}
+      logos: ${SUPABASE_BUCKET_LOGOS:${SUPABASE_BUCKET:}}
 
 logging:
   pattern:
@@ -118,18 +119,6 @@ logging:
     com.worknest: ${LOG_LEVEL_WORKNEST:INFO}
 
 app:
-  datasource:
-    connection-init-sql: "${DB_CONNECTION_INIT_SQL:SET TIME ZONE 'UTC'}"
-  master:
-    datasource:
-      pool:
-        maximum-pool-size: ${MASTER_DB_POOL_MAX_SIZE:15}
-        minimum-idle: ${MASTER_DB_POOL_MIN_IDLE:2}
-        connection-timeout-ms: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
-        idle-timeout-ms: ${DB_POOL_IDLE_TIMEOUT_MS:300000}
-        max-lifetime-ms: ${DB_POOL_MAX_LIFETIME_MS:1800000}
-        validation-timeout-ms: ${DB_POOL_VALIDATION_TIMEOUT_MS:5000}
-        leak-detection-threshold-ms: ${DB_POOL_LEAK_DETECTION_MS:0}
   tenant:
     header: ${TENANT_HEADER:X-Tenant-ID}
     default: ${TENANT_DEFAULT:master}

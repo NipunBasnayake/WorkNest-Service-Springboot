@@ -113,10 +113,6 @@ public class StartupSecretsValidator implements CommandLineRunner {
         if ("root".equalsIgnoreCase(datasourceUsername.trim())) {
             throw new IllegalStateException("Production database user must not be root");
         }
-        if ("postgres".equalsIgnoreCase(datasourceUsername.trim())) {
-            throw new IllegalStateException("Production database user must not be postgres superuser");
-        }
-
         if (!isBlank(mailHost) || !isBlank(mailUsername)) {
             requireNonBlank(mailHost, "spring.mail.host");
             requireNonBlank(mailUsername, "spring.mail.username");

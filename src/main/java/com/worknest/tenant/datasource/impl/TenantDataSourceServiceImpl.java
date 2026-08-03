@@ -5,6 +5,7 @@ import com.worknest.common.exception.TenantNotFoundException;
 import com.worknest.common.exception.TenantResolutionException;
 import com.worknest.common.util.AppConstants;
 import com.worknest.config.DatabaseDataSourceSupport;
+import com.worknest.config.TenantDataSourceProperties;
 import com.worknest.master.entity.PlatformTenant;
 import com.worknest.master.service.MasterTenantLookupService;
 import com.worknest.tenant.datasource.TenantDataSourceService;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -37,18 +39,8 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     private final DataSource masterDataSource;
     private final MasterTenantLookupService masterTenantLookupService;
     private final String defaultTenant;
-    private final int maxCachedPools;
-    private final long cacheIdleEvictionMs;
-
-    private final int poolMaximumSize;
-    private final int poolMinimumIdle;
-    private final long poolConnectionTimeoutMs;
-    private final long poolIdleTimeoutMs;
-    private final long poolMaxLifetimeMs;
-    private final long poolValidationTimeoutMs;
-    private final long poolLeakDetectionThresholdMs;
+    private final TenantDataSourceProperties dataSourceProperties;
     private final String driverClassName;
-    private final String connectionInitSql;
 
     private final ConcurrentMap<String, TenantPoolHolder> tenantDataSources = new ConcurrentHashMap<>();
 
@@ -56,31 +48,14 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
             @Qualifier("masterDataSource") DataSource masterDataSource,
             MasterTenantLookupService masterTenantLookupService,
             @Value("${app.tenant.default:" + AppConstants.DEFAULT_TENANT + "}") String defaultTenant,
-            @Value("${app.tenant.datasource.cache.max-cached-pools:100}") int maxCachedPools,
-            @Value("${app.tenant.datasource.cache.idle-eviction-ms:900000}") long cacheIdleEvictionMs,
-            @Value("${app.tenant.datasource.pool.maximum-pool-size:8}") int poolMaximumSize,
-            @Value("${app.tenant.datasource.pool.minimum-idle:0}") int poolMinimumIdle,
-            @Value("${app.tenant.datasource.pool.connection-timeout-ms:30000}") long poolConnectionTimeoutMs,
-            @Value("${app.tenant.datasource.pool.idle-timeout-ms:300000}") long poolIdleTimeoutMs,
-            @Value("${app.tenant.datasource.pool.max-lifetime-ms:1800000}") long poolMaxLifetimeMs,
-            @Value("${app.tenant.datasource.pool.validation-timeout-ms:5000}") long poolValidationTimeoutMs,
-            @Value("${app.tenant.datasource.pool.leak-detection-threshold-ms:0}") long poolLeakDetectionThresholdMs,
-            @Value("${spring.datasource.driver-class-name}") String driverClassName,
-            @Value("${app.datasource.connection-init-sql:}") String connectionInitSql) {
+            @Qualifier("masterDataSourceProperties") DataSourceProperties masterDataSourceProperties,
+            TenantDataSourceProperties dataSourceProperties) {
         this.masterDataSource = masterDataSource;
         this.masterTenantLookupService = masterTenantLookupService;
         this.defaultTenant = defaultTenant;
-        this.maxCachedPools = maxCachedPools;
-        this.cacheIdleEvictionMs = cacheIdleEvictionMs;
-        this.poolMaximumSize = poolMaximumSize;
-        this.poolMinimumIdle = poolMinimumIdle;
-        this.poolConnectionTimeoutMs = poolConnectionTimeoutMs;
-        this.poolIdleTimeoutMs = poolIdleTimeoutMs;
-        this.poolMaxLifetimeMs = poolMaxLifetimeMs;
-        this.poolValidationTimeoutMs = poolValidationTimeoutMs;
-        this.poolLeakDetectionThresholdMs = poolLeakDetectionThresholdMs;
-        this.driverClassName = driverClassName;
-        this.connectionInitSql = connectionInitSql;
+        this.dataSourceProperties = dataSourceProperties;
+        this.driverClassName = masterDataSourceProperties.getDriverClassName();
+        DatabaseDataSourceSupport.requireMySqlUrl(masterDataSourceProperties.getUrl());
     }
 
     @Override
@@ -130,27 +105,28 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
 
     @Override
     public DataSource createDataSource(PlatformTenant tenant) {
+        DatabaseDataSourceSupport.requireMySqlUrl(tenant.getDbUrl());
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(tenant.getDbUrl());
         config.setUsername(tenant.getDbUsername());
         config.setPassword(tenant.getDbPassword());
-        config.setDriverClassName(driverClassName);
+        String configuredDriver = DatabaseDataSourceSupport.trimToNull(driverClassName);
+        if (configuredDriver != null) {
+            config.setDriverClassName(configuredDriver);
+        }
 
-        config.setMaximumPoolSize(poolMaximumSize);
-        config.setMinimumIdle(poolMinimumIdle);
-        config.setConnectionTimeout(poolConnectionTimeoutMs);
-        config.setIdleTimeout(poolIdleTimeoutMs);
-        config.setMaxLifetime(poolMaxLifetimeMs);
-        config.setValidationTimeout(poolValidationTimeoutMs);
-        if (poolLeakDetectionThresholdMs > 0) {
-            config.setLeakDetectionThreshold(poolLeakDetectionThresholdMs);
+        TenantDataSourceProperties.Pool pool = dataSourceProperties.getPool();
+        config.setMaximumPoolSize(pool.getMaximumPoolSize());
+        config.setMinimumIdle(pool.getMinimumIdle());
+        config.setConnectionTimeout(pool.getConnectionTimeoutMs());
+        config.setIdleTimeout(pool.getIdleTimeoutMs());
+        config.setMaxLifetime(pool.getMaxLifetimeMs());
+        config.setValidationTimeout(pool.getValidationTimeoutMs());
+        if (pool.getLeakDetectionThresholdMs() > 0) {
+            config.setLeakDetectionThreshold(pool.getLeakDetectionThresholdMs());
         }
         config.setPoolName("WorkNestTenantPool-" + tenant.getTenantKey());
         config.setRegisterMbeans(false);
-        String resolvedConnectionInitSql = DatabaseDataSourceSupport.trimToNull(connectionInitSql);
-        if (resolvedConnectionInitSql != null) {
-            config.setConnectionInitSql(resolvedConnectionInitSql);
-        }
 
         return new HikariDataSource(config);
     }
@@ -181,6 +157,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
 
     private void evictPoolsIfAboveLimit() {
         int currentSize = tenantDataSources.size();
+        int maxCachedPools = dataSourceProperties.getCache().getMaxCachedPools();
         if (currentSize <= maxCachedPools) {
             return;
         }
@@ -216,7 +193,7 @@ public class TenantDataSourceServiceImpl implements TenantDataSourceService {
     }
 
     private boolean isIdleForEviction(TenantPoolHolder holder, long nowEpochMs) {
-        if (nowEpochMs - holder.lastAccessEpochMs() < cacheIdleEvictionMs) {
+        if (nowEpochMs - holder.lastAccessEpochMs() < dataSourceProperties.getCache().getIdleEvictionMs()) {
             return false;
         }
 

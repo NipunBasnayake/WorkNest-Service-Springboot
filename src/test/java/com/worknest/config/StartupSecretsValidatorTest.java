@@ -22,16 +22,6 @@ class StartupSecretsValidatorTest {
     }
 
     @Test
-    void productionRejectsPostgresSuperuserAccount() {
-        StartupSecretsValidator validator = validator(
-                environment("prod"), "postgres", "strong-db-password", "strong-jwt-secret", false, "");
-
-        assertThatThrownBy(validator::run)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("postgres superuser");
-    }
-
-    @Test
     void productionRejectsKnownJwtDefault() {
         StartupSecretsValidator validator = validator(
                 environment("prod"), "worknest_app", "strong-db-password", DEFAULT_JWT_SECRET, false, "");
@@ -78,7 +68,7 @@ class StartupSecretsValidatorTest {
             String bootstrapPassword) {
         return new StartupSecretsValidator(
                 environment,
-                "jdbc:postgresql://worknest-postgres:5432/platform_master",
+                "jdbc:mysql://database:3306/platform_master",
                 databaseUser,
                 databasePassword,
                 jwtSecret,
@@ -111,7 +101,7 @@ class StartupSecretsValidatorTest {
             String supabaseServiceRoleKey) {
         return new StartupSecretsValidator(
                 environment,
-                "jdbc:postgresql://worknest-postgres:5432/platform_master",
+                "jdbc:mysql://database:3306/platform_master",
                 databaseUser,
                 databasePassword,
                 jwtSecret,

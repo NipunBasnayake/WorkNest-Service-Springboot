@@ -99,23 +99,24 @@ public class TenantProvisioningServiceImpl implements TenantProvisioningService 
     }
 
     private void createTenantDatabaseIfMissing(String databaseName) {
-        if (!DatabaseDataSourceSupport.isPostgreSqlUrl(masterDbUrl)) {
-            throw new IllegalStateException("Tenant provisioning requires a PostgreSQL datasource URL.");
-        }
+        DatabaseDataSourceSupport.requireMySqlUrl(masterDbUrl);
+        createMySqlDatabaseIfMissing(databaseName);
+    }
 
+    private void createMySqlDatabaseIfMissing(String databaseName) {
         Integer count = masterJdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM pg_database WHERE datname = ?",
+                "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?",
                 Integer.class,
                 databaseName);
         if (Objects.requireNonNullElse(count, 0) > 0) {
             return;
         }
-
-        masterJdbcTemplate.execute("CREATE DATABASE " + quoteIdentifier(databaseName)
-                + " WITH ENCODING 'UTF8' TEMPLATE template0");
+        masterJdbcTemplate.execute("CREATE DATABASE " + quoteMySqlIdentifier(databaseName)
+                + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     }
 
-    private String quoteIdentifier(String identifier) {
-        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    private String quoteMySqlIdentifier(String identifier) {
+        return "`" + identifier.replace("`", "``") + "`";
     }
+
 }

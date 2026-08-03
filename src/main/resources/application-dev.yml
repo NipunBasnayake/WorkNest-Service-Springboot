@@ -1,0 +1,13 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: jdbc:mysql://${MASTER_DB_HOST:localhost}:${MASTER_DB_PORT:3306}/${MASTER_DB_NAME:platform_master}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MASTER_DB_USERNAME:root}
+    password: ${MASTER_DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update

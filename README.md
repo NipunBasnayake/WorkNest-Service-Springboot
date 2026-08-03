@@ -35,7 +35,7 @@ Production note: current repository defaults are development-oriented in several
 | Security | Spring Security 6 + JWT (JJWT) | Stateless bearer auth, role-based authorization, tenant claim checks |
 | Data Access | Spring Data JPA + Hibernate 6 | Separate master and tenant persistence units |
 | Multi-tenancy | Hibernate DATABASE multi-tenancy | Custom CurrentTenantIdentifierResolver + MultiTenantConnectionProvider |
-| Database | MySQL 8.x | Master DB plus per-tenant DB credentials in platform metadata |
+| Database | MySQL 8.x | Master database plus one database per tenant |
 | Migrations | Hibernate ddl-auto | No Flyway dependency or migration scripts currently present |
 | Real-time | Spring WebSocket + STOMP + SockJS | In-memory simple broker with heartbeat |
 | API Docs | springdoc-openapi 2.6.0 | JWT bearer scheme in OpenAPI |
@@ -50,7 +50,7 @@ Production note: current repository defaults are development-oriented in several
 | Data Domain | Persistence Unit | Physical Storage | Responsibilities |
 |---|---|---|---|
 | Master control plane | masterEntityManagerFactory | `platform_master` (configured in `spring.datasource.*`) | Platform users, refresh tokens, tenant registry, onboarding metadata |
-| Tenant business plane | entityManagerFactory (tenant) | Per-tenant MySQL databases (resolved from `platform_tenants.db_url/db_username/db_password`) | Employees, teams, attendance, leaves, projects, tasks, chats, notifications, audit logs |
+| Tenant business plane | entityManagerFactory (tenant) | Per-tenant MySQL databases resolved from `platform_tenants.db_url/db_username/db_password` | Employees, teams, attendance, leaves, projects, tasks, chats, notifications, audit logs |
 
 ### Request routing and tenant resolution
 
@@ -280,9 +280,13 @@ src/main/java/com/worknest
 
 src/main/resources
   application.yml
+  application-dev.yml
+  application-prod.yml
 
 docker-compose.yml
+docker-compose.dev.yml
 Dockerfile
+.env.example
 pom.xml
 ```
 
@@ -294,14 +298,18 @@ pom.xml
 
 - JDK 21
 - Maven 3.9+
-- MySQL 8+
+- MySQL 8+ for local development
 - Docker and Docker Compose (optional)
 
 ### Run locally
 
-1. Create a MySQL database for master metadata (for example: `platform_master`).
-2. Update configuration values (recommended via environment overrides; see Environment Variables section).
-3. Start the service:
+The default profile is `dev`. It uses MySQL and resolves to this URL when no database host variables are supplied:
+
+```text
+jdbc:mysql://localhost:3306/platform_master?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+```
+
+Copy `.env.example` to `.env` and set the local MySQL password, Supabase credentials, and JWT secret. `application-dev.yml` imports this file through Spring Boot Config Data; there is no custom dotenv parser.
 
 ```bash
 mvn spring-boot:run
@@ -318,25 +326,41 @@ Default application port is `8080`.
 
 ### Profiles
 
-- Default profile: no explicit profile required.
-- Production profile: `SPRING_PROFILES_ACTIVE=prod`.
-- In `prod`, `StartupSecretsValidator` enforces non-empty critical secrets and blocks `spring.jpa.hibernate.ddl-auto=update`.
+- `dev` is active by default and is intentionally MySQL-only.
+- `application-dev.yml` imports the optional working-directory `.env` file and maps `MASTER_DB_*` values into `spring.datasource.*`.
+- `prod` does not load `.env`; Dockploy or the container runtime must inject the variables into the process environment.
+- Both profiles use `com.mysql.cj.jdbc.Driver`, `createDatabaseIfNotExist=true`, and Hibernate schema update. Hibernate detects the MySQL dialect from JDBC metadata.
 
-### Docker
+### Docker development
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
-Container endpoints:
+This starts the backend and MySQL on an isolated network. The backend uses the service hostname `database`; it never uses `localhost` for a container-to-container database connection. MySQL is bound to `127.0.0.1:${MYSQL_PORT:-3307}` for development tools.
 
-- Backend: `http://localhost:${BACKEND_PORT:-8080}`
-- MySQL: `localhost:${MYSQL_PORT:-3306}`
+### Production and Dockploy
 
-Production Warnings:
+1. Enter the `.env.example` variable names with production values in Dockploy's environment UI. For CLI Compose, use an untracked production env file.
+2. Replace every placeholder secret and set the real frontend URLs/origins.
+3. Deploy `docker-compose.yml` from this directory.
+4. Attach the named `worknest-database-data` volume to persistent VPS storage and retain it across deployments.
 
-- Current `docker-compose.yml` exports `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`, while Spring Boot datasource properties are `spring.datasource.*`. Use `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` (or map values inside `application.yml`) to avoid startup mismatches.
-- Current repository `application.yml` contains hardcoded credentials and a JWT secret intended for local development only.
+```bash
+docker compose config
+docker compose up -d --build
+docker compose ps
+```
+
+The production Compose stack exposes only the backend port. MySQL stays on the internal `worknest-network`, has a persistent named volume, and must pass its health check before the backend starts. The backend readiness probe is `/actuator/health/readiness`.
+
+For the current Dockploy MySQL service, the equivalent JDBC URL is assembled without embedding credentials:
+
+```text
+jdbc:mysql://${MASTER_DB_HOST}:${MASTER_DB_PORT}/${MASTER_DB_NAME}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+```
+
+When deploying this repository's Compose stack, the backend always uses the internal service name `database`. When deploying only the backend against the existing Dockploy database service, set `MASTER_DB_HOST=worknestsaas-worknestdb-yjwvog`, `MASTER_DB_PORT=3306`, `MASTER_DB_NAME=worknest_db`, and provide the username/password separately.
 
 ---
 
@@ -368,78 +392,23 @@ Production Warnings:
 
 ## Environment Variables
 
-This project currently keeps many defaults directly in `application.yml`. For production, externalize all secrets and operational settings.
+Use [.env.example](./.env.example) as the canonical inventory. Production secrets are never committed and are consumed through these mappings:
 
-### Core runtime and profile
+| Area | Required variables |
+|---|---|
+| Runtime | `SPRING_PROFILES_ACTIVE`, `SERVER_PORT` |
+| Master DB | `MASTER_DB_HOST`, `MASTER_DB_PORT`, `MASTER_DB_NAME`, `MASTER_DB_USERNAME`, `MASTER_DB_PASSWORD` |
+| Tenant pools | The common `TENANT_DB_*` pool/cache controls when tuning is required; tenant pools reuse the master MySQL driver |
+| Storage | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_BUCKET` (or the six category-specific bucket overrides) |
+| JWT | `JWT_SECRET`, `JWT_ACCESS_EXPIRATION_MS`, `JWT_REFRESH_EXPIRATION_MS` |
+| Mail | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`; set `MAIL_ENABLED=false` when SMTP is intentionally disabled |
+| Browser | `PUBLIC_WEB_BASE_URL`, `PASSWORD_RESET_LINK_BASE_URL`, `ALLOWED_ORIGINS`, `WS_ALLOWED_ORIGINS` |
 
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| Active profile | `spring.profiles.active` | `SPRING_PROFILES_ACTIVE` |
-| Server port | `server.port` | `SERVER_PORT` |
+`application.yml` contains only common behavior and operational defaults. Connection coordinates live in `application-dev.yml` and `application-prod.yml`. Both bind to `spring.datasource.*`; Java code never reads `MASTER_DB_*` directly.
 
-### Master database
+All upload paths use `SupabaseStorageProvider`; there is no filesystem storage provider, uploads directory, or local-path setting. A single private Supabase bucket is supported by `SUPABASE_BUCKET`, while category-specific variables remain available for installations that need separate buckets.
 
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| Master JDBC URL | `spring.datasource.url` | `SPRING_DATASOURCE_URL` |
-| Master DB username | `spring.datasource.username` | `SPRING_DATASOURCE_USERNAME` |
-| Master DB password | `spring.datasource.password` | `SPRING_DATASOURCE_PASSWORD` |
-| Driver class | `spring.datasource.driver-class-name` | `SPRING_DATASOURCE_DRIVER_CLASS_NAME` |
-
-### JWT and tenant request context
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| JWT signing secret (Base64) | `app.jwt.secret` | `APP_JWT_SECRET` |
-| Access token TTL (ms) | `app.jwt.expiration` | `APP_JWT_EXPIRATION` |
-| Refresh token TTL (ms) | `app.jwt.refresh-expiration` | `APP_JWT_REFRESH_EXPIRATION` |
-| Tenant header name | `app.tenant.header` | `APP_TENANT_HEADER` |
-| Default tenant alias | `app.tenant.default` | `APP_TENANT_DEFAULT` |
-
-### CORS and WebSocket origins
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| REST allowed origins | `app.cors.allowed-origins` | `APP_CORS_ALLOWED_ORIGINS` |
-| WS allowed origins | `app.websocket.allowed-origins` | `APP_WEBSOCKET_ALLOWED_ORIGINS` |
-
-### Security exposure toggles
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| Public health endpoint | `app.security.public-health-enabled` | `APP_SECURITY_PUBLIC_HEALTH_ENABLED` |
-| Public Swagger endpoints | `app.security.swagger-public-enabled` | `APP_SECURITY_SWAGGER_PUBLIC_ENABLED` |
-
-### Mail and password reset
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| SMTP host | `spring.mail.host` | `SPRING_MAIL_HOST` |
-| SMTP port | `spring.mail.port` | `SPRING_MAIL_PORT` |
-| SMTP username | `spring.mail.username` | `SPRING_MAIL_USERNAME` |
-| SMTP password | `spring.mail.password` | `SPRING_MAIL_PASSWORD` |
-| Sender email | `app.email.from` | `APP_EMAIL_FROM` |
-| Reset token expiry minutes | `app.auth.password-reset.token-expiry-minutes` | `APP_AUTH_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES` |
-| Reset link base URL | `app.auth.password-reset.link-base-url` | `APP_AUTH_PASSWORD_RESET_LINK_BASE_URL` |
-
-### File storage and upload limits
-
-| Purpose | Spring Property | Recommended Environment Variable |
-|---|---|---|
-| Frontend upload directory | `app.storage.frontend-public-uploads-dir` | `APP_STORAGE_FRONTEND_PUBLIC_UPLOADS_DIR` |
-| Max upload size (bytes) | `app.storage.max-file-size-bytes` | `APP_STORAGE_MAX_FILE_SIZE_BYTES` |
-| Allowed MIME types | `app.storage.allowed-mime-types` | `APP_STORAGE_ALLOWED_MIME_TYPES` |
-
-Production Warnings:
-
-- Manage secrets through a centralized secret manager (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, or HashiCorp Vault).
-- Never commit real credentials, JWT keys, or SMTP app passwords.
-- Rotate all secrets that were previously stored in repository history.
-
-Error response standardization note:
-
-- Most exceptions use `ErrorResponse` via `GlobalExceptionHandler`, and success responses use `ApiResponse`.
-- JWT and tenant filters also write error payloads directly. Keep their error-code taxonomy aligned with global handler contracts to preserve client-side consistency.
+Never commit `.env`. Rotate any database, JWT, SMTP, or Supabase secret that has appeared in source history, and use Dockploy's protected environment-variable storage for production.
 
 ---
 

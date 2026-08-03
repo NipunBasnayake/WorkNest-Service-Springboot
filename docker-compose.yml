@@ -5,20 +5,78 @@ services:
       dockerfile: Dockerfile
     image: ${BACKEND_IMAGE_NAME:-worknest-backend:latest}
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      MASTER_DB_HOST: database
+      MASTER_DB_PORT: 3306
+      MASTER_DB_NAME: ${MASTER_DB_NAME:?Set MASTER_DB_NAME}
+      MASTER_DB_USERNAME: ${MASTER_DB_USERNAME:?Set MASTER_DB_USERNAME}
+      MASTER_DB_PASSWORD: ${MASTER_DB_PASSWORD:?Set MASTER_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_BUCKET: ${SUPABASE_BUCKET:?Set SUPABASE_BUCKET}
+      MAIL_ENABLED: ${MAIL_ENABLED:-false}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@example.com}
+      PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:?Set PUBLIC_WEB_BASE_URL}
+      PASSWORD_RESET_LINK_BASE_URL: ${PASSWORD_RESET_LINK_BASE_URL:?Set PASSWORD_RESET_LINK_BASE_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS}}
+      PUBLIC_HEALTH_ENABLED: ${PUBLIC_HEALTH_ENABLED:-true}
+      SWAGGER_PUBLIC_ENABLED: ${SWAGGER_PUBLIC_ENABLED:-false}
+      SPRINGDOC_API_DOCS_ENABLED: ${SPRINGDOC_API_DOCS_ENABLED:-false}
+      SPRINGDOC_SWAGGER_UI_ENABLED: ${SPRINGDOC_SWAGGER_UI_ENABLED:-false}
+      MANAGEMENT_ENDPOINTS: ${MANAGEMENT_ENDPOINTS:-health,info,metrics}
+      MANAGEMENT_HEALTH_SHOW_DETAILS: ${MANAGEMENT_HEALTH_SHOW_DETAILS:-never}
+      BOOTSTRAP_PLATFORM_ADMIN_ENABLED: ${BOOTSTRAP_PLATFORM_ADMIN_ENABLED:-false}
+      BOOTSTRAP_PLATFORM_ADMIN_NAME: ${BOOTSTRAP_PLATFORM_ADMIN_NAME:-Platform Admin}
+      BOOTSTRAP_PLATFORM_ADMIN_EMAIL: ${BOOTSTRAP_PLATFORM_ADMIN_EMAIL:-}
+      BOOTSTRAP_PLATFORM_ADMIN_PASSWORD: ${BOOTSTRAP_PLATFORM_ADMIN_PASSWORD:-}
+    depends_on:
+      database:
+        condition: service_healthy
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     networks:
       - worknest-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health/readiness || curl -fsS http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health/readiness"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 60s
+
+  database:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MASTER_DB_NAME:?Set MASTER_DB_NAME}
+      MYSQL_USER: ${MASTER_DB_USERNAME:?Set MASTER_DB_USERNAME}
+      MYSQL_PASSWORD: ${MASTER_DB_PASSWORD:?Set MASTER_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - worknest-database-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - worknest-network
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  worknest-database-data:
 
 networks:
   worknest-network:
-    external: true
-    name: ${DOCKER_NETWORK_NAME:-worknest_network}
+    driver: bridge

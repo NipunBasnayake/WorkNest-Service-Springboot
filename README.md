@@ -1195,3 +1195,581 @@ Current architecture supports:
 
 ---
 
+# 🚀 Getting Started
+
+This guide walks you through setting up the WorkNest backend for local development and production deployment.
+
+---
+
+# 📋 Prerequisites
+
+Ensure the following software is installed before starting.
+
+| Software | Version |
+|-----------|----------|
+| Java | 21+ |
+| Maven | 3.9+ |
+| MySQL | 8.0+ |
+| Git | Latest |
+| Docker | Latest *(optional)* |
+| Docker Compose | Latest *(optional)* |
+| IntelliJ IDEA | Recommended |
+
+---
+
+# 💻 Clone Repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/WorkNest-Service-Springboot.git
+
+cd WorkNest-Service-Springboot
+```
+
+---
+
+# ⚙ Environment Configuration
+
+Create a local environment file.
+
+```bash
+cp .env.example .env
+```
+
+Configure the values according to your environment.
+
+Example:
+
+```dotenv
+#############################################
+# APPLICATION
+#############################################
+
+SPRING_PROFILES_ACTIVE=dev
+
+#############################################
+# DATABASE
+#############################################
+
+MASTER_DB_HOST=localhost
+MASTER_DB_PORT=3306
+MASTER_DB_NAME=platform_master
+MASTER_DB_USERNAME=root
+MASTER_DB_PASSWORD=yourpassword
+
+#############################################
+# JWT
+#############################################
+
+JWT_SECRET=YOUR_BASE64_SECRET
+
+JWT_ACCESS_EXPIRATION_MS=900000
+JWT_REFRESH_EXPIRATION_MS=604800000
+
+#############################################
+# SUPABASE
+#############################################
+
+SUPABASE_URL=https://your-project.supabase.co
+
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+SUPABASE_BUCKET=worknest
+
+#############################################
+# EMAIL
+#############################################
+
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=example@gmail.com
+MAIL_PASSWORD=yourpassword
+
+#############################################
+# APPLICATION URLS
+#############################################
+
+PUBLIC_WEB_BASE_URL=http://localhost:5173
+
+PASSWORD_RESET_LINK_BASE_URL=http://localhost:5173/reset-password
+
+#############################################
+# CORS
+#############################################
+
+ALLOWED_ORIGINS=http://localhost:5173
+
+WS_ALLOWED_ORIGINS=http://localhost:5173
+```
+
+---
+
+# 🗄 MySQL Setup
+
+Start MySQL.
+
+Create the master database.
+
+```sql
+CREATE DATABASE platform_master;
+```
+
+No tenant databases need to be created manually.
+
+WorkNest automatically provisions new tenant databases during organization registration.
+
+---
+
+# 🧹 Clean Project
+
+```bash
+mvn clean
+```
+
+---
+
+# 🔨 Compile
+
+```bash
+mvn compile
+```
+
+---
+
+# ▶ Run Application
+
+```bash
+mvn spring-boot:run
+```
+
+Expected output:
+
+```
+Started Main
+```
+
+Backend API:
+
+```
+http://localhost:8080
+```
+
+Swagger (Development)
+
+```
+http://localhost:8080/swagger-ui/index.html
+```
+
+Actuator
+
+```
+http://localhost:8080/actuator/health
+```
+
+---
+
+# 🖥 Running with IntelliJ IDEA
+
+Open
+
+```
+File
+    Open Project
+```
+
+Select
+
+```
+WorkNest-Service-Springboot
+```
+
+Wait until Maven imports all dependencies.
+
+Run
+
+```
+Main.java
+```
+
+or
+
+```
+Spring Boot Configuration
+```
+
+---
+
+# 💙 Running with VS Code
+
+Install extensions
+
+- Java Extension Pack
+- Spring Boot Extension Pack
+- Maven for Java
+
+Run
+
+```
+Main.java
+```
+
+or
+
+```
+mvn spring-boot:run
+```
+
+---
+
+# 🐳 Docker
+
+Build image
+
+```bash
+docker build -t worknest-backend .
+```
+
+Run container
+
+```bash
+docker run \
+-p 8080:8080 \
+--env-file .env \
+worknest-backend
+```
+
+---
+
+# 🐳 Docker Compose
+
+Start
+
+```bash
+docker compose up -d
+```
+
+Stop
+
+```bash
+docker compose down
+```
+
+View logs
+
+```bash
+docker compose logs -f
+```
+
+Restart
+
+```bash
+docker compose restart
+```
+
+---
+
+# 📂 Important Configuration Files
+
+```
+application.yml
+
+application-dev.yml
+
+application-prod.yml
+
+.env.example
+
+Dockerfile
+
+docker-compose.yml
+```
+
+---
+
+# 🌐 Profiles
+
+## Development
+
+```
+dev
+```
+
+Uses
+
+- Local MySQL
+- Local .env
+- Development Logging
+
+Run
+
+```bash
+mvn spring-boot:run
+```
+
+---
+
+## Production
+
+```
+prod
+```
+
+Uses
+
+- Environment Variables
+- External MySQL
+- Optimized Logging
+
+Run
+
+```bash
+SPRING_PROFILES_ACTIVE=prod
+```
+
+---
+
+# 📦 Building Production JAR
+
+```bash
+mvn clean package
+```
+
+Generated
+
+```
+target/
+
+worknest-service.jar
+```
+
+Run
+
+```bash
+java -jar worknest-service.jar
+```
+
+---
+
+# 🔑 Environment Variables
+
+## Required
+
+| Variable | Required |
+|-----------|----------|
+| MASTER_DB_HOST | ✅ |
+| MASTER_DB_PORT | ✅ |
+| MASTER_DB_NAME | ✅ |
+| MASTER_DB_USERNAME | ✅ |
+| MASTER_DB_PASSWORD | ✅ |
+| JWT_SECRET | ✅ |
+| SUPABASE_URL | ✅ |
+| SUPABASE_SERVICE_ROLE_KEY | ✅ |
+| MAIL_HOST | ✅ |
+| MAIL_USERNAME | ✅ |
+| MAIL_PASSWORD | ✅ |
+
+---
+
+# 🔒 JWT Secret
+
+Generate a secure Base64 secret.
+
+Linux
+
+```bash
+openssl rand -base64 64
+```
+
+PowerShell
+
+```powershell
+[Convert]::ToBase64String((1..64 | ForEach-Object {Get-Random -Maximum 256}))
+```
+
+---
+
+# 📡 Health Endpoints
+
+Liveness
+
+```
+GET
+
+/actuator/health/liveness
+```
+
+Readiness
+
+```
+GET
+
+/actuator/health/readiness
+```
+
+General Health
+
+```
+GET
+
+/actuator/health
+```
+
+---
+
+# 📚 API Documentation
+
+Swagger UI
+
+```
+/swagger-ui/index.html
+```
+
+OpenAPI
+
+```
+/v3/api-docs
+```
+
+---
+
+# 📨 Default Platform Administrator
+
+When bootstrap is enabled
+
+```
+Email
+
+admin@worknest.com
+```
+
+Password
+
+```
+Configured through environment variables
+```
+
+Disable bootstrap after the first deployment.
+
+---
+
+# 🏢 Automatic Tenant Provisioning
+
+When a new company registers:
+
+```
+Company Registration
+
+↓
+
+Validate Request
+
+↓
+
+Create Platform Record
+
+↓
+
+Create MySQL Database
+
+↓
+
+Create Tables
+
+↓
+
+Seed Initial Data
+
+↓
+
+Create Administrator
+
+↓
+
+Ready
+```
+
+No manual SQL scripts are required for tenant creation.
+
+---
+
+# 🔍 Verify Installation
+
+Open
+
+```
+http://localhost:8080/actuator/health
+```
+
+Expected response
+
+```json
+{
+  "status": "UP"
+}
+```
+
+---
+
+# 🧪 Running Tests
+
+Run all tests
+
+```bash
+mvn test
+```
+
+Run integration tests
+
+```bash
+mvn verify
+```
+
+---
+
+# 📝 Development Workflow
+
+```text
+Clone Repository
+
+↓
+
+Configure .env
+
+↓
+
+Create platform_master
+
+↓
+
+mvn clean
+
+↓
+
+mvn compile
+
+↓
+
+mvn spring-boot:run
+
+↓
+
+Develop
+
+↓
+
+Test
+
+↓
+
+Commit
+
+↓
+
+Push
+
+↓
+
+Deploy
+```
+
+---
+

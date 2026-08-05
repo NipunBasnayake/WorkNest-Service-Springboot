@@ -447,3 +447,751 @@ The project documentation is organized under the `/docs` directory.
 
 ---
 
+# 🧩 Backend Modules
+
+The WorkNest backend is organized into modular business domains, enabling independent development, scalability, and maintainability.
+
+---
+
+## 🔐 Authentication Module
+
+Responsible for authentication and identity management.
+
+### Features
+
+- User Login
+- User Logout
+- JWT Access Token
+- Refresh Token
+- Password Reset
+- Email Verification
+- Secure Password Hashing
+- Token Rotation
+- Session Validation
+
+---
+
+## 👤 Platform Administration
+
+The platform administration module manages the SaaS platform itself.
+
+### Responsibilities
+
+- Platform Admin Management
+- Tenant Registration
+- Tenant Approval
+- Tenant Provisioning
+- Tenant Database Creation
+- Platform Configuration
+- Platform Analytics
+
+---
+
+## 🏢 Tenant Management
+
+Each organization is represented as an isolated tenant.
+
+Responsibilities include:
+
+- Tenant Creation
+- Tenant Configuration
+- Database Provisioning
+- Connection Pool Management
+- Tenant Isolation
+- Tenant Lifecycle
+
+---
+
+## 👥 Employee Module
+
+Provides complete employee lifecycle management.
+
+### Features
+
+- Employee Registration
+- Employee Profile
+- Department Assignment
+- Team Assignment
+- Designation Management
+- Employment Status
+- Profile Image
+- Employee Documents
+- Search & Filtering
+
+---
+
+## 👨‍💼 Department Module
+
+- Department Creation
+- Department Updates
+- Employee Assignment
+- Department Statistics
+
+---
+
+## 👨‍👩‍👧‍👦 Team Module
+
+- Team Creation
+- Team Leaders
+- Team Members
+- Team Projects
+- Team Chat
+
+---
+
+## 📁 Project Module
+
+Project lifecycle management.
+
+### Features
+
+- Create Project
+- Update Project
+- Archive Project
+- Project Status
+- Milestones
+- Members
+- Progress Tracking
+
+---
+
+## ✅ Task Module
+
+Powerful Kanban-based task management.
+
+### Features
+
+- Task Creation
+- Assignment
+- Priorities
+- Due Dates
+- Labels
+- Comments
+- Attachments
+- Activity Timeline
+- Status Updates
+
+Task States
+
+```
+TODO
+
+↓
+
+IN PROGRESS
+
+↓
+
+REVIEW
+
+↓
+
+DONE
+```
+
+---
+
+## 💬 Chat Module
+
+Real-time communication powered by WebSockets.
+
+Supports:
+
+- Team Chat
+- Project Chat
+- Direct Messaging
+- Read Status
+- Message History
+- Notifications
+
+---
+
+## 🔔 Notification Module
+
+Event-driven notification system.
+
+Examples:
+
+- New Task
+- Task Assigned
+- Leave Approved
+- Interview Scheduled
+- Employee Joined
+- Announcement Published
+
+---
+
+## 📢 Announcement Module
+
+Broadcast organization-wide announcements.
+
+Supports:
+
+- Rich Text
+- Priority Levels
+- Attachments
+- Audience Targeting
+
+---
+
+## 📅 Attendance Module
+
+Employee attendance management.
+
+Features:
+
+- Check In
+- Check Out
+- Attendance History
+- Reports
+- Analytics
+
+---
+
+## 🌴 Leave Module
+
+Leave management workflow.
+
+Features
+
+- Leave Requests
+- Leave Types
+- Approvals
+- Rejections
+- Leave Balance
+- History
+
+---
+
+## 🎯 Recruitment Module
+
+Applicant Tracking System (ATS)
+
+Features
+
+- Job Positions
+- Candidates
+- Interview Scheduling
+- Interview Feedback
+- Hiring Pipeline
+- Candidate Documents
+
+---
+
+## 📈 Reports Module
+
+Generates organization reports.
+
+Includes
+
+- Employee Reports
+- Attendance Reports
+- Leave Reports
+- Recruitment Reports
+- Project Reports
+
+---
+
+## 📊 Analytics Module
+
+Business intelligence dashboard.
+
+Provides
+
+- KPIs
+- Employee Analytics
+- Productivity
+- Recruitment Insights
+- Attendance Statistics
+
+---
+
+## ☁ Storage Module
+
+File management using Supabase Storage.
+
+Supports
+
+- Images
+- Documents
+- Attachments
+- Reports
+
+---
+
+# 🔒 Security Architecture
+
+Security is implemented across multiple layers.
+
+```
+                Request
+
+                   │
+
+                   ▼
+
+          Spring Security Filter
+
+                   │
+
+                   ▼
+
+            CORS Validation
+
+                   │
+
+                   ▼
+
+             JWT Validation
+
+                   │
+
+                   ▼
+
+         Tenant Resolution Filter
+
+                   │
+
+                   ▼
+
+          Authorization Check
+
+                   │
+
+                   ▼
+
+            Controller Layer
+
+                   │
+
+                   ▼
+
+             Business Logic
+
+                   │
+
+                   ▼
+
+              Database
+```
+
+---
+
+## Authentication Flow
+
+```
+User
+
+ │
+
+ │ Login
+
+ ▼
+
+Spring Security
+
+ │
+
+ ▼
+
+Authentication Manager
+
+ │
+
+ ▼
+
+UserDetailsService
+
+ │
+
+ ▼
+
+Database
+
+ │
+
+ ▼
+
+JWT Generation
+
+ │
+
+ ▼
+
+Access Token
+
+Refresh Token
+
+ │
+
+ ▼
+
+Client
+```
+
+---
+
+## Authorization Model
+
+WorkNest uses Role-Based Access Control (RBAC).
+
+### Platform Roles
+
+```
+PLATFORM_ADMIN
+```
+
+---
+
+### Tenant Roles
+
+```
+TENANT_ADMIN
+
+ADMIN
+
+HR
+
+MANAGER
+
+TEAM_LEAD
+
+EMPLOYEE
+```
+
+Each API endpoint is protected based on user roles.
+
+---
+
+# 🏢 Multi-Tenant Request Lifecycle
+
+Every request passes through tenant resolution before accessing business data.
+
+```
+Incoming Request
+
+        │
+
+        ▼
+
+Extract Tenant Header
+
+        │
+
+        ▼
+
+Validate JWT
+
+        │
+
+        ▼
+
+Load Tenant
+
+(platform_master)
+
+        │
+
+        ▼
+
+Resolve DataSource
+
+        │
+
+        ▼
+
+Tenant Database
+
+        │
+
+        ▼
+
+Execute Business Logic
+```
+
+---
+
+# 🗄 Database Architecture
+
+```
+                     MySQL Server
+
+                           │
+
+      ┌────────────────────┼────────────────────┐
+
+      │                    │                    │
+
+platform_master     tenant_companyA     tenant_companyB
+
+      │                    │                    │
+
+      │                    │                    │
+
+ Platform Tables      Business Data      Business Data
+```
+
+---
+
+## Master Database
+
+Stores platform-wide information.
+
+Typical entities:
+
+- Platform Users
+- Platform Roles
+- Tenants
+- Refresh Tokens
+- Tenant Metadata
+
+---
+
+## Tenant Database
+
+Each tenant contains its own business data.
+
+Typical entities:
+
+- Employees
+- Departments
+- Teams
+- Projects
+- Tasks
+- Chat
+- Notifications
+- Leave
+- Attendance
+- Recruitment
+
+---
+
+# 🔄 Tenant Provisioning Workflow
+
+```
+Register Company
+
+      │
+
+      ▼
+
+Validate Input
+
+      │
+
+      ▼
+
+Create Tenant Record
+
+(platform_master)
+
+      │
+
+      ▼
+
+Create Database
+
+tenant_company
+
+      │
+
+      ▼
+
+Initialize Schema
+
+      │
+
+      ▼
+
+Seed Default Data
+
+      │
+
+      ▼
+
+Create Admin User
+
+      │
+
+      ▼
+
+Tenant Ready
+```
+
+---
+
+# 📦 Package Structure
+
+```
+src/
+
+├── auth/
+├── common/
+├── config/
+├── exception/
+├── master/
+│   ├── controller/
+│   ├── entity/
+│   ├── repository/
+│   └── service/
+│
+├── notification/
+├── security/
+│   ├── filter/
+│   ├── jwt/
+│   └── config/
+│
+├── storage/
+├── tenant/
+│   ├── attendance/
+│   ├── employee/
+│   ├── leave/
+│   ├── project/
+│   ├── recruitment/
+│   ├── reports/
+│   ├── task/
+│   └── analytics/
+│
+├── websocket/
+└── Main.java
+```
+
+---
+
+# 🔄 Request Lifecycle
+
+```
+Browser
+
+↓
+
+Traefik
+
+↓
+
+Spring Boot
+
+↓
+
+Security Filter
+
+↓
+
+JWT Filter
+
+↓
+
+Tenant Filter
+
+↓
+
+Controller
+
+↓
+
+Service
+
+↓
+
+Repository
+
+↓
+
+JPA
+
+↓
+
+MySQL
+```
+
+---
+
+# 📡 WebSocket Architecture
+
+```
+Client
+
+ │
+
+ ▼
+
+WebSocket
+
+ │
+
+ ▼
+
+STOMP Endpoint
+
+ │
+
+ ▼
+
+Message Broker
+
+ │
+
+ ▼
+
+Topic
+
+ │
+
+ ▼
+
+Subscribed Clients
+```
+
+Supported capabilities:
+
+- Live Chat
+- Notifications
+- Team Messaging
+- Project Discussions
+
+---
+
+# ✉ Email System
+
+Supports SMTP integration for:
+
+- Welcome Emails
+- Password Reset
+- Interview Invitations
+- Leave Notifications
+- System Alerts
+
+---
+
+# 📁 File Storage
+
+The application uses **Supabase Storage**.
+
+Supported file types:
+
+- Images
+- PDFs
+- Office Documents
+- ZIP Files
+
+Maximum upload size is configurable.
+
+---
+
+# 📈 Scalability
+
+Designed for cloud-native deployment.
+
+Current architecture supports:
+
+- Multiple Organizations
+- Multiple Databases
+- Docker
+- Dokploy
+- Reverse Proxies
+- HTTPS
+- Cloud Storage
+- Horizontal Frontend Scaling
+
+---
+
